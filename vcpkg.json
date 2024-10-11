@@ -1,0 +1,8 @@
+{
+  "dependencies": [
+    "entt",
+    "quill",
+    "sdl2",
+    "libconfig"
+  ]
+}
