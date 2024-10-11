@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "default (Debug)",
+      "inherits": "vcpkg (Debug)",
+      "environment": {
+        "VCPKG_ROOT": "C:\\Users\\daniele\\vcpkg"
+      }
+    },
+    {
+      "name": "default (Release)",
+      "inherits": "vcpkg (Release)",
+      "environment": {
+        "VCPKG_ROOT": "C:\\Users\\daniele\\vcpkg"
+      }
+    }    
+  ]
+}
