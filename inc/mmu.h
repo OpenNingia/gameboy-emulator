@@ -10,8 +10,8 @@
 	void hwr_##x(std::uint8_t v) { write_u8(addr, v); }
 
 #define DEF_HWREG_NP(x,addr) \
-	std::uint8_t x##() const { return read_u8(addr); } \
-	void x##(std::uint8_t v) { write_u8(addr, v); }
+	std::uint8_t x() const { return read_u8(addr); } \
+	void x(std::uint8_t v) { write_u8(addr, v); }
 
 namespace gbemu {
 

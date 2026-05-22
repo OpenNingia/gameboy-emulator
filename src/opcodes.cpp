@@ -5,8 +5,8 @@
 #include <exc.hpp>
 
 #define IMPL_INSTR(x) \
-	gbemu::instruction_types::##x gbemu::instructions::x##_{}; \
-	void gbemu::instruction_types::##x##::execute(cpu& cpu)
+	gbemu::instruction_types::x gbemu::instructions::x##_{}; \
+	void gbemu::instruction_types::x::execute(cpu& cpu)
 
 std::array<gbemu::instruction*, 256> gbemu::instruction_set{};
 std::array<gbemu::instruction*, 256> gbemu::instruction_set_cb{};

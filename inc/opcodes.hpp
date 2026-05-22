@@ -7,8 +7,8 @@
 #include <cpu.h>
 
 #define DEF_INSTR( o, x, y ) \
-	struct x##: instruction { \
-			## x ##() : instruction(y) { \
+	struct x: instruction { \
+			x() : instruction(y) { \
 					if constexpr (((o) & 0xFF00) == 0xCB00) \
 							instruction_set_cb[(o) & 0xFF] = this; \
 					else \
@@ -16,7 +16,7 @@
 			} \
 			void execute(cpu& cpu) override; };
 
-#define INST_INSTR(x) extern gbemu::instruction_types::##x x##_;
+#define INST_INSTR(x) extern gbemu::instruction_types::x x##_;
 
 namespace gbemu {
 	extern std::array<instruction*, 256> instruction_set;

@@ -1,9 +1,7 @@
 #include <cpu.h>
 #include <mmu.h>
 #include <exc.hpp>
-#include <opc.h>
-
-#include <unordered_map>
+#include <opcodes.hpp>
 
 #if DEBUG
 #include <iostream>
