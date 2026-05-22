@@ -93,18 +93,13 @@ void Application::run() {
         for (int i = 0; i < speed; i++) {
             core.tick();
         }
-#if 0
 
-        // (per ora) riempi con un pattern di test
-        for (int y = 0; y < 144; y++)
-            for (int x = 0; x < 160; x++)
-                framebuffer[y * 160 + x] = ((x ^ y) & 1) ? 0xFFFFFFFF : 0xFF000000;
-
-        SDL_UpdateTexture(texture, nullptr, framebuffer.data(), 160 * sizeof(std::uint32_t));
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
-        SDL_RenderPresent(renderer);
-#endif
+        if (core.ppu.consume_frame_ready()) {
+            SDL_UpdateTexture(texture, nullptr, core.ppu.framebuffer(), 160 * 4);
+            SDL_RenderClear(renderer);
+            SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+            SDL_RenderPresent(renderer);
+        }
     }
 
     SDL_DestroyRenderer(renderer);

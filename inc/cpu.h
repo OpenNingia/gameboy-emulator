@@ -4,6 +4,7 @@
 #include <string>
 #include <optional>
 
+#include <ppu.h>
 #include <mmu.h>
 #include <card.h>
 
@@ -18,9 +19,12 @@ namespace gbemu {
 
 	struct cpu;
 	struct instruction {
-		instruction(std::string m) : mnemonic(std::move(m)) {}
+ 		instruction(std::string m, uint8_t c, uint8_t ct)
+     		: mnemonic(std::move(m)), cycles(c), cycles_taken(ct) {}
 		//
 		std::string mnemonic;
+		uint8_t cycles;
+		uint8_t cycles_taken;   // == cycles tranne sui branch condizionali		
 		
 		void operator() (cpu& cpu) { execute(cpu); };
 	protected:
@@ -136,14 +140,23 @@ namespace gbemu {
 
 	struct cpu {
 
-		cpu() : regs(), mmu(), alu(regs), crd(), interrupt_enabled(true), stopped(false), pc_ring(), pc_idx(0) {}
+		cpu() : 
+			regs(), mmu(), alu(regs), ppu(mmu), crd(), 
+			interrupt_enabled(true), stopped(false), halted(false), 
+			ime_pending(false), ei_just_executed(false), 
+			extra_cycles(0),pc_ring(), pc_idx(0) {}
 
 		registers regs;
 		mmu mmu;
 		alu alu;
+		ppu ppu;
 		std::optional<rom_file> crd;
 		bool interrupt_enabled;
 		bool stopped;
+		bool halted;
+		bool ime_pending;
+		bool ei_just_executed;
+		uint8_t extra_cycles;
 		std::array<std::uint16_t, 256> pc_ring;
 		std::size_t pc_idx;
 
@@ -153,14 +166,8 @@ namespace gbemu {
 		void load(bios_file const& c);
 		// init registers
 		void init();
-		// execute a cycle
-		void tick();
-		// stop execution
-		void stop();
-		// reset execution
-		void reset();
-		// is stopped
-		[[nodiscard]] bool is_stopped() const;
+		// execute an instruction and returns total cycles
+		uint8_t tick();
 
 		// fetch next op
 		std::uint16_t fetch();

@@ -4,6 +4,8 @@
 #include <opcodes.hpp>
 #include <log.h>
 
+#include <bit>
+
 using namespace gbemu;
 
 std::uint16_t cpu::fetch() {
@@ -38,7 +40,7 @@ void cpu::load(rom_file& c) {
 	memset(&regs, 0, sizeof(regs));
 
 	// skip bios	
-	mmu.bios_accessible = false;
+	// mmu.bios_accessible = false;
 }
 
 void cpu::load(bios_file const& c) {
@@ -75,17 +77,48 @@ void cpu::init() {
 	}
 }
 
-void cpu::tick() {
+uint8_t cpu::tick() {
 	pc_ring[pc_idx] = regs.pc;
-	pc_idx = (pc_idx + 1) % pc_ring.size();
-
+	pc_idx = (pc_idx + 1) % pc_ring.size();	
 	auto saved_pc = regs.pc;
+
+	if (halted) {
+		auto pending = mmu.hwr_if() & mmu.hwr_ie() & 0x1F;
+		if (pending) halted = false;
+		ppu.tick(4);
+		return 4;
+	}	
+
+	// EI delay: applica IME=true se EI eseguito al tick precedente
+	if (ime_pending && !ei_just_executed) {
+		interrupt_enabled = true;
+		ime_pending = false;
+	}
+	ei_just_executed = false;	
+
+	extra_cycles = 0;
+
 	try {
 		auto op = fetch();
 		auto& instr = decode(op);
 		LOG_TRACE_L1(gbemu::log::root(), "{:04x}  op={:04x}  {}", saved_pc, op, instr.mnemonic);
 		instr(*this);
-		mmu.tick_io_stub();
+
+		uint8_t total = instr.cycles + extra_cycles;
+
+		// IRQ dispatch
+		auto pending = mmu.hwr_if() & mmu.hwr_ie() & 0x1F;
+		if (interrupt_enabled && pending) {
+			int b = std::countr_zero(static_cast<unsigned>(pending));
+			interrupt_enabled = false;
+			mmu.hwr_if(mmu.hwr_if() & ~(1 << b));
+			push(regs.pc);
+			regs.pc = 0x40 + b * 8;
+			total += 20;
+		}
+
+		ppu.tick(total);
+		return total;
 	}
 	catch (const gbemu_exception& e) {
 		LOG_ERROR(gbemu::log::root(),
@@ -104,16 +137,4 @@ std::uint16_t cpu::pop_u16() {
 	auto u16 = mmu.read_u16(regs.sp);
 	regs.sp += 2;
 	return u16;
-}
-
-bool cpu::is_stopped() const {
-	return stopped;
-}
-
-void cpu::stop() {
-	stopped = true;
-}
-
-void cpu::reset() {
-	stopped = false;
 }

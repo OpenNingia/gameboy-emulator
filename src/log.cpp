@@ -17,7 +17,7 @@ namespace gbemu::log {
 			"root",
 			quill::Frontend::create_or_get_sink<quill::ConsoleSink>("console"));
 
-		g_root->set_log_level(quill::LogLevel::TraceL3);
+		g_root->set_log_level(quill::LogLevel::Debug);
 	}
 
 	quill::Logger* root() {

@@ -581,7 +581,10 @@ IMPL_INSTR(add_a_d8) {
 
 // 86 ADD A, (HL)
 /* Add the contents of memory specified by register pair HL to the contents of register A, and store the results in register A. */
-IMPL_INSTR(add_a__hl_) { throw gbemu::gbemu_exception{"add_a__hl_ not implemented"}; }
+IMPL_INSTR(add_a__hl_) { 
+	auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.regs.af.hi = cpu.alu.add(cpu.regs.af.hi, value);
+}
 
 // 8F ADC A, A
 /* Add the contents of register A and the CY flag to the contents of register A, and store the results in register A. */
@@ -621,31 +624,31 @@ IMPL_INSTR(adc_a__hl_) { throw gbemu::gbemu_exception{"adc_a__hl_ not implemente
 
 // 97 SUB A
 /* Subtract the contents of register A from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_a) { throw gbemu::gbemu_exception{"sub_a not implemented"}; }
+IMPL_INSTR(sub_a) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.af.hi); }
 
 // 90 SUB B
 /* Subtract the contents of register B from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_b) { throw gbemu::gbemu_exception{"sub_b not implemented"}; }
+IMPL_INSTR(sub_b) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.bc.lo); }
 
 // 91 SUB C
 /* Subtract the contents of register C from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_c) { throw gbemu::gbemu_exception{"sub_c not implemented"}; }
+IMPL_INSTR(sub_c) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.bc.hi); }
 
 // 92 SUB D
 /* Subtract the contents of register D from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_d) { throw gbemu::gbemu_exception{"sub_d not implemented"}; }
+IMPL_INSTR(sub_d) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.de.hi); }
 
 // 93 SUB E
 /* Subtract the contents of register E from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_e) { throw gbemu::gbemu_exception{"sub_e not implemented"}; }
+IMPL_INSTR(sub_e) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.de.lo); }
 
 // 94 SUB H
 /* Subtract the contents of register H from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_h) { throw gbemu::gbemu_exception{"sub_h not implemented"}; }
+IMPL_INSTR(sub_h) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.hl.hi); }
 
 // 95 SUB L
 /* Subtract the contents of register L from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_l) { throw gbemu::gbemu_exception{"sub_l not implemented"}; }
+IMPL_INSTR(sub_l) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.hl.lo); }
 
 // D6 SUB d8
 /* Subtract the contents of the 8-bit immediate operand d8 from the contents of register A, and store the results in register A. */
@@ -900,7 +903,10 @@ IMPL_INSTR(cp_d8) {
 // BE CP (HL)
 /* Compare the contents of memory specified by register pair HL and the contents of register A by calculating A - (HL), and set the Z flag if they are equal.
 The execution of this instruction does not affect the contents of register A. */
-IMPL_INSTR(cp__hl_) { throw gbemu::gbemu_exception{"cp__hl_ not implemented"}; }
+IMPL_INSTR(cp__hl_) { 
+	auto nn = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.alu.sub(cpu.regs.af.hi, nn); // setta Z/N/H/C, butta il risultato
+ }
 
 // 3C INC A
 /* Increment the contents of register A by 1. */
@@ -2146,6 +2152,7 @@ IMPL_INSTR(jr_nz_s8) {
 	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
 	if (!cpu.regs.z_flag()) {
 		cpu.regs.pc += s8;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
 	}
 }
 
@@ -2155,6 +2162,7 @@ IMPL_INSTR(jr_z_s8) {
 	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
 	if (cpu.regs.z_flag()) {
 		cpu.regs.pc += s8;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
 	}
 }
 
@@ -2191,6 +2199,7 @@ IMPL_INSTR(call_nz_a16) {
 	if (!cpu.regs.z_flag()) {
 		cpu.push(cpu.regs.pc);
 		cpu.regs.pc = a16;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
 	}
 }
 
@@ -2203,6 +2212,7 @@ IMPL_INSTR(call_z_a16) {
 	if (cpu.regs.z_flag()) {
 		cpu.push(cpu.regs.pc);
 		cpu.regs.pc = a16;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
 	}
 }
 
@@ -2215,6 +2225,7 @@ IMPL_INSTR(call_nc_a16) {
 	if (!cpu.regs.c_flag()) {
 		cpu.push(cpu.regs.pc);
 		cpu.regs.pc = a16;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
 	}
 }
 
@@ -2227,6 +2238,7 @@ IMPL_INSTR(call_c_a16) {
 	if (cpu.regs.c_flag()) {
 		cpu.push(cpu.regs.pc);
 		cpu.regs.pc = a16;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
 	}
 }
 
@@ -2238,38 +2250,49 @@ IMPL_INSTR(ret) { cpu.regs.pc = cpu.pop_u16(); }
 // D9 RETI
 /* Used when an interrupt-service routine finishes. The address for the return from the interrupt is loaded in the program counter PC. The master interrupt enable flag is returned to its pre-interrupt status.
 The contents of the address specified by the stack pointer SP are loaded in the lower-order byte of PC, and the contents of SP are incremented by 1. The contents of the address specified by the new SP value are then loaded in the higher-order byte of PC, and the contents of SP are incremented by 1 again. (THe value of SP is 2 larger than before instruction execution.) The next instruction is fetched from the address specified by the content of PC (as usual). */
-IMPL_INSTR(reti) { throw gbemu::gbemu_exception{"reti not implemented"}; }
+IMPL_INSTR(reti) { 
+	cpu.regs.pc = cpu.pop_u16(); 
+	cpu.interrupt_enabled = true;
+}
 
 // C0 RET NZ
 /* If the Z flag is 0, control is returned to the source program by popping from the memory stack the program counter PC value that was pushed to the stack when the subroutine was called.
 The contents of the address specified by the stack pointer SP are loaded in the lower-order byte of PC, and the contents of SP are incremented by 1. The contents of the address specified by the new SP value are then loaded in the higher-order byte of PC, and the contents of SP are incremented by 1 again. (THe value of SP is 2 larger than before instruction execution.) The next instruction is fetched from the address specified by the content of PC (as usual). */
 IMPL_INSTR(ret_nz) {
-	if (!cpu.regs.z_flag())
+	if (!cpu.regs.z_flag()) {
 		cpu.regs.pc = cpu.pop_u16();
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
 }
 
 // C8 RET Z
 /* If the Z flag is 1, control is returned to the source program by popping from the memory stack the program counter PC value that was pushed to the stack when the subroutine was called.
 The contents of the address specified by the stack pointer SP are loaded in the lower-order byte of PC, and the contents of SP are incremented by 1. The contents of the address specified by the new SP value are then loaded in the higher-order byte of PC, and the contents of SP are incremented by 1 again. (THe value of SP is 2 larger than before instruction execution.) The next instruction is fetched from the address specified by the content of PC (as usual). */
-IMPL_INSTR(ret_z) { 
-	if (cpu.regs.z_flag())
+IMPL_INSTR(ret_z) {
+	if (cpu.regs.z_flag()) {
 		cpu.regs.pc = cpu.pop_u16();
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
 }
 
 // D0 RET NC
 /* If the CY flag is 0, control is returned to the source program by popping from the memory stack the program counter PC value that was pushed to the stack when the subroutine was called.
 The contents of the address specified by the stack pointer SP are loaded in the lower-order byte of PC, and the contents of SP are incremented by 1. The contents of the address specified by the new SP value are then loaded in the higher-order byte of PC, and the contents of SP are incremented by 1 again. (THe value of SP is 2 larger than before instruction execution.) The next instruction is fetched from the address specified by the content of PC (as usual). */
 IMPL_INSTR(ret_nc) {
-	if (!cpu.regs.c_flag())
+	if (!cpu.regs.c_flag()) {
 		cpu.regs.pc = cpu.pop_u16();
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
 }
 
 // D8 RET C
 /* If the CY flag is 1, control is returned to the source program by popping from the memory stack the program counter PC value that was pushed to the stack when the subroutine was called.
 The contents of the address specified by the stack pointer SP are loaded in the lower-order byte of PC, and the contents of SP are incremented by 1. The contents of the address specified by the new SP value are then loaded in the higher-order byte of PC, and the contents of SP are incremented by 1 again. (THe value of SP is 2 larger than before instruction execution.) The next instruction is fetched from the address specified by the content of PC (as usual). */
 IMPL_INSTR(ret_c) {
-	if (cpu.regs.c_flag())
+	if (cpu.regs.c_flag()) {
 		cpu.regs.pc = cpu.pop_u16();
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
 }
 
 // C7 RST 0
@@ -2345,12 +2368,16 @@ IMPL_INSTR(scf) { throw gbemu::gbemu_exception{"scf not implemented"}; }
 Even if a DI instruction is executed in an interrupt routine, the IME flag is set if a return is performed with a RETI instruction. */
 IMPL_INSTR(di) { 
 	cpu.interrupt_enabled = false;
+	cpu.ime_pending = false;
 }
 
 // FB EI
 /* Set the interrupt master enable (IME) flag and enable maskable interrupts. This instruction can be used in an interrupt routine to enable higher-order interrupts.
 The IME flag is reset immediately after an interrupt occurs. The IME flag reset remains in effect if coontrol is returned from the interrupt routine by a RET instruction. However, if an EI instruction is executed in the interrupt routine, control is returned with IME = 1. */
-IMPL_INSTR(ei) { throw gbemu::gbemu_exception{"ei not implemented"}; }
+IMPL_INSTR(ei) { 
+	cpu.ime_pending = true; 
+	cpu.ei_just_executed = true; 
+}
 
 // 76 HALT
 /* After a HALT instruction is executed, the system clock is stopped and HALT mode is entered. Although the system clock is stopped in this status, the oscillator circuit and LCD controller continue to operate.
@@ -2360,7 +2387,7 @@ The program counter is halted at the step after the HALT instruction. If both th
 Once HALT mode is cancelled, the program starts from the address indicated by the program counter.
 If the interrupt master enable flag is set, the contents of the program coounter are pushed to the stack and control jumps to the starting address of the interrupt.
 If the RESET terminal goes LOW in HALT moode, the mode becomes that of a normal reset. */
-IMPL_INSTR(halt) { throw gbemu::gbemu_exception{"halt not implemented"}; }
+IMPL_INSTR(halt) { cpu.halted = true; }
 
 // 10 STOP
 /* Execution of a STOP instruction stops both the system clock and oscillator circuit. STOP mode is entered and the LCD controller also stops. However, the status of the internal RAM register ports remains unchanged.
@@ -2369,5 +2396,5 @@ If the RESET terminal goes LOW in STOP mode, it becomes that of a normal reset s
 The following conditions should be met before a STOP instruction is executed and stop mode is entered:
 All interrupt-enable (IE) flags are reset.
 Input to P10-P13 is LOW for all. */
-IMPL_INSTR(stop) { cpu.stop(); }
+IMPL_INSTR(stop) { cpu.stopped = true; }
 

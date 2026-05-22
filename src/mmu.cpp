@@ -133,6 +133,13 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val)
 				mmio[0xFF02 - 0xFF00] = 0x01;   // <-- clear bit 7 ("transfer done")
 				// opzionale: set IF.3 per generare interrupt seriale
 			}
+			else if (addr == 0xFF46) {
+				// OAM DMA transfer: copy 160 bytes from (val * 0x100) to OAM
+				std::uint16_t src = static_cast<std::uint16_t>(val) << 8;
+				for (std::size_t i = 0; i < sram.size(); ++i) {
+					sram[i] = read_u8(src + i);
+				}
+			}
 		}
 		// zram
 		else
@@ -162,18 +169,11 @@ void gbemu::mmu::initialize_registers()
 	hwr_ly(0x00);	
 	hwr_lyc(0x00);
 
-
-	// TODO...
-}
-
-void gbemu::mmu::tick_io_stub()
-{
-	if (++ppu_stub_counter < ppu_stub_step) return;
-	ppu_stub_counter = 0;
-
-	std::uint8_t ly = hwr_ly();
-	ly = static_cast<std::uint8_t>((ly + 1) % 154);
-	// LY lives in mmio[] — write directly so we don't recurse through the
-	// FF02 serial shim in write_u8 and don't pay another dispatch.
-	mmio[0xFF44 - 0xFF00] = ly;
+	hwr_bgp(0xFC);
+	hwr_obp0(0xFF);
+	hwr_obp1(0xFF);
+	hwr_wy(0x00);
+	hwr_wx(0x00);
+	hwr_ie(0x00);
+	hwr_dma(0xFF);
 }

@@ -66,19 +66,21 @@ namespace gbemu {
 		// TODO NR10-52
 
 		DEF_HWREG(lcdc, 0xFF40);
-		DEF_HWREG(stat, 0xFF41);
+		DEF_HWREG_NP(hwr_stat, 0xFF41);
 		DEF_HWREG(scy, 0xFF42);
 		DEF_HWREG(scx, 0xFF43);
 		DEF_HWREG(ly, 0xFF44);
-		DEF_HWREG(lyc, 0xFF45)
+		DEF_HWREG(lyc, 0xFF45);
+		DEF_HWREG(dma,  0xFF46);
+		DEF_HWREG(bgp,  0xFF47);
+		DEF_HWREG(obp0, 0xFF48);
+		DEF_HWREG(obp1, 0xFF49);
+		DEF_HWREG(wy,   0xFF4A);
+		DEF_HWREG(wx,   0xFF4B);
+		DEF_HWREG_NP(hwr_ie, 0xFFFF);
 
 		// boot sequence
 		void initialize_registers();
-
-		// minimal PPU/timing stub: advances LY (0xFF44) so VBlank-wait
-		// polling loops in test ROMs eventually exit. Called once per
-		// CPU tick; LY rolls 0..153 every ppu_stub_step instructions.
-		void tick_io_stub();
 
 	private:
 		unsigned ppu_stub_counter { 0 };
