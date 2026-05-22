@@ -750,6 +750,11 @@ IMPL_INSTR(or__hl_) { throw gbemu::gbemu_exception{"not implemented"}; }
 /* Take the logical exclusive-OR for each bit of the contents of register A and the contents of register A, and store the results in register A. */
 IMPL_INSTR(xor_a) {
 	cpu.regs.af.hi ^= cpu.regs.af.hi;
+	cpu.regs.z_flag(true);
+	cpu.regs.n_flag(false);
+	cpu.regs.h_flag(false);
+	cpu.regs.c_flag(false);
+
 }
 
 // A8 XOR B
