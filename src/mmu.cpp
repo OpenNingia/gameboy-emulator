@@ -2,13 +2,6 @@
 
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const
 {
-	// TODO. this is a workaround to increment LY even thou I don't have a ppu
-	// remove this as soon as I implement the PPU
-	if (addr == 0xFF44) {
-		static std::uint8_t fake_ly = 0;
-		return fake_ly++ % 154;
-	}
-
 	switch (addr & 0xF000) {
 		// the first 256 bytes can be either the bios
 		// or the first bank of cardrige
@@ -167,8 +160,20 @@ void gbemu::mmu::initialize_registers()
 	hwr_scy(0x00);
 	hwr_scx(0x00);	
 	hwr_ly(0x00);	
-	hwr_lyc(0x00);	
-	
+	hwr_lyc(0x00);
+
 
 	// TODO...
+}
+
+void gbemu::mmu::tick_io_stub()
+{
+	if (++ppu_stub_counter < ppu_stub_step) return;
+	ppu_stub_counter = 0;
+
+	std::uint8_t ly = hwr_ly();
+	ly = static_cast<std::uint8_t>((ly + 1) % 154);
+	// LY lives in mmio[] — write directly so we don't recurse through the
+	// FF02 serial shim in write_u8 and don't pay another dispatch.
+	mmio[0xFF44 - 0xFF00] = ly;
 }

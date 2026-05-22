@@ -4,8 +4,9 @@ project(GbEmu)
 
 find_package(SDL2 CONFIG REQUIRED)
 find_package(LibConfig CONFIG REQUIRED)
+find_package(quill CONFIG REQUIRED)
 
-add_executable(GbEmu "gbemu.cpp" "app.cpp" "cpu.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp")
+add_executable(GbEmu "gbemu.cpp" "app.cpp" "cpu.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "log.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(GbEmu
@@ -13,6 +14,7 @@ target_link_libraries(GbEmu
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
     libconfig::libconfig libconfig::libconfig++
+    quill::quill
 )
 
 target_include_directories(GbEmu PRIVATE ${CMAKE_SOURCE_DIR}/inc)

@@ -2,21 +2,9 @@
 #include <mmu.h>
 #include <exc.hpp>
 #include <opcodes.hpp>
-
-#if DEBUG
-#include <iostream>
-#endif
+#include <log.h>
 
 using namespace gbemu;
-
-// opcodes
-/*
-const std::unordered_map<std::uint16_t, gbemu::instruction&> instruction_set = {
-	{0x0000, instructions::nop_},
-	{0x00C3, instructions::jpa16_},
-	{0x00F3, instructions::di_}
-};
-*/
 
 std::uint16_t cpu::fetch() {
 	constexpr std::uint8_t prefix = 0xCB;
@@ -95,15 +83,14 @@ void cpu::tick() {
 	try {
 		auto op = fetch();
 		auto& instr = decode(op);
+		LOG_TRACE_L1(gbemu::log::root(), "{:04x}  op={:04x}  {}", saved_pc, op, instr.mnemonic);
 		instr(*this);
+		mmu.tick_io_stub();
 	}
 	catch (const gbemu_exception& e) {
-#if DEBUG
-		std::cerr << std::hex << "@PC=" << saved_pc
-			<< " AF=" << regs.af.u16 << " BC=" << regs.bc.u16
-			<< " DE=" << regs.de.u16 << " HL=" << regs.hl.u16
-			<< " SP=" << regs.sp << " : " << e.what() << "\n";
-#endif
+		LOG_ERROR(gbemu::log::root(),
+			"@PC={:04x} AF={:04x} BC={:04x} DE={:04x} HL={:04x} SP={:04x} : {}",
+			saved_pc, regs.af.u16, regs.bc.u16, regs.de.u16, regs.hl.u16, regs.sp, e.what());
 		throw;
 	}
 }

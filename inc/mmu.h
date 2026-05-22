@@ -74,5 +74,14 @@ namespace gbemu {
 
 		// boot sequence
 		void initialize_registers();
+
+		// minimal PPU/timing stub: advances LY (0xFF44) so VBlank-wait
+		// polling loops in test ROMs eventually exit. Called once per
+		// CPU tick; LY rolls 0..153 every ppu_stub_step instructions.
+		void tick_io_stub();
+
+	private:
+		unsigned ppu_stub_counter { 0 };
+		static constexpr unsigned ppu_stub_step { 32 };
 	};
 }
