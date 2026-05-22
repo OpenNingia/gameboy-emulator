@@ -514,7 +514,7 @@ Load the contents of memory specified by stack pointer SP into the lower portion
 Add 1 to SP and load the contents from the new memory location into the upper portion of AF.
 By the end, SP should be 2 more than its initial value. */
 IMPL_INSTR(pop_af) {
-	cpu.regs.af.u16 = cpu.pop_u16();
+	cpu.regs.af.u16 = cpu.pop_u16() & 0xFFF0;
 }
 
 // F8 LD HL, SP+s8
@@ -717,9 +717,7 @@ IMPL_INSTR(or_b) { throw gbemu::gbemu_exception{"not implemented"}; }
 /* Take the logical OR for each bit of the contents of register C and the contents of register A, and store the results in register A. */
 IMPL_INSTR(or_c) {
 	cpu.regs.af.hi |= cpu.regs.bc.lo;
-
-	// FIXME: I'm not sure why, but that's the observed behavior on BGB debugger
-	cpu.regs.af.lo = 0;
+	cpu.regs.z_flag(cpu.regs.af.hi == 0);
 }
 
 // B2 OR D
@@ -829,8 +827,7 @@ IMPL_INSTR(cp_l) { throw gbemu::gbemu_exception{"not implemented"}; }
 The execution of this instruction does not affect the contents of register A. */
 IMPL_INSTR(cp_d8) {
 	auto nn = cpu.mmu.read_u8(cpu.regs.pc++);
-	auto da = cpu.alu.sub(cpu.regs.af.hi, nn);
-	cpu.regs.z_flag(nn == cpu.regs.af.hi);
+	cpu.alu.sub(cpu.regs.af.hi, nn); // setta Z/N/H/C, butta il risultato
 }
 
 // BE CP (HL)

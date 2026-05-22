@@ -59,39 +59,47 @@ namespace gbemu {
 		alu(registers& r) : regs(r) { }
 
 		std::uint8_t add(std::uint8_t a, std::uint8_t b) {
-			regs.c_flag((static_cast<std::uint16_t>(a) + b) > 0xFF);
+			auto r = static_cast<std::uint16_t>(a) + b;
+			regs.c_flag(r > 0xFF);
 			// set z_flag, n_flag, h_flag
-			regs.z_flag((a + b) == 0);
+			regs.z_flag(r == 0);
 			regs.n_flag(false);
 			regs.h_flag((a & 0xF) + (b & 0xF) > 0xF);
-			return a + b;
+			return static_cast<std::uint8_t>(r);
 		}
 
 		std::uint16_t add(std::uint16_t a, std::uint16_t b) {
-			regs.c_flag((static_cast<std::uint32_t>(a) + b) > 0xFFFF);
-			// set z_flag, n_flag, h_flag
-			regs.z_flag((a + b) == 0);
-			regs.n_flag(false);
-			regs.h_flag((a & 0xFFF) + (b & 0xFFF) > 0xFFF);
-			return a + b;
+			auto r = add_hl(a, b);
+			// set z_flag
+			return r;
 		}
 
+		std::uint16_t add_hl(std::uint16_t a, std::uint16_t b) {
+			auto r = static_cast<std::uint32_t>(a) + b;
+			regs.c_flag(r > 0xFFFF);
+			regs.n_flag(false);
+			regs.h_flag((a & 0xFFF) + (b & 0xFFF) > 0xFFF);
+			return static_cast<std::uint16_t>(r);
+		}		
+
 		std::uint16_t sub(std::uint16_t a, std::uint16_t b) {
+			auto r = static_cast<std::uint32_t>(a) - b;
 			regs.c_flag(a < b);
 			// set z_flag, n_flag, h_flag
-			regs.z_flag((a - b) == 0);
+			regs.z_flag(r == 0);
 			regs.n_flag(true);
 			regs.h_flag((a & 0xFFF) < (b & 0xFFF));
-			return a - b;
+			return static_cast<std::uint16_t>(r);
 		}
 
 		std::uint8_t sub(std::uint8_t a, std::uint8_t b) {
+			auto r = static_cast<std::uint16_t>(a) - b;
 			regs.c_flag(a < b);
 			// set z_flag, n_flag, h_flag
-			regs.z_flag((a - b) == 0);
+			regs.z_flag(r == 0);
 			regs.n_flag(true);
 			regs.h_flag((a & 0xF) < (b & 0xF));
-			return a - b;
+			return static_cast<std::uint8_t>(r);
 		}
 
 		std::uint8_t inc(std::uint8_t a) {
