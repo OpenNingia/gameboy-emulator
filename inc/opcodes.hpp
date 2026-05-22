@@ -5,17 +5,22 @@
 #ifndef _H_OPCODES_H_
 #define _H_OPCODES_H_
 #include <cpu.h>
-#include <unordered_map>
 
 #define DEF_INSTR( o, x, y ) \
 	struct x##: instruction { \
-		## x ##() : instruction(y) { instruction_set.insert({o, *this}); } \
-		void execute(cpu& cpu) override; };
+			## x ##() : instruction(y) { \
+					if constexpr (((o) & 0xFF00) == 0xCB00) \
+							instruction_set_cb[(o) & 0xFF] = this; \
+					else \
+							instruction_set[(o) & 0xFF] = this; \
+			} \
+			void execute(cpu& cpu) override; };
 
 #define INST_INSTR(x) extern gbemu::instruction_types::##x x##_;
-			
+
 namespace gbemu {
-	extern std::unordered_map<std::uint16_t, instruction&> instruction_set;
+	extern std::array<instruction*, 256> instruction_set;
+	extern std::array<instruction*, 256> instruction_set_cb;
 	namespace instruction_types {
 			
 		DEF_INSTR(0x007F, ld_a_a, "LD A, A");

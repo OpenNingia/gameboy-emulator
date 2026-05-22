@@ -33,10 +33,13 @@ std::uint16_t cpu::fetch() {
 }
 
 instruction& cpu::decode(std::uint16_t op) {
-	if (instruction_set.contains(op))
-		return instruction_set.find(op)->second;
-	throw gbemu_exception{ "Instruction not handled!" };
+	auto* p = ((op & 0xFF00) == 0xCB00)
+                ? instruction_set_cb[op & 0xFF]
+                : instruction_set[op & 0xFF];
+	if (!p) throw gbemu_exception{ "Instruction not handled!" };
+	return *p;
 }
+
 void cpu::load(rom_file& c) {
 	crd = std::move(c);
 	// load first two banks

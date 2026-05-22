@@ -8,7 +8,8 @@
 	gbemu::instruction_types::##x gbemu::instructions::x##_{}; \
 	void gbemu::instruction_types::##x##::execute(cpu& cpu)
 
-std::unordered_map<std::uint16_t, gbemu::instruction&> gbemu::instruction_set;
+std::array<gbemu::instruction*, 256> gbemu::instruction_set{};
+std::array<gbemu::instruction*, 256> gbemu::instruction_set_cb{};
 
 // 7F LD A, A
 /* Load the contents of register A into register A. */
