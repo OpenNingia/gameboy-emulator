@@ -2061,14 +2061,14 @@ IMPL_INSTR(jp_c_a16) { throw gbemu::gbemu_exception{"not implemented"}; }
 // 18 JR s8
 /* Jump s8 steps from the current address in the program counter (PC). (Jump relative.) */
 IMPL_INSTR(jr_s8) {
-	auto s8 = cpu.mmu.read_u8(cpu.regs.pc);
-	cpu.regs.pc += s8 + 1;	
+	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+	cpu.regs.pc += s8;	
 }
 
 // 20 JR NZ, s8
 /* If the Z flag is 0, jump s8 steps from the current address stored in the program counter (PC). If not, the instruction following the current JP instruction is executed (as usual). */
 IMPL_INSTR(jr_nz_s8) { 
-	auto s8 = cpu.mmu.read_u8(cpu.regs.pc++);
+	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
 	if (!cpu.regs.z_flag()) {
 		cpu.regs.pc += s8;
 	}
@@ -2077,7 +2077,7 @@ IMPL_INSTR(jr_nz_s8) {
 // 28 JR Z, s8
 /* If the Z flag is 1, jump s8 steps from the current address stored in the program counter (PC). If not, the instruction following the current JP instruction is executed (as usual). */
 IMPL_INSTR(jr_z_s8) { 
-	auto s8 = cpu.mmu.read_u8(cpu.regs.pc++);
+	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
 	if (cpu.regs.z_flag()) {
 		cpu.regs.pc += s8;
 	}

@@ -65,6 +65,11 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const
 	}
 }
 
+std::int8_t gbemu::mmu::read_i8(std::uint16_t addr) const
+{
+	return static_cast<std::int8_t>(read_u8(addr));
+}
+
 void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val)
 {
 	switch (addr & 0xF000) {

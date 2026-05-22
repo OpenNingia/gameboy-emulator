@@ -42,6 +42,7 @@ namespace gbemu {
 		ram_t<0x0080> zram;
 
 		std::uint8_t read_u8(std::uint16_t addr) const;
+		std::int8_t read_i8(std::uint16_t addr) const;
 		void write_u8(std::uint16_t addr, std::uint8_t val);
 		
 		std::uint16_t read_u16(std::uint16_t addr) {
