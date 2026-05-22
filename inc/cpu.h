@@ -93,6 +93,22 @@ namespace gbemu {
 			regs.h_flag((a & 0xF) < (b & 0xF));
 			return a - b;
 		}
+
+		std::uint8_t inc(std::uint8_t a) {
+			auto r = a + 1;
+			regs.z_flag(r == 0);
+			regs.n_flag(false);
+			regs.h_flag((a & 0xF) == 0xF);
+			return r;
+		}
+
+		std::uint8_t dec(std::uint8_t a) {
+			auto r = a - 1;
+			regs.z_flag(r == 0);
+			regs.n_flag(true);
+			regs.h_flag((a & 0xF) == 0x0);
+			return r;
+		}		
 	
 	private:
 		registers& regs;

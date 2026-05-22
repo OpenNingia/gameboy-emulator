@@ -841,43 +841,43 @@ IMPL_INSTR(cp__hl_) { throw gbemu::gbemu_exception{"not implemented"}; }
 // 3C INC A
 /* Increment the contents of register A by 1. */
 IMPL_INSTR(inc_a) {
-	cpu.regs.af.hi++;
+	cpu.regs.af.hi = cpu.alu.inc(cpu.regs.af.hi);
 }
 
 // 04 INC B
 /* Increment the contents of register B by 1. */
 IMPL_INSTR(inc_b) {
-	cpu.regs.bc.hi++;
+	cpu.regs.bc.hi = cpu.alu.inc(cpu.regs.bc.hi);
 }
 
 // 0C INC C
 /* Increment the contents of register C by 1. */
 IMPL_INSTR(inc_c) { 
-	cpu.regs.bc.lo++;
+	cpu.regs.bc.lo = cpu.alu.inc(cpu.regs.bc.lo);
 }
 
 // 14 INC D
 /* Increment the contents of register D by 1. */
 IMPL_INSTR(inc_d) { 
-	cpu.regs.de.hi++;
+	cpu.regs.de.hi = cpu.alu.inc(cpu.regs.de.hi);
 }
 
 // 1C INC E
 /* Increment the contents of register E by 1. */
 IMPL_INSTR(inc_e) { 
-	cpu.regs.de.lo++;
+	cpu.regs.de.lo = cpu.alu.inc(cpu.regs.de.lo);
 }
 
 // 24 INC H
 /* Increment the contents of register H by 1. */
 IMPL_INSTR(inc_h) { 
-	cpu.regs.hl.hi++;
+	cpu.regs.hl.hi = cpu.alu.inc(cpu.regs.hl.hi);
 }
 
 // 2C INC L
 /* Increment the contents of register L by 1. */
 IMPL_INSTR(inc_l) { 
-	cpu.regs.hl.lo++;
+	cpu.regs.hl.lo = cpu.alu.inc(cpu.regs.hl.lo);
 }
 
 // 34 INC (HL)
@@ -887,43 +887,43 @@ IMPL_INSTR(inc__hl_) { throw gbemu::gbemu_exception{"not implemented"}; }
 // 3D DEC A
 /* Decrement the contents of register A by 1. */
 IMPL_INSTR(dec_a) {
-	cpu.regs.af.hi--;
+	cpu.regs.af.hi = cpu.alu.dec(cpu.regs.af.hi);
 }
 
 // 05 DEC B
 /* Decrement the contents of register B by 1. */
 IMPL_INSTR(dec_b) {
-	cpu.regs.bc.hi--;
+	cpu.regs.bc.hi = cpu.alu.dec(cpu.regs.bc.hi);
 }
 
 // 0D DEC C
 /* Decrement the contents of register C by 1. */
 IMPL_INSTR(dec_c) { 
-	cpu.regs.bc.lo--;
+	cpu.regs.bc.lo = cpu.alu.dec(cpu.regs.bc.lo);
 }
 
 // 15 DEC D
 /* Decrement the contents of register D by 1. */
 IMPL_INSTR(dec_d) { 
-	cpu.regs.de.hi--;
+	cpu.regs.de.hi = cpu.alu.dec(cpu.regs.de.hi);
 }
 
 // 1D DEC E
 /* Decrement the contents of register E by 1. */
 IMPL_INSTR(dec_e) {
-	cpu.regs.de.lo--;
+	cpu.regs.de.lo = cpu.alu.dec(cpu.regs.de.lo);
 }
 
 // 25 DEC H
 /* Decrement the contents of register H by 1. */
 IMPL_INSTR(dec_h) { 
-	cpu.regs.hl.hi--;
+	cpu.regs.hl.hi = cpu.alu.dec(cpu.regs.hl.hi);
 }
 
 // 2D DEC L
 /* Decrement the contents of register L by 1. */
 IMPL_INSTR(dec_l) { 
-	cpu.regs.hl.lo--;
+	cpu.regs.hl.lo = cpu.alu.dec(cpu.regs.hl.lo);
 }
 
 // 35 DEC (HL)
