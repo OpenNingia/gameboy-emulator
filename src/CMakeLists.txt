@@ -5,7 +5,7 @@ project(GbEmu)
 find_package(SDL2 CONFIG REQUIRED)
 find_package(LibConfig CONFIG REQUIRED)
 
-add_executable(GbEmu "gbemu.cpp" "app.cpp" "cpu.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp")
+add_executable(GbEmu "gbemu.cpp" "app.cpp" "cpu.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(GbEmu

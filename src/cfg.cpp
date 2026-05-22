@@ -11,8 +11,10 @@ config::config(std::string const& file_path)
 
 	const auto& root = cfg.getRoot();
 	const auto& app_rom = root["application"]["rom"];
+	const auto& app_bios = root["application"]["bios"];
 
-	app_rom.lookupValue("path", rom.rom_path);
+	app_rom.lookupValue("path", rom.path);
+	app_bios.lookupValue("path", bios.path);
 
 	auto& valw = root.lookup("application.window.size.w");
 	auto& valh = root.lookup("application.window.size.h");

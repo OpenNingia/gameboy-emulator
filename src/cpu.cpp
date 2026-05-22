@@ -33,18 +33,53 @@ instruction& cpu::decode(std::uint16_t op) {
 		return instruction_set.find(op)->second;
 	throw gbemu_exception{ "Instruction not handled!" };
 }
-void cpu::load(cartridge& c) {
+void cpu::load(rom_file& c) {
 	crd = std::move(c);
 	// load first two banks
-	memcpy(mmu.rom0.data(), crd->data.data(), mmu.rom0.size());
-	memcpy(mmu.rom1.data(), crd->data.data() + mmu.rom0.size(), mmu.rom1.size());
+	auto bank1_sz = std::min(crd->data.size(), mmu.rom0.size());
+	auto bank2_sz = std::min(crd->data.size() - bank1_sz, mmu.rom1.size());
+	memcpy(mmu.rom0.data(), crd->data.data(), bank1_sz);
+	memcpy(mmu.rom1.data(), crd->data.data() + bank1_sz, bank2_sz);
 
 	// reset registers
 	memset(&regs, 0, sizeof(regs));
 
-	// skip bios
-	regs.pc = 0x100;
-	mmu.bios_accessible = false;
+	// skip bios	
+	// mmu.bios_accessible = false;
+}
+
+void cpu::load(bios_file const& c) {
+	
+	// load first two banks
+	memcpy(mmu.bios.data(), c.data.data(), mmu.bios.size());
+
+	// reset registers
+	memset(&regs, 0, sizeof(regs));
+
+	// skip bios	
+	mmu.bios_accessible = true;
+}
+
+void cpu::init() {
+	if (mmu.bios_accessible) {
+		regs.af.u16 = 0x0000;
+		regs.bc.u16 = 0x0000;
+		regs.de.u16 = 0x0000;
+		regs.hl.u16 = 0x0000;
+		regs.sp = 0xFFFE;
+		regs.pc = 0x00;
+	}
+	else {
+		// initial registry values
+		mmu.initialize_registers();
+
+		regs.af.u16 = 0x01B0;
+		regs.bc.u16 = 0x0013;
+		regs.de.u16 = 0x00D8;
+		regs.hl.u16 = 0x014D;
+		regs.sp = 0xFFFE;
+		regs.pc = 0x100;
+	}
 }
 
 void cpu::tick() {
@@ -52,4 +87,15 @@ void cpu::tick() {
 	auto& instr = decode(op);
 	// execute instruction
 	instr(*this);
+}
+
+void cpu::push(std::uint16_t u16) {
+	regs.sp -= 2;
+	mmu.write_u16(regs.sp, u16);
+}
+
+std::uint16_t cpu::pop_u16() {
+	auto u16 = mmu.read_u16(regs.sp);
+	regs.sp += 2;
+	return u16;
 }

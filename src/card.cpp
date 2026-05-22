@@ -6,7 +6,7 @@
 
 using namespace gbemu;
 
-void cartridge::load_rom(const std::string& path)
+void bin_file::load_from(const std::string& path)
 {
 	std::filesystem::path input_file_path{ path };
 	auto length = std::filesystem::file_size(path);

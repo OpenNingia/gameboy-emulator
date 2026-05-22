@@ -5,14 +5,14 @@
       "name": "default (Debug)",
       "inherits": "vcpkg (Debug)",
       "environment": {
-        "VCPKG_ROOT": "C:\\Users\\daniele\\vcpkg"
+        "VCPKG_ROOT": "C:\\code\\vcpkg"
       }
     },
     {
       "name": "default (Release)",
       "inherits": "vcpkg (Release)",
       "environment": {
-        "VCPKG_ROOT": "C:\\Users\\daniele\\vcpkg"
+        "VCPKG_ROOT": "C:\\code\\vcpkg"
       }
     }    
   ]

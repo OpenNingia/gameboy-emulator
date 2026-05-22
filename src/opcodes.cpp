@@ -16,7 +16,9 @@ IMPL_INSTR(ld_a_a) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // 78 LD A, B
 /* Load the contents of register B into register A. */
-IMPL_INSTR(ld_a_b) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_a_b) {
+	cpu.regs.af.hi = cpu.regs.bc.hi;
+}
 
 // 79 LD A, C
 /* Load the contents of register C into register A. */
@@ -32,15 +34,21 @@ IMPL_INSTR(ld_a_e) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // 7C LD A, H
 /* Load the contents of register H into register A. */
-IMPL_INSTR(ld_a_h) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_a_h) { 
+	cpu.regs.af.hi = cpu.regs.hl.hi;
+}
 
 // 7D LD A, L
 /* Load the contents of register L into register A. */
-IMPL_INSTR(ld_a_l) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_a_l) { 
+	cpu.regs.af.hi = cpu.regs.hl.lo;
+}
 
 // 47 LD B, A
 /* Load the contents of register A into register B. */
-IMPL_INSTR(ld_b_a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_b_a) { 
+	cpu.regs.bc.hi = cpu.regs.af.hi;
+}
 
 // 40 LD B, B
 /* Load the contents of register B into register B. */
@@ -214,27 +222,39 @@ IMPL_INSTR(ld_a_d8) {
 
 // 06 LD B, d8
 /* Load the 8-bit immediate operand d8 into register B. */
-IMPL_INSTR(ld_b_d8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_b_d8) {
+	cpu.regs.bc.hi = cpu.mmu.read_u8(cpu.regs.pc++);
+}
 
 // 0E LD C, d8
 /* Load the 8-bit immediate operand d8 into register C. */
-IMPL_INSTR(ld_c_d8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_c_d8) { 
+	cpu.regs.bc.lo = cpu.mmu.read_u8(cpu.regs.pc++);
+}
 
 // 16 LD D, d8
 /* Load the 8-bit immediate operand d8 into register D. */
-IMPL_INSTR(ld_d_d8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_d_d8) {
+	cpu.regs.de.hi = cpu.mmu.read_u8(cpu.regs.pc++);
+}
 
 // 1E LD E, d8
 /* Load the 8-bit immediate operand d8 into register E. */
-IMPL_INSTR(ld_e_d8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_e_d8) { 
+	cpu.regs.de.lo = cpu.mmu.read_u8(cpu.regs.pc++);
+}
 
 // 26 LD H, d8
 /* Load the 8-bit immediate operand d8 into register H. */
-IMPL_INSTR(ld_h_d8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_h_d8) { 
+	cpu.regs.hl.hi = cpu.mmu.read_u8(cpu.regs.pc++); 
+}
 
 // 2E LD L, d8
 /* Load the 8-bit immediate operand d8 into register L. */
-IMPL_INSTR(ld_l_d8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_l_d8) {
+	cpu.regs.hl.lo = cpu.mmu.read_u8(cpu.regs.pc++);
+}
 
 // 7E LD A, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register A. */
@@ -324,7 +344,10 @@ Note: Should specify a 16-bit address in the mnemonic portion for a8, although t
 0xFF00-0xFF7F: Port/Mode registers, control register, sound register
 0xFF80-0xFFFE: Working & Stack RAM (127 bytes)
 0xFFFF: Interrupt Enable Register */
-IMPL_INSTR(ld_a__a8_) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_a__a8_) {
+	auto addr = cpu.mmu.read_u8(cpu.regs.pc++) | 0xFF00;
+	cpu.regs.af.hi = cpu.mmu.read_u8(addr);
+}
 
 // E0 LD (a8), A
 /* Store the contents of register A in the internal RAM, port register, or mode register at the address in the range 0xFF00-0xFFFF specified by the 8-bit immediate operand a8.
@@ -351,44 +374,61 @@ IMPL_INSTR(ld__a16__a) {
 
 // 2A LD A, (HL+)
 /* Load the contents of memory specified by register pair HL into register A, and simultaneously increment the contents of HL. */
-IMPL_INSTR(ld_a__hlp_) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_a__hlp_) { 
+	cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.hl.u16++);
+}
 
 // 3A LD A, (HL-)
 /* Load the contents of memory specified by register pair HL into register A, and simultaneously decrement the contents of HL. */
-IMPL_INSTR(ld_a__hlm_) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_a__hlm_) {
+	cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.hl.u16--);
+}
 
 // 02 LD (BC), A
 /* Store the contents of register A in the memory location specified by register pair BC. */
-IMPL_INSTR(ld__bc__a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld__bc__a) {
+	cpu.mmu.write_u8(cpu.regs.bc.u16, cpu.regs.af.hi);
+}
 
 // 12 LD (DE), A
 /* Store the contents of register A in the memory location specified by register pair DE. */
-IMPL_INSTR(ld__de__a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld__de__a) { 
+	cpu.mmu.write_u8(cpu.regs.de.u16, cpu.regs.af.hi);
+}
 
 // 22 LD (HL+), A
 /* Store the contents of register A into the memory location specified by register pair HL, and simultaneously increment the contents of HL. */
-IMPL_INSTR(ld__hlp__a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld__hlp__a) {
+	cpu.mmu.write_u8(cpu.regs.hl.u16++, cpu.regs.af.hi);
+}
 
 // 32 LD (HL-), A
 /* Store the contents of register A into the memory location specified by register pair HL, and simultaneously decrement the contents of HL. */
-IMPL_INSTR(ld__hlm__a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld__hlm__a) { 
+	cpu.mmu.write_u8(cpu.regs.hl.u16--, cpu.regs.af.hi);
+}
 
 // 01 LD BC, d16
 /* Load the 2 bytes of immediate data into register pair BC.
  The first byte of immediate data is the lower byte (i.e., bits 0-7), and the second byte of immediate data is the higher byte (i.e., bits 8-15). */
-IMPL_INSTR(ld_bc_d16) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_bc_d16) {
+	cpu.regs.bc.u16 = cpu.mmu.read_u16(cpu.regs.pc);
+	cpu.regs.pc += 2;
+}
 
 // 11 LD DE, d16
 /* Load the 2 bytes of immediate data into register pair DE.
  The first byte of immediate data is the lower byte (i.e., bits 0-7), and the second byte of immediate data is the higher byte (i.e., bits 8-15). */
-IMPL_INSTR(ld_de_d16) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ld_de_d16) {
+	cpu.regs.de.u16 = cpu.mmu.read_u16(cpu.regs.pc);
+	cpu.regs.pc += 2;
+}
 
 // 21 LD HL, d16
 /* Load the 2 bytes of immediate data into register pair HL.
  The first byte of immediate data is the lower byte (i.e., bits 0-7), and the second byte of immediate data is the higher byte (i.e., bits 8-15). */
 IMPL_INSTR(ld_hl_d16) { 
-	auto nn = cpu.mmu.read_u16(cpu.regs.pc);
-	cpu.regs.hl.u16 = nn;
+	cpu.regs.hl.u16 = cpu.mmu.read_u16(cpu.regs.pc);
 	cpu.regs.pc += 2;
 }
 
@@ -410,56 +450,72 @@ IMPL_INSTR(ld_sp_hl) { throw gbemu::gbemu_exception{"not implemented"}; }
 Subtract 1 from the stack pointer SP, and put the contents of the higher portion of register pair BC on the stack.
 Subtract 2 from SP, and put the lower portion of register pair BC on the stack.
 Decrement SP by 2. */
-IMPL_INSTR(push_bc) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(push_bc) {
+	cpu.push(cpu.regs.bc.u16);
+}
 
 // D5 PUSH DE
 /* Push the contents of register pair DE onto the memory stack by doing the following:
 Subtract 1 from the stack pointer SP, and put the contents of the higher portion of register pair DE on the stack.
 Subtract 2 from SP, and put the lower portion of register pair DE on the stack.
 Decrement SP by 2. */
-IMPL_INSTR(push_de) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(push_de) {
+	cpu.push(cpu.regs.de.u16);
+}
 
 // E5 PUSH HL
 /* Push the contents of register pair HL onto the memory stack by doing the following:
 Subtract 1 from the stack pointer SP, and put the contents of the higher portion of register pair HL on the stack.
 Subtract 2 from SP, and put the lower portion of register pair HL on the stack.
 Decrement SP by 2. */
-IMPL_INSTR(push_hl) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(push_hl) {
+	cpu.push(cpu.regs.hl.u16);
+}
 
 // F5 PUSH AF
 /* Push the contents of register pair AF onto the memory stack by doing the following:
 Subtract 1 from the stack pointer SP, and put the contents of the higher portion of register pair AF on the stack.
 Subtract 2 from SP, and put the lower portion of register pair AF on the stack.
 Decrement SP by 2. */
-IMPL_INSTR(push_af) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(push_af) { 
+	cpu.push(cpu.regs.af.u16); 
+}
 
 // C1 POP BC
 /* Pop the contents from the memory stack into register pair into register pair BC by doing the following:
 Load the contents of memory specified by stack pointer SP into the lower portion of BC.
 Add 1 to SP and load the contents from the new memory location into the upper portion of BC.
 By the end, SP should be 2 more than its initial value. */
-IMPL_INSTR(pop_bc) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(pop_bc) {
+	cpu.regs.bc.u16 = cpu.pop_u16();
+}
 
 // D1 POP DE
 /* Pop the contents from the memory stack into register pair into register pair DE by doing the following:
 Load the contents of memory specified by stack pointer SP into the lower portion of DE.
 Add 1 to SP and load the contents from the new memory location into the upper portion of DE.
 By the end, SP should be 2 more than its initial value. */
-IMPL_INSTR(pop_de) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(pop_de) {
+	cpu.regs.de.u16 = cpu.pop_u16();
+}
 
 // E1 POP HL
 /* Pop the contents from the memory stack into register pair into register pair HL by doing the following:
 Load the contents of memory specified by stack pointer SP into the lower portion of HL.
 Add 1 to SP and load the contents from the new memory location into the upper portion of HL.
 By the end, SP should be 2 more than its initial value. */
-IMPL_INSTR(pop_hl) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(pop_hl) {
+	cpu.regs.hl.u16 = cpu.pop_u16();
+}
 
 // F1 POP AF
 /* Pop the contents from the memory stack into register pair into register pair AF by doing the following:
 Load the contents of memory specified by stack pointer SP into the lower portion of AF.
 Add 1 to SP and load the contents from the new memory location into the upper portion of AF.
 By the end, SP should be 2 more than its initial value. */
-IMPL_INSTR(pop_af) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(pop_af) {
+	cpu.regs.af.u16 = cpu.pop_u16();
+}
 
 // F8 LD HL, SP+s8
 /* Add the 8-bit signed operand s8 (values -128 to +127) to the stack pointer SP, and store the result in register pair HL. */
@@ -659,7 +715,12 @@ IMPL_INSTR(or_b) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // B1 OR C
 /* Take the logical OR for each bit of the contents of register C and the contents of register A, and store the results in register A. */
-IMPL_INSTR(or_c) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(or_c) {
+	cpu.regs.af.hi |= cpu.regs.bc.lo;
+
+	// FIXME: I'm not sure why, but that's the observed behavior on BGB debugger
+	cpu.regs.af.lo = 0;
+}
 
 // B2 OR D
 /* Take the logical OR for each bit of the contents of register D and the contents of register A, and store the results in register A. */
@@ -687,7 +748,9 @@ IMPL_INSTR(or__hl_) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // AF XOR A
 /* Take the logical exclusive-OR for each bit of the contents of register A and the contents of register A, and store the results in register A. */
-IMPL_INSTR(xor_a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(xor_a) {
+	cpu.regs.af.hi ^= cpu.regs.af.hi;
+}
 
 // A8 XOR B
 /* Take the logical exclusive-OR for each bit of the contents of register B and the contents of register A, and store the results in register A. */
@@ -759,7 +822,11 @@ IMPL_INSTR(cp_l) { throw gbemu::gbemu_exception{"not implemented"}; }
 // FE CP d8
 /* Compare the contents of register A and the contents of the 8-bit immediate operand d8 by calculating A - d8, and set the Z flag if they are equal.
 The execution of this instruction does not affect the contents of register A. */
-IMPL_INSTR(cp_d8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(cp_d8) {
+	auto nn = cpu.mmu.read_u8(cpu.regs.pc++);
+	auto da = cpu.alu.sub(cpu.regs.af.hi, nn);
+	cpu.regs.z_flag(nn == cpu.regs.af.hi);
+}
 
 // BE CP (HL)
 /* Compare the contents of memory specified by register pair HL and the contents of register A by calculating A - (HL), and set the Z flag if they are equal.
@@ -768,31 +835,45 @@ IMPL_INSTR(cp__hl_) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // 3C INC A
 /* Increment the contents of register A by 1. */
-IMPL_INSTR(inc_a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_a) {
+	cpu.regs.af.hi++;
+}
 
 // 04 INC B
 /* Increment the contents of register B by 1. */
-IMPL_INSTR(inc_b) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_b) {
+	cpu.regs.bc.hi++;
+}
 
 // 0C INC C
 /* Increment the contents of register C by 1. */
-IMPL_INSTR(inc_c) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_c) { 
+	cpu.regs.bc.lo++;
+}
 
 // 14 INC D
 /* Increment the contents of register D by 1. */
-IMPL_INSTR(inc_d) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_d) { 
+	cpu.regs.de.hi++;
+}
 
 // 1C INC E
 /* Increment the contents of register E by 1. */
-IMPL_INSTR(inc_e) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_e) { 
+	cpu.regs.de.lo++;
+}
 
 // 24 INC H
 /* Increment the contents of register H by 1. */
-IMPL_INSTR(inc_h) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_h) { 
+	cpu.regs.hl.hi++;
+}
 
 // 2C INC L
 /* Increment the contents of register L by 1. */
-IMPL_INSTR(inc_l) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_l) { 
+	cpu.regs.hl.lo++;
+}
 
 // 34 INC (HL)
 /* Increment the contents of memory specified by register pair HL by 1. */
@@ -800,31 +881,45 @@ IMPL_INSTR(inc__hl_) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // 3D DEC A
 /* Decrement the contents of register A by 1. */
-IMPL_INSTR(dec_a) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(dec_a) {
+	cpu.regs.af.hi--;
+}
 
 // 05 DEC B
 /* Decrement the contents of register B by 1. */
-IMPL_INSTR(dec_b) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(dec_b) {
+	cpu.regs.bc.hi--;
+}
 
 // 0D DEC C
 /* Decrement the contents of register C by 1. */
-IMPL_INSTR(dec_c) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(dec_c) { 
+	cpu.regs.bc.lo--;
+}
 
 // 15 DEC D
 /* Decrement the contents of register D by 1. */
-IMPL_INSTR(dec_d) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(dec_d) { 
+	cpu.regs.de.hi--;
+}
 
 // 1D DEC E
 /* Decrement the contents of register E by 1. */
-IMPL_INSTR(dec_e) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(dec_e) {
+	cpu.regs.de.lo--;
+}
 
 // 25 DEC H
 /* Decrement the contents of register H by 1. */
-IMPL_INSTR(dec_h) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(dec_h) { 
+	cpu.regs.hl.hi--;
+}
 
 // 2D DEC L
 /* Decrement the contents of register L by 1. */
-IMPL_INSTR(dec_l) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(dec_l) { 
+	cpu.regs.hl.lo--;
+}
 
 // 35 DEC (HL)
 /* Decrement the contents of memory specified by register pair HL by 1. */
@@ -852,15 +947,21 @@ IMPL_INSTR(add_sp_s8) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // 03 INC BC
 /* Increment the contents of register pair BC by 1. */
-IMPL_INSTR(inc_bc) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_bc) { 
+	cpu.regs.bc.u16++;
+}
 
 // 13 INC DE
 /* Increment the contents of register pair DE by 1. */
-IMPL_INSTR(inc_de) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_de) { 
+	cpu.regs.de.u16++;
+}
 
 // 23 INC HL
 /* Increment the contents of register pair HL by 1. */
-IMPL_INSTR(inc_hl) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(inc_hl) {
+	cpu.regs.hl.u16++;
+}
 
 // 33 INC SP
 /* Increment the contents of register pair SP by 1. */
@@ -1372,7 +1473,11 @@ IMPL_INSTR(bit_7_e) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // CB7C BIT 7, H
 /* Copy the complement of the contents of bit 7 in register H to the Z flag of the program status word (PSW). */
-IMPL_INSTR(bit_7_h) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(bit_7_h) {
+	cpu.regs.z_flag(((cpu.regs.hl.hi) & (1 << 7)) == 0);
+	cpu.regs.n_flag(0);
+	cpu.regs.h_flag(1);
+}
 
 // CB7D BIT 7, L
 /* Copy the complement of the contents of bit 7 in register L to the Z flag of the program status word (PSW). */
@@ -1955,15 +2060,28 @@ IMPL_INSTR(jp_c_a16) { throw gbemu::gbemu_exception{"not implemented"}; }
 
 // 18 JR s8
 /* Jump s8 steps from the current address in the program counter (PC). (Jump relative.) */
-IMPL_INSTR(jr_s8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(jr_s8) {
+	auto s8 = cpu.mmu.read_u8(cpu.regs.pc);
+	cpu.regs.pc += s8 + 1;	
+}
 
 // 20 JR NZ, s8
 /* If the Z flag is 0, jump s8 steps from the current address stored in the program counter (PC). If not, the instruction following the current JP instruction is executed (as usual). */
-IMPL_INSTR(jr_nz_s8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(jr_nz_s8) { 
+	auto s8 = cpu.mmu.read_u8(cpu.regs.pc++);
+	if (!cpu.regs.z_flag()) {
+		cpu.regs.pc += s8;
+	}
+}
 
 // 28 JR Z, s8
 /* If the Z flag is 1, jump s8 steps from the current address stored in the program counter (PC). If not, the instruction following the current JP instruction is executed (as usual). */
-IMPL_INSTR(jr_z_s8) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(jr_z_s8) { 
+	auto s8 = cpu.mmu.read_u8(cpu.regs.pc++);
+	if (cpu.regs.z_flag()) {
+		cpu.regs.pc += s8;
+	}
+}
 
 // 30 JR NC, s8
 /* If the CY flag is 0, jump s8 steps from the current address stored in the program counter (PC). If not, the instruction following the current JP instruction is executed (as usual). */
@@ -1982,7 +2100,15 @@ IMPL_INSTR(jp_hl) { throw gbemu::gbemu_exception{"not implemented"}; }
 The subroutine is placed after the location specified by the new PC value. When the subroutine finishes, control is returned to the source program using a return instruction and by popping the starting address of the next instruction (which was just pushed) and moving it to the PC.
 With the push, the current value of SP is decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then decremented by 1 again, and the lower-order byte of PC is loaded in the memory address specified by that value of SP.
 The lower-order byte of a16 is placed in byte 2 of the object code, and the higher-order byte is placed in byte 3. */
-IMPL_INSTR(call_a16) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(call_a16) {
+	auto subr = cpu.mmu.read_u16(cpu.regs.pc);
+
+	// store the PC at the address pointed by the SP
+	cpu.push(cpu.regs.pc + 2);
+
+	// update PC
+	cpu.regs.pc = subr;
+}
 
 // C4 CALL NZ, a16
 /* If the Z flag is 0, the program counter PC value corresponding to the memory location of the instruction following the CALL instruction is pushed to the 2 bytes following the memory byte specified by the stack pointer SP. The 16-bit immediate operand a16 is then loaded into PC.
@@ -2007,7 +2133,10 @@ IMPL_INSTR(call_c_a16) { throw gbemu::gbemu_exception{"not implemented"}; }
 // C9 RET
 /* Pop from the memory stack the program counter PC value pushed when the subroutine was called, returning contorl to the source program.
 The contents of the address specified by the stack pointer SP are loaded in the lower-order byte of PC, and the contents of SP are incremented by 1. The contents of the address specified by the new SP value are then loaded in the higher-order byte of PC, and the contents of SP are incremented by 1 again. (THe value of SP is 2 larger than before instruction execution.) The next instruction is fetched from the address specified by the content of PC (as usual). */
-IMPL_INSTR(ret) { throw gbemu::gbemu_exception{"not implemented"}; }
+IMPL_INSTR(ret) {
+	auto addr = cpu.pop_u16();
+	cpu.regs.pc = addr;
+}
 
 // D9 RETI
 /* Used when an interrupt-service routine finishes. The address for the return from the interrupt is loaded in the program counter PC. The master interrupt enable flag is returned to its pre-interrupt status.

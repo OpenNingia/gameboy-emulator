@@ -17,8 +17,15 @@ Application::~Application() {
 
 static void load_rom(gbemu::cpu& core, const std::string& path)
 {
-    gbemu::cartridge c{};
-    c.load_rom(path);
+    gbemu::rom_file c{};
+    c.load_from(path);
+    core.load(c);
+}
+
+static void load_bios(gbemu::cpu& core, const std::string& path)
+{
+    gbemu::bios_file c{};
+    c.load_from(path);
     core.load(c);
 }
 
@@ -46,8 +53,15 @@ void Application::run() {
 
     SDL_RenderSetLogicalSize(renderer, 160, 144);
 
+    // load bios(
+    if (!cfg.bios.path.empty()) {
+        load_bios(core, cfg.bios.path);
+    }
+
     // load rom
-    load_rom(core, cfg.rom.rom_path);
+    load_rom(core, cfg.rom.path);
+
+    core.init();
 
 
     const int speed = 16;

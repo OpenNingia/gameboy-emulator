@@ -4,8 +4,11 @@
 #include <string>
 
 namespace gbemu {
-	struct cartridge {
-		void load_rom(const std::string& path);
+	struct bin_file {
+		void load_from(const std::string& path);
 		std::vector<std::uint8_t> data{};
 	};
+
+	struct rom_file : bin_file {};
+	struct bios_file : bin_file {};
 }

@@ -8,8 +8,12 @@ namespace gbemu {
 
 		//
 		struct romcfg {
-			std::string rom_path;
+			std::string path;
 		} rom;
+
+		struct bioscfg {
+			std::string path;
+		} bios;
 
 		struct wincfg {
 			std::size_t width;
