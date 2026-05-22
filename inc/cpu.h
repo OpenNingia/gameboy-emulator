@@ -68,12 +68,13 @@ namespace gbemu {
 			return static_cast<std::uint8_t>(r);
 		}
 
+		/*
 		std::uint16_t add(std::uint16_t a, std::uint16_t b) {
 			auto r = add_hl(a, b);
 			// set z_flag
 			regs.z_flag(static_cast<std::uint16_t>(r) == 0);
 			return r;
-		}
+		}*/
 
 		std::uint16_t add_hl(std::uint16_t a, std::uint16_t b) {
 			auto r = static_cast<std::uint32_t>(a) + b;
@@ -118,6 +119,16 @@ namespace gbemu {
 			regs.h_flag((a & 0xF) == 0x0);
 			return r;
 		}		
+
+		std::uint8_t rl(std::uint8_t a) {
+			std::uint8_t old_carry = regs.c_flag() ? 1 : 0;
+			std::uint8_t r = static_cast<std::uint8_t>((a << 1) | old_carry);
+			regs.z_flag(r == 0);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x80) != 0);
+			return r;
+		}
 	
 	private:
 		registers& regs;
@@ -125,13 +136,16 @@ namespace gbemu {
 
 	struct cpu {
 
-		cpu() : regs(), mmu(), alu(regs), crd(), interrupt_enabled(true) {}
+		cpu() : regs(), mmu(), alu(regs), crd(), interrupt_enabled(true), stopped(false), pc_ring(), pc_idx(0) {}
 
 		registers regs;
 		mmu mmu;
 		alu alu;
 		std::optional<rom_file> crd;
-		bool interrupt_enabled{ true };
+		bool interrupt_enabled;
+		bool stopped;
+		std::array<std::uint16_t, 256> pc_ring;
+		std::size_t pc_idx;
 
 		// load a cartridge
 		void load(rom_file& c);
@@ -141,6 +155,12 @@ namespace gbemu {
 		void init();
 		// execute a cycle
 		void tick();
+		// stop execution
+		void stop();
+		// reset execution
+		void reset();
+		// is stopped
+		[[nodiscard]] bool is_stopped() const;
 
 		// fetch next op
 		std::uint16_t fetch();

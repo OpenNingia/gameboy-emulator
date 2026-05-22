@@ -2,6 +2,13 @@
 
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const
 {
+	// TODO. this is a workaround to increment LY even thou I don't have a ppu
+	// remove this as soon as I implement the PPU
+	if (addr == 0xFF44) {
+		static std::uint8_t fake_ly = 0;
+		return fake_ly++ % 154;
+	}
+
 	switch (addr & 0xF000) {
 		// the first 256 bytes can be either the bios
 		// or the first bank of cardrige
@@ -123,8 +130,17 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val)
 		else if (addr < 0xFF00)
 			throw gbemu_exception{ "Not addressable!" };
 		// memory mapped i/o
-		else if (addr < 0xFF80)
+		else if (addr < 0xFF80) {
 			mmio[addr - 0xFF00] = val;
+
+			// stampa a console i dati scritti nella porta seriale
+			if (addr == 0xFF02 && val == 0x81) {
+				std::putchar(static_cast<char>(read_u8(0xFF01)));
+				std::fflush(stdout);
+				mmio[0xFF02 - 0xFF00] = 0x01;   // <-- clear bit 7 ("transfer done")
+				// opzionale: set IF.3 per generare interrupt seriale
+			}
+		}
 		// zram
 		else
 			zram[addr - 0xFF80] = val;

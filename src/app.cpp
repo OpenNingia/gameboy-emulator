@@ -67,6 +67,17 @@ void Application::run() {
     const int speed = 16;
 
     bool quit = false;
+
+    // texture
+    auto texture = SDL_CreateTexture(
+        renderer,
+        SDL_PIXELFORMAT_ARGB8888,
+        SDL_TEXTUREACCESS_STREAMING,
+        160, 144);
+
+    std::array<std::uint32_t, 160 * 144> framebuffer{};
+
+
     while (!quit) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -82,6 +93,18 @@ void Application::run() {
         for (int i = 0; i < speed; i++) {
             core.tick();
         }
+#if 0
+
+        // (per ora) riempi con un pattern di test
+        for (int y = 0; y < 144; y++)
+            for (int x = 0; x < 160; x++)
+                framebuffer[y * 160 + x] = ((x ^ y) & 1) ? 0xFFFFFFFF : 0xFF000000;
+
+        SDL_UpdateTexture(texture, nullptr, framebuffer.data(), 160 * sizeof(std::uint32_t));
+        SDL_RenderClear(renderer);
+        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+        SDL_RenderPresent(renderer);
+#endif
     }
 
     SDL_DestroyRenderer(renderer);

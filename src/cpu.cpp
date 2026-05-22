@@ -5,6 +5,10 @@
 
 #include <unordered_map>
 
+#if DEBUG
+#include <iostream>
+#endif
+
 using namespace gbemu;
 
 // opcodes
@@ -45,7 +49,7 @@ void cpu::load(rom_file& c) {
 	memset(&regs, 0, sizeof(regs));
 
 	// skip bios	
-	// mmu.bios_accessible = false;
+	mmu.bios_accessible = false;
 }
 
 void cpu::load(bios_file const& c) {
@@ -83,10 +87,24 @@ void cpu::init() {
 }
 
 void cpu::tick() {
-	auto op = fetch();
-	auto& instr = decode(op);
-	// execute instruction
-	instr(*this);
+	pc_ring[pc_idx] = regs.pc;
+	pc_idx = (pc_idx + 1) % pc_ring.size();
+
+	auto saved_pc = regs.pc;
+	try {
+		auto op = fetch();
+		auto& instr = decode(op);
+		instr(*this);
+	}
+	catch (const gbemu_exception& e) {
+#if DEBUG
+		std::cerr << std::hex << "@PC=" << saved_pc
+			<< " AF=" << regs.af.u16 << " BC=" << regs.bc.u16
+			<< " DE=" << regs.de.u16 << " HL=" << regs.hl.u16
+			<< " SP=" << regs.sp << " : " << e.what() << "\n";
+#endif
+		throw;
+	}
 }
 
 void cpu::push(std::uint16_t u16) {
@@ -98,4 +116,16 @@ std::uint16_t cpu::pop_u16() {
 	auto u16 = mmu.read_u16(regs.sp);
 	regs.sp += 2;
 	return u16;
+}
+
+bool cpu::is_stopped() const {
+	return stopped;
+}
+
+void cpu::stop() {
+	stopped = true;
+}
+
+void cpu::reset() {
+	stopped = false;
 }
