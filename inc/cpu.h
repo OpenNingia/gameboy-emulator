@@ -62,7 +62,7 @@ namespace gbemu {
 			auto r = static_cast<std::uint16_t>(a) + b;
 			regs.c_flag(r > 0xFF);
 			// set z_flag, n_flag, h_flag
-			regs.z_flag(r == 0);
+			regs.z_flag(static_cast<std::uint8_t>(r) == 0);
 			regs.n_flag(false);
 			regs.h_flag((a & 0xF) + (b & 0xF) > 0xF);
 			return static_cast<std::uint8_t>(r);
@@ -71,6 +71,7 @@ namespace gbemu {
 		std::uint16_t add(std::uint16_t a, std::uint16_t b) {
 			auto r = add_hl(a, b);
 			// set z_flag
+			regs.z_flag(static_cast<std::uint16_t>(r) == 0);
 			return r;
 		}
 
@@ -86,7 +87,7 @@ namespace gbemu {
 			auto r = static_cast<std::uint32_t>(a) - b;
 			regs.c_flag(a < b);
 			// set z_flag, n_flag, h_flag
-			regs.z_flag(r == 0);
+			regs.z_flag(static_cast<std::uint16_t>(r) == 0);
 			regs.n_flag(true);
 			regs.h_flag((a & 0xFFF) < (b & 0xFFF));
 			return static_cast<std::uint16_t>(r);
@@ -96,7 +97,7 @@ namespace gbemu {
 			auto r = static_cast<std::uint16_t>(a) - b;
 			regs.c_flag(a < b);
 			// set z_flag, n_flag, h_flag
-			regs.z_flag(r == 0);
+			regs.z_flag(static_cast<std::uint8_t>(r) == 0);
 			regs.n_flag(true);
 			regs.h_flag((a & 0xF) < (b & 0xF));
 			return static_cast<std::uint8_t>(r);
@@ -104,7 +105,7 @@ namespace gbemu {
 
 		std::uint8_t inc(std::uint8_t a) {
 			auto r = a + 1;
-			regs.z_flag(r == 0);
+			regs.z_flag(static_cast<std::uint8_t>(r) == 0);
 			regs.n_flag(false);
 			regs.h_flag((a & 0xF) == 0xF);
 			return r;
@@ -112,7 +113,7 @@ namespace gbemu {
 
 		std::uint8_t dec(std::uint8_t a) {
 			auto r = a - 1;
-			regs.z_flag(r == 0);
+			regs.z_flag(static_cast<std::uint8_t>(r) == 0);
 			regs.n_flag(true);
 			regs.h_flag((a & 0xF) == 0x0);
 			return r;

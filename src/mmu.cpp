@@ -78,14 +78,16 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val)
 	case 0x1000:
 	case 0x2000:
 	case 0x3000:
-		throw gbemu_exception{ "Read only memory!" };
+		// nothing to do, but don't throw an exception since some cartridges use this area for bank switching
+		break;
 
 		// second rom bank
 	case 0x4000:
 	case 0x5000:
 	case 0x6000:
 	case 0x7000:
-		throw gbemu_exception{ "Read only memory!" };
+		// nothing to do, but don't throw an exception since some cartridges use this area for bank switching
+		break;
 
 		// gpu vram
 	case 0x8000:
