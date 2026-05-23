@@ -1937,1163 +1937,1177 @@ IMPL_INSTR(swap__hl_) {
 // CB47 BIT 0, A
 /* Copy the complement of the contents of bit 0 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_0_a) {
-    throw gbemu::gbemu_exception{"bit_0_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 0);
 }
 
 // CB40 BIT 0, B
 /* Copy the complement of the contents of bit 0 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_0_b) {
-    throw gbemu::gbemu_exception{"bit_0_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 0);
 }
 
 // CB41 BIT 0, C
 /* Copy the complement of the contents of bit 0 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_0_c) {
-    throw gbemu::gbemu_exception{"bit_0_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 0);
 }
 
 // CB42 BIT 0, D
 /* Copy the complement of the contents of bit 0 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_0_d) {
-    throw gbemu::gbemu_exception{"bit_0_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 0);
 }
 
 // CB43 BIT 0, E
 /* Copy the complement of the contents of bit 0 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_0_e) {
-    throw gbemu::gbemu_exception{"bit_0_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 0);
 }
 
 // CB44 BIT 0, H
 /* Copy the complement of the contents of bit 0 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_0_h) {
-    throw gbemu::gbemu_exception{"bit_0_h not implemented"};
+    cpu.alu.bit(cpu.regs.hl.hi, 0);
 }
 
 // CB45 BIT 0, L
 /* Copy the complement of the contents of bit 0 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_0_l) {
-    throw gbemu::gbemu_exception{"bit_0_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 0);
 }
 
 // CB4F BIT 1, A
 /* Copy the complement of the contents of bit 1 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_1_a) {
-    throw gbemu::gbemu_exception{"bit_1_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 1);
 }
 
 // CB48 BIT 1, B
 /* Copy the complement of the contents of bit 1 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_1_b) {
-    throw gbemu::gbemu_exception{"bit_1_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 1);
 }
 
 // CB49 BIT 1, C
 /* Copy the complement of the contents of bit 1 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_1_c) {
-    throw gbemu::gbemu_exception{"bit_1_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 1);
 }
 
 // CB4A BIT 1, D
 /* Copy the complement of the contents of bit 1 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_1_d) {
-    throw gbemu::gbemu_exception{"bit_1_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 1);
 }
 
 // CB4B BIT 1, E
 /* Copy the complement of the contents of bit 1 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_1_e) {
-    throw gbemu::gbemu_exception{"bit_1_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 1);
 }
 
 // CB4C BIT 1, H
 /* Copy the complement of the contents of bit 1 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_1_h) {
-    throw gbemu::gbemu_exception{"bit_1_h not implemented"};
+    cpu.alu.bit(cpu.regs.hl.hi, 1);
 }
 
 // CB4D BIT 1, L
 /* Copy the complement of the contents of bit 1 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_1_l) {
-    throw gbemu::gbemu_exception{"bit_1_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 1);
 }
 
 // CB57 BIT 2, A
 /* Copy the complement of the contents of bit 2 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_2_a) {
-    throw gbemu::gbemu_exception{"bit_2_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 2);
 }
 
 // CB50 BIT 2, B
 /* Copy the complement of the contents of bit 2 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_2_b) {
-    throw gbemu::gbemu_exception{"bit_2_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 2);
 }
 
 // CB51 BIT 2, C
 /* Copy the complement of the contents of bit 2 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_2_c) {
-    throw gbemu::gbemu_exception{"bit_2_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 2);
 }
 
 // CB52 BIT 2, D
 /* Copy the complement of the contents of bit 2 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_2_d) {
-    throw gbemu::gbemu_exception{"bit_2_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 2);
 }
 
 // CB53 BIT 2, E
 /* Copy the complement of the contents of bit 2 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_2_e) {
-    throw gbemu::gbemu_exception{"bit_2_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 2);
 }
 
 // CB54 BIT 2, H
 /* Copy the complement of the contents of bit 2 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_2_h) {
-    throw gbemu::gbemu_exception{"bit_2_h not implemented"};
+    cpu.alu.bit(cpu.regs.hl.hi, 2);
 }
 
 // CB55 BIT 2, L
 /* Copy the complement of the contents of bit 2 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_2_l) {
-    throw gbemu::gbemu_exception{"bit_2_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 2);
 }
 
 // CB5F BIT 3, A
 /* Copy the complement of the contents of bit 3 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_3_a) {
-    throw gbemu::gbemu_exception{"bit_3_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 3);
 }
 
 // CB58 BIT 3, B
 /* Copy the complement of the contents of bit 3 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_3_b) {
-    throw gbemu::gbemu_exception{"bit_3_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 3);
 }
 
 // CB59 BIT 3, C
 /* Copy the complement of the contents of bit 3 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_3_c) {
-    throw gbemu::gbemu_exception{"bit_3_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 3);
 }
 
 // CB5A BIT 3, D
 /* Copy the complement of the contents of bit 3 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_3_d) {
-    throw gbemu::gbemu_exception{"bit_3_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 3);
 }
 
 // CB5B BIT 3, E
 /* Copy the complement of the contents of bit 3 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_3_e) {
-    throw gbemu::gbemu_exception{"bit_3_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 3);
 }
 
 // CB5C BIT 3, H
 /* Copy the complement of the contents of bit 3 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_3_h) {
-    throw gbemu::gbemu_exception{"bit_3_h not implemented"};
+    cpu.alu.bit(cpu.regs.hl.hi, 3);
 }
 
 // CB5D BIT 3, L
 /* Copy the complement of the contents of bit 3 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_3_l) {
-    throw gbemu::gbemu_exception{"bit_3_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 3);
 }
 
 // CB67 BIT 4, A
 /* Copy the complement of the contents of bit 4 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_4_a) {
-    throw gbemu::gbemu_exception{"bit_4_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 4);
 }
 
 // CB60 BIT 4, B
 /* Copy the complement of the contents of bit 4 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_4_b) {
-    throw gbemu::gbemu_exception{"bit_4_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 4);
 }
 
 // CB61 BIT 4, C
 /* Copy the complement of the contents of bit 4 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_4_c) {
-    throw gbemu::gbemu_exception{"bit_4_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 4);
 }
 
 // CB62 BIT 4, D
 /* Copy the complement of the contents of bit 4 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_4_d) {
-    throw gbemu::gbemu_exception{"bit_4_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 4);
 }
 
 // CB63 BIT 4, E
 /* Copy the complement of the contents of bit 4 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_4_e) {
-    throw gbemu::gbemu_exception{"bit_4_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 4);
 }
 
 // CB64 BIT 4, H
 /* Copy the complement of the contents of bit 4 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_4_h) {
-    throw gbemu::gbemu_exception{"bit_4_h not implemented"};
+    cpu.alu.bit(cpu.regs.hl.hi, 4);
 }
 
 // CB65 BIT 4, L
 /* Copy the complement of the contents of bit 4 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_4_l) {
-    throw gbemu::gbemu_exception{"bit_4_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 4);
 }
 
 // CB6F BIT 5, A
 /* Copy the complement of the contents of bit 5 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_5_a) {
-    throw gbemu::gbemu_exception{"bit_5_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 5);
 }
 
 // CB68 BIT 5, B
 /* Copy the complement of the contents of bit 5 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_5_b) {
-    throw gbemu::gbemu_exception{"bit_5_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 5);
 }
 
 // CB69 BIT 5, C
 /* Copy the complement of the contents of bit 5 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_5_c) {
-    throw gbemu::gbemu_exception{"bit_5_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 5);
 }
 
 // CB6A BIT 5, D
 /* Copy the complement of the contents of bit 5 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_5_d) {
-    throw gbemu::gbemu_exception{"bit_5_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 5);
 }
 
 // CB6B BIT 5, E
 /* Copy the complement of the contents of bit 5 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_5_e) {
-    throw gbemu::gbemu_exception{"bit_5_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 5);
 }
 
 // CB6C BIT 5, H
 /* Copy the complement of the contents of bit 5 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_5_h) {
-    throw gbemu::gbemu_exception{"bit_5_h not implemented"};
+    cpu.alu.bit(cpu.regs.hl.hi, 5);
 }
 
 // CB6D BIT 5, L
 /* Copy the complement of the contents of bit 5 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_5_l) {
-    throw gbemu::gbemu_exception{"bit_5_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 5);
 }
 
 // CB77 BIT 6, A
 /* Copy the complement of the contents of bit 6 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_6_a) {
-    throw gbemu::gbemu_exception{"bit_6_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 6);
 }
 
 // CB70 BIT 6, B
 /* Copy the complement of the contents of bit 6 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_6_b) {
-    throw gbemu::gbemu_exception{"bit_6_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 6);
 }
 
 // CB71 BIT 6, C
 /* Copy the complement of the contents of bit 6 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_6_c) {
-    throw gbemu::gbemu_exception{"bit_6_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 6);
 }
 
 // CB72 BIT 6, D
 /* Copy the complement of the contents of bit 6 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_6_d) {
-    throw gbemu::gbemu_exception{"bit_6_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 6);
 }
 
 // CB73 BIT 6, E
 /* Copy the complement of the contents of bit 6 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_6_e) {
-    throw gbemu::gbemu_exception{"bit_6_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 6);
 }
 
 // CB74 BIT 6, H
 /* Copy the complement of the contents of bit 6 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_6_h) {
-    throw gbemu::gbemu_exception{"bit_6_h not implemented"};
+    cpu.alu.bit(cpu.regs.hl.hi, 6);
 }
 
 // CB75 BIT 6, L
 /* Copy the complement of the contents of bit 6 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_6_l) {
-    throw gbemu::gbemu_exception{"bit_6_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 6);
 }
 
 // CB7F BIT 7, A
 /* Copy the complement of the contents of bit 7 in register A to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_7_a) {
-    throw gbemu::gbemu_exception{"bit_7_a not implemented"};
+    cpu.alu.bit(cpu.regs.af.hi, 7);
 }
 
 // CB78 BIT 7, B
 /* Copy the complement of the contents of bit 7 in register B to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_7_b) {
-    throw gbemu::gbemu_exception{"bit_7_b not implemented"};
+    cpu.alu.bit(cpu.regs.bc.hi, 7);
 }
 
 // CB79 BIT 7, C
 /* Copy the complement of the contents of bit 7 in register C to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_7_c) {
-    throw gbemu::gbemu_exception{"bit_7_c not implemented"};
+    cpu.alu.bit(cpu.regs.bc.lo, 7);
 }
 
 // CB7A BIT 7, D
 /* Copy the complement of the contents of bit 7 in register D to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_7_d) {
-    throw gbemu::gbemu_exception{"bit_7_d not implemented"};
+    cpu.alu.bit(cpu.regs.de.hi, 7);
 }
 
 // CB7B BIT 7, E
 /* Copy the complement of the contents of bit 7 in register E to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_7_e) {
-    throw gbemu::gbemu_exception{"bit_7_e not implemented"};
+    cpu.alu.bit(cpu.regs.de.lo, 7);
 }
 
 // CB7C BIT 7, H
 /* Copy the complement of the contents of bit 7 in register H to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_7_h) {
-    cpu.regs.z_flag(((cpu.regs.hl.hi) & (1 << 7)) == 0);
-    cpu.regs.n_flag(0);
-    cpu.regs.h_flag(1);
+    cpu.alu.bit(cpu.regs.hl.hi, 7);
 }
 
 // CB7D BIT 7, L
 /* Copy the complement of the contents of bit 7 in register L to the Z flag of the program status word (PSW). */
 IMPL_INSTR(bit_7_l) {
-    throw gbemu::gbemu_exception{"bit_7_l not implemented"};
+    cpu.alu.bit(cpu.regs.hl.lo, 7);
 }
 
 // CB46 BIT 0, (HL)
 /* Copy the complement of the contents of bit 0 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_0__hl_) {
-    throw gbemu::gbemu_exception{"bit_0__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 0);
 }
 
 // CB4E BIT 1, (HL)
 /* Copy the complement of the contents of bit 1 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_1__hl_) {
-    throw gbemu::gbemu_exception{"bit_1__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 1);
 }
 
 // CB56 BIT 2, (HL)
 /* Copy the complement of the contents of bit 2 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_2__hl_) {
-    throw gbemu::gbemu_exception{"bit_2__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 2);
 }
 
 // CB5E BIT 3, (HL)
 /* Copy the complement of the contents of bit 3 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_3__hl_) {
-    throw gbemu::gbemu_exception{"bit_3__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 3);
 }
 
 // CB66 BIT 4, (HL)
 /* Copy the complement of the contents of bit 4 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_4__hl_) {
-    throw gbemu::gbemu_exception{"bit_4__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 4);
 }
 
 // CB6E BIT 5, (HL)
 /* Copy the complement of the contents of bit 5 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_5__hl_) {
-    throw gbemu::gbemu_exception{"bit_5__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 5);
 }
 
 // CB76 BIT 6, (HL)
 /* Copy the complement of the contents of bit 6 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_6__hl_) {
-    throw gbemu::gbemu_exception{"bit_6__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 6);
 }
 
 // CB7E BIT 7, (HL)
 /* Copy the complement of the contents of bit 7 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_7__hl_) {
-    throw gbemu::gbemu_exception{"bit_7__hl_ not implemented"};
+    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 7);
 }
 
 // CBC7 SET 0, A
 /* Set bit 0 in register A to 1. */
 IMPL_INSTR(set_0_a) {
-    throw gbemu::gbemu_exception{"set_0_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 0);
 }
 
 // CBC0 SET 0, B
 /* Set bit 0 in register B to 1. */
 IMPL_INSTR(set_0_b) {
-    throw gbemu::gbemu_exception{"set_0_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 0);
 }
 
 // CBC1 SET 0, C
 /* Set bit 0 in register C to 1. */
 IMPL_INSTR(set_0_c) {
-    throw gbemu::gbemu_exception{"set_0_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 0);
 }
 
 // CBC2 SET 0, D
 /* Set bit 0 in register D to 1. */
 IMPL_INSTR(set_0_d) {
-    throw gbemu::gbemu_exception{"set_0_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 0);
 }
 
 // CBC3 SET 0, E
 /* Set bit 0 in register E to 1. */
 IMPL_INSTR(set_0_e) {
-    throw gbemu::gbemu_exception{"set_0_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 0);
 }
 
 // CBC4 SET 0, H
 /* Set bit 0 in register H to 1. */
 IMPL_INSTR(set_0_h) {
-    throw gbemu::gbemu_exception{"set_0_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 0);
 }
 
 // CBC5 SET 0, L
 /* Set bit 0 in register L to 1. */
 IMPL_INSTR(set_0_l) {
-    throw gbemu::gbemu_exception{"set_0_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 0);
 }
 
 // CBCF SET 1, A
 /* Set bit 1 in register A to 1. */
 IMPL_INSTR(set_1_a) {
-    throw gbemu::gbemu_exception{"set_1_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 1);
 }
 
 // CBC8 SET 1, B
 /* Set bit 1 in register B to 1. */
 IMPL_INSTR(set_1_b) {
-    throw gbemu::gbemu_exception{"set_1_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 1);
 }
 
 // CBC9 SET 1, C
 /* Set bit 1 in register C to 1. */
 IMPL_INSTR(set_1_c) {
-    throw gbemu::gbemu_exception{"set_1_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 1);
 }
 
 // CBCA SET 1, D
 /* Set bit 1 in register D to 1. */
 IMPL_INSTR(set_1_d) {
-    throw gbemu::gbemu_exception{"set_1_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 1);
 }
 
 // CBCB SET 1, E
 /* Set bit 1 in register E to 1. */
 IMPL_INSTR(set_1_e) {
-    throw gbemu::gbemu_exception{"set_1_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 1);
 }
 
 // CBCC SET 1, H
 /* Set bit 1 in register H to 1. */
 IMPL_INSTR(set_1_h) {
-    throw gbemu::gbemu_exception{"set_1_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 1);
 }
 
 // CBCD SET 1, L
 /* Set bit 1 in register L to 1. */
 IMPL_INSTR(set_1_l) {
-    throw gbemu::gbemu_exception{"set_1_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 1);
 }
 
 // CBD7 SET 2, A
 /* Set bit 2 in register A to 1. */
 IMPL_INSTR(set_2_a) {
-    throw gbemu::gbemu_exception{"set_2_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 2);
 }
 
 // CBD0 SET 2, B
 /* Set bit 2 in register B to 1. */
 IMPL_INSTR(set_2_b) {
-    throw gbemu::gbemu_exception{"set_2_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 2);
 }
 
 // CBD1 SET 2, C
 /* Set bit 2 in register C to 1. */
 IMPL_INSTR(set_2_c) {
-    throw gbemu::gbemu_exception{"set_2_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 2);
 }
 
 // CBD2 SET 2, D
 /* Set bit 2 in register D to 1. */
 IMPL_INSTR(set_2_d) {
-    throw gbemu::gbemu_exception{"set_2_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 2);
 }
 
 // CBD3 SET 2, E
 /* Set bit 2 in register E to 1. */
 IMPL_INSTR(set_2_e) {
-    throw gbemu::gbemu_exception{"set_2_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 2);
 }
 
 // CBD4 SET 2, H
 /* Set bit 2 in register H to 1. */
 IMPL_INSTR(set_2_h) {
-    throw gbemu::gbemu_exception{"set_2_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 2);
 }
 
 // CBD5 SET 2, L
 /* Set bit 2 in register L to 1. */
 IMPL_INSTR(set_2_l) {
-    throw gbemu::gbemu_exception{"set_2_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 2);
 }
 
 // CBDF SET 3, A
 /* Set bit 3 in register A to 1. */
 IMPL_INSTR(set_3_a) {
-    throw gbemu::gbemu_exception{"set_3_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 3);
 }
 
 // CBD8 SET 3, B
 /* Set bit 3 in register B to 1. */
 IMPL_INSTR(set_3_b) {
-    throw gbemu::gbemu_exception{"set_3_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 3);
 }
 
 // CBD9 SET 3, C
 /* Set bit 3 in register C to 1. */
 IMPL_INSTR(set_3_c) {
-    throw gbemu::gbemu_exception{"set_3_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 3);
 }
 
 // CBDA SET 3, D
 /* Set bit 3 in register D to 1. */
 IMPL_INSTR(set_3_d) {
-    throw gbemu::gbemu_exception{"set_3_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 3);
 }
 
 // CBDB SET 3, E
 /* Set bit 3 in register E to 1. */
 IMPL_INSTR(set_3_e) {
-    throw gbemu::gbemu_exception{"set_3_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 3);
 }
 
 // CBDC SET 3, H
 /* Set bit 3 in register H to 1. */
 IMPL_INSTR(set_3_h) {
-    throw gbemu::gbemu_exception{"set_3_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 3);
 }
 
 // CBDD SET 3, L
 /* Set bit 3 in register L to 1. */
 IMPL_INSTR(set_3_l) {
-    throw gbemu::gbemu_exception{"set_3_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 3);
 }
 
 // CBE7 SET 4, A
 /* Set bit 4 in register A to 1. */
 IMPL_INSTR(set_4_a) {
-    throw gbemu::gbemu_exception{"set_4_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 4);
 }
 
 // CBE0 SET 4, B
 /* Set bit 4 in register B to 1. */
 IMPL_INSTR(set_4_b) {
-    throw gbemu::gbemu_exception{"set_4_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 4);
 }
 
 // CBE1 SET 4, C
 /* Set bit 4 in register C to 1. */
 IMPL_INSTR(set_4_c) {
-    throw gbemu::gbemu_exception{"set_4_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 4);
 }
 
 // CBE2 SET 4, D
 /* Set bit 4 in register D to 1. */
 IMPL_INSTR(set_4_d) {
-    throw gbemu::gbemu_exception{"set_4_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 4);
 }
 
 // CBE3 SET 4, E
 /* Set bit 4 in register E to 1. */
 IMPL_INSTR(set_4_e) {
-    throw gbemu::gbemu_exception{"set_4_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 4);
 }
 
 // CBE4 SET 4, H
 /* Set bit 4 in register H to 1. */
 IMPL_INSTR(set_4_h) {
-    throw gbemu::gbemu_exception{"set_4_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 4);
 }
 
 // CBE5 SET 4, L
 /* Set bit 4 in register L to 1. */
 IMPL_INSTR(set_4_l) {
-    throw gbemu::gbemu_exception{"set_4_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 4);
 }
 
 // CBEF SET 5, A
 /* Set bit 5 in register A to 1. */
 IMPL_INSTR(set_5_a) {
-    throw gbemu::gbemu_exception{"set_5_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 5);
 }
 
 // CBE8 SET 5, B
 /* Set bit 5 in register B to 1. */
 IMPL_INSTR(set_5_b) {
-    throw gbemu::gbemu_exception{"set_5_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 5);
 }
 
 // CBE9 SET 5, C
 /* Set bit 5 in register C to 1. */
 IMPL_INSTR(set_5_c) {
-    throw gbemu::gbemu_exception{"set_5_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 5);
 }
 
 // CBEA SET 5, D
 /* Set bit 5 in register D to 1. */
 IMPL_INSTR(set_5_d) {
-    throw gbemu::gbemu_exception{"set_5_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 5);
 }
 
 // CBEB SET 5, E
 /* Set bit 5 in register E to 1. */
 IMPL_INSTR(set_5_e) {
-    throw gbemu::gbemu_exception{"set_5_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 5);
 }
 
 // CBEC SET 5, H
 /* Set bit 5 in register H to 1. */
 IMPL_INSTR(set_5_h) {
-    throw gbemu::gbemu_exception{"set_5_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 5);
 }
 
 // CBED SET 5, L
 /* Set bit 5 in register L to 1. */
 IMPL_INSTR(set_5_l) {
-    throw gbemu::gbemu_exception{"set_5_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 5);
 }
 
 // CBF7 SET 6, A
 /* Set bit 6 in register A to 1. */
 IMPL_INSTR(set_6_a) {
-    throw gbemu::gbemu_exception{"set_6_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 6);
 }
 
 // CBF0 SET 6, B
 /* Set bit 6 in register B to 1. */
 IMPL_INSTR(set_6_b) {
-    throw gbemu::gbemu_exception{"set_6_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 6);
 }
 
 // CBF1 SET 6, C
 /* Set bit 6 in register C to 1. */
 IMPL_INSTR(set_6_c) {
-    throw gbemu::gbemu_exception{"set_6_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 6);
 }
 
 // CBF2 SET 6, D
 /* Set bit 6 in register D to 1. */
 IMPL_INSTR(set_6_d) {
-    throw gbemu::gbemu_exception{"set_6_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 6);
 }
 
 // CBF3 SET 6, E
 /* Set bit 6 in register E to 1. */
 IMPL_INSTR(set_6_e) {
-    throw gbemu::gbemu_exception{"set_6_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 6);
 }
 
 // CBF4 SET 6, H
 /* Set bit 6 in register H to 1. */
 IMPL_INSTR(set_6_h) {
-    throw gbemu::gbemu_exception{"set_6_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 6);
 }
 
 // CBF5 SET 6, L
 /* Set bit 6 in register L to 1. */
 IMPL_INSTR(set_6_l) {
-    throw gbemu::gbemu_exception{"set_6_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 6);
 }
 
 // CBFF SET 7, A
 /* Set bit 7 in register A to 1. */
 IMPL_INSTR(set_7_a) {
-    throw gbemu::gbemu_exception{"set_7_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.set(cpu.regs.af.hi, 7);
 }
 
 // CBF8 SET 7, B
 /* Set bit 7 in register B to 1. */
 IMPL_INSTR(set_7_b) {
-    throw gbemu::gbemu_exception{"set_7_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.set(cpu.regs.bc.hi, 7);
 }
 
 // CBF9 SET 7, C
 /* Set bit 7 in register C to 1. */
 IMPL_INSTR(set_7_c) {
-    throw gbemu::gbemu_exception{"set_7_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.set(cpu.regs.bc.lo, 7);
 }
 
 // CBFA SET 7, D
 /* Set bit 7 in register D to 1. */
 IMPL_INSTR(set_7_d) {
-    throw gbemu::gbemu_exception{"set_7_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.set(cpu.regs.de.hi, 7);
 }
 
 // CBFB SET 7, E
 /* Set bit 7 in register E to 1. */
 IMPL_INSTR(set_7_e) {
-    throw gbemu::gbemu_exception{"set_7_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.set(cpu.regs.de.lo, 7);
 }
 
 // CBFC SET 7, H
 /* Set bit 7 in register H to 1. */
 IMPL_INSTR(set_7_h) {
-    throw gbemu::gbemu_exception{"set_7_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.set(cpu.regs.hl.hi, 7);
 }
 
 // CBFD SET 7, L
 /* Set bit 7 in register L to 1. */
 IMPL_INSTR(set_7_l) {
-    throw gbemu::gbemu_exception{"set_7_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.set(cpu.regs.hl.lo, 7);
 }
 
 // CBC6 SET 0, (HL)
 /* Set bit 0 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_0__hl_) {
-    throw gbemu::gbemu_exception{"set_0__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 0));
 }
 
 // CBCE SET 1, (HL)
 /* Set bit 1 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_1__hl_) {
-    throw gbemu::gbemu_exception{"set_1__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 1));
 }
 
 // CBD6 SET 2, (HL)
 /* Set bit 2 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_2__hl_) {
-    throw gbemu::gbemu_exception{"set_2__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 2));
 }
 
 // CBDE SET 3, (HL)
 /* Set bit 3 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_3__hl_) {
-    throw gbemu::gbemu_exception{"set_3__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 3));
 }
 
 // CBE6 SET 4, (HL)
 /* Set bit 4 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_4__hl_) {
-    throw gbemu::gbemu_exception{"set_4__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 4));
 }
 
 // CBEE SET 5, (HL)
 /* Set bit 5 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_5__hl_) {
-    throw gbemu::gbemu_exception{"set_5__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 5));
 }
 
 // CBF6 SET 6, (HL)
 /* Set bit 6 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_6__hl_) {
-    throw gbemu::gbemu_exception{"set_6__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 6));
 }
 
 // CBFE SET 7, (HL)
 /* Set bit 7 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_7__hl_) {
-    throw gbemu::gbemu_exception{"set_7__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 7));
 }
 
 // CB87 RES 0, A
 /* Reset bit 0 in register A to 0. */
 IMPL_INSTR(res_0_a) {
-    throw gbemu::gbemu_exception{"res_0_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 0);
 }
 
 // CB80 RES 0, B
 /* Reset bit 0 in register B to 0. */
 IMPL_INSTR(res_0_b) {
-    throw gbemu::gbemu_exception{"res_0_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 0);
 }
 
 // CB81 RES 0, C
 /* Reset bit 0 in register C to 0. */
 IMPL_INSTR(res_0_c) {
-    throw gbemu::gbemu_exception{"res_0_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 0);
 }
 
 // CB82 RES 0, D
 /* Reset bit 0 in register D to 0. */
 IMPL_INSTR(res_0_d) {
-    throw gbemu::gbemu_exception{"res_0_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 0);
 }
 
 // CB83 RES 0, E
 /* Reset bit 0 in register E to 0. */
 IMPL_INSTR(res_0_e) {
-    throw gbemu::gbemu_exception{"res_0_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 0);
 }
 
 // CB84 RES 0, H
 /* Reset bit 0 in register H to 0. */
 IMPL_INSTR(res_0_h) {
-    throw gbemu::gbemu_exception{"res_0_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 0);
 }
 
 // CB85 RES 0, L
 /* Reset bit 0 in register L to 0. */
 IMPL_INSTR(res_0_l) {
-    throw gbemu::gbemu_exception{"res_0_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 0);
 }
 
 // CB8F RES 1, A
 /* Reset bit 1 in register A to 0. */
 IMPL_INSTR(res_1_a) {
-    throw gbemu::gbemu_exception{"res_1_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 1);
 }
 
 // CB88 RES 1, B
 /* Reset bit 1 in register B to 0. */
 IMPL_INSTR(res_1_b) {
-    throw gbemu::gbemu_exception{"res_1_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 1);
 }
 
 // CB89 RES 1, C
 /* Reset bit 1 in register C to 0. */
 IMPL_INSTR(res_1_c) {
-    throw gbemu::gbemu_exception{"res_1_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 1);
 }
 
 // CB8A RES 1, D
 /* Reset bit 1 in register D to 0. */
 IMPL_INSTR(res_1_d) {
-    throw gbemu::gbemu_exception{"res_1_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 1);
 }
 
 // CB8B RES 1, E
 /* Reset bit 1 in register E to 0. */
 IMPL_INSTR(res_1_e) {
-    throw gbemu::gbemu_exception{"res_1_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 1);
 }
 
 // CB8C RES 1, H
 /* Reset bit 1 in register H to 0. */
 IMPL_INSTR(res_1_h) {
-    throw gbemu::gbemu_exception{"res_1_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 1);
 }
 
 // CB8D RES 1, L
 /* Reset bit 1 in register L to 0. */
 IMPL_INSTR(res_1_l) {
-    throw gbemu::gbemu_exception{"res_1_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 1);
 }
 
 // CB97 RES 2, A
 /* Reset bit 2 in register A to 0. */
 IMPL_INSTR(res_2_a) {
-    throw gbemu::gbemu_exception{"res_2_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 2);
 }
 
 // CB90 RES 2, B
 /* Reset bit 2 in register B to 0. */
 IMPL_INSTR(res_2_b) {
-    throw gbemu::gbemu_exception{"res_2_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 2);
 }
 
 // CB91 RES 2, C
 /* Reset bit 2 in register C to 0. */
 IMPL_INSTR(res_2_c) {
-    throw gbemu::gbemu_exception{"res_2_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 2);
 }
 
 // CB92 RES 2, D
 /* Reset bit 2 in register D to 0. */
 IMPL_INSTR(res_2_d) {
-    throw gbemu::gbemu_exception{"res_2_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 2);
 }
 
 // CB93 RES 2, E
 /* Reset bit 2 in register E to 0. */
 IMPL_INSTR(res_2_e) {
-    throw gbemu::gbemu_exception{"res_2_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 2);
 }
 
 // CB94 RES 2, H
 /* Reset bit 2 in register H to 0. */
 IMPL_INSTR(res_2_h) {
-    throw gbemu::gbemu_exception{"res_2_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 2);
 }
 
 // CB95 RES 2, L
 /* Reset bit 2 in register L to 0. */
 IMPL_INSTR(res_2_l) {
-    throw gbemu::gbemu_exception{"res_2_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 2);
 }
 
 // CB9F RES 3, A
 /* Reset bit 3 in register A to 0. */
 IMPL_INSTR(res_3_a) {
-    throw gbemu::gbemu_exception{"res_3_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 3);
 }
 
 // CB98 RES 3, B
 /* Reset bit 3 in register B to 0. */
 IMPL_INSTR(res_3_b) {
-    throw gbemu::gbemu_exception{"res_3_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 3);
 }
 
 // CB99 RES 3, C
 /* Reset bit 3 in register C to 0. */
 IMPL_INSTR(res_3_c) {
-    throw gbemu::gbemu_exception{"res_3_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 3);
 }
 
 // CB9A RES 3, D
 /* Reset bit 3 in register D to 0. */
 IMPL_INSTR(res_3_d) {
-    throw gbemu::gbemu_exception{"res_3_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 3);
 }
 
 // CB9B RES 3, E
 /* Reset bit 3 in register E to 0. */
 IMPL_INSTR(res_3_e) {
-    throw gbemu::gbemu_exception{"res_3_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 3);
 }
 
 // CB9C RES 3, H
 /* Reset bit 3 in register H to 0. */
 IMPL_INSTR(res_3_h) {
-    throw gbemu::gbemu_exception{"res_3_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 3);
 }
 
 // CB9D RES 3, L
 /* Reset bit 3 in register L to 0. */
 IMPL_INSTR(res_3_l) {
-    throw gbemu::gbemu_exception{"res_3_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 3);
 }
 
 // CBA7 RES 4, A
 /* Reset bit 4 in register A to 0. */
 IMPL_INSTR(res_4_a) {
-    throw gbemu::gbemu_exception{"res_4_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 4);
 }
 
 // CBA0 RES 4, B
 /* Reset bit 4 in register B to 0. */
 IMPL_INSTR(res_4_b) {
-    throw gbemu::gbemu_exception{"res_4_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 4);
 }
 
 // CBA1 RES 4, C
 /* Reset bit 4 in register C to 0. */
 IMPL_INSTR(res_4_c) {
-    throw gbemu::gbemu_exception{"res_4_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 4);
 }
 
 // CBA2 RES 4, D
 /* Reset bit 4 in register D to 0. */
 IMPL_INSTR(res_4_d) {
-    throw gbemu::gbemu_exception{"res_4_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 4);
 }
 
 // CBA3 RES 4, E
 /* Reset bit 4 in register E to 0. */
 IMPL_INSTR(res_4_e) {
-    throw gbemu::gbemu_exception{"res_4_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 4);
 }
 
 // CBA4 RES 4, H
 /* Reset bit 4 in register H to 0. */
 IMPL_INSTR(res_4_h) {
-    throw gbemu::gbemu_exception{"res_4_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 4);
 }
 
 // CBA5 RES 4, L
 /* Reset bit 4 in register L to 0. */
 IMPL_INSTR(res_4_l) {
-    throw gbemu::gbemu_exception{"res_4_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 4);
 }
 
 // CBAF RES 5, A
 /* Reset bit 5 in register A to 0. */
 IMPL_INSTR(res_5_a) {
-    throw gbemu::gbemu_exception{"res_5_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 5);
 }
 
 // CBA8 RES 5, B
 /* Reset bit 5 in register B to 0. */
 IMPL_INSTR(res_5_b) {
-    throw gbemu::gbemu_exception{"res_5_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 5);
 }
 
 // CBA9 RES 5, C
 /* Reset bit 5 in register C to 0. */
 IMPL_INSTR(res_5_c) {
-    throw gbemu::gbemu_exception{"res_5_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 5);
 }
 
 // CBAA RES 5, D
 /* Reset bit 5 in register D to 0. */
 IMPL_INSTR(res_5_d) {
-    throw gbemu::gbemu_exception{"res_5_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 5);
 }
 
 // CBAB RES 5, E
 /* Reset bit 5 in register E to 0. */
 IMPL_INSTR(res_5_e) {
-    throw gbemu::gbemu_exception{"res_5_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 5);
 }
 
 // CBAC RES 5, H
 /* Reset bit 5 in register H to 0. */
 IMPL_INSTR(res_5_h) {
-    throw gbemu::gbemu_exception{"res_5_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 5);
 }
 
 // CBAD RES 5, L
 /* Reset bit 5 in register L to 0. */
 IMPL_INSTR(res_5_l) {
-    throw gbemu::gbemu_exception{"res_5_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 5);
 }
 
 // CBB7 RES 6, A
 /* Reset bit 6 in register A to 0. */
 IMPL_INSTR(res_6_a) {
-    throw gbemu::gbemu_exception{"res_6_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 6);
 }
 
 // CBB0 RES 6, B
 /* Reset bit 6 in register B to 0. */
 IMPL_INSTR(res_6_b) {
-    throw gbemu::gbemu_exception{"res_6_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 6);
 }
 
 // CBB1 RES 6, C
 /* Reset bit 6 in register C to 0. */
 IMPL_INSTR(res_6_c) {
-    throw gbemu::gbemu_exception{"res_6_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 6);
 }
 
 // CBB2 RES 6, D
 /* Reset bit 6 in register D to 0. */
 IMPL_INSTR(res_6_d) {
-    throw gbemu::gbemu_exception{"res_6_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 6);
 }
 
 // CBB3 RES 6, E
 /* Reset bit 6 in register E to 0. */
 IMPL_INSTR(res_6_e) {
-    throw gbemu::gbemu_exception{"res_6_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 6);
 }
 
 // CBB4 RES 6, H
 /* Reset bit 6 in register H to 0. */
 IMPL_INSTR(res_6_h) {
-    throw gbemu::gbemu_exception{"res_6_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 6);
 }
 
 // CBB5 RES 6, L
 /* Reset bit 6 in register L to 0. */
 IMPL_INSTR(res_6_l) {
-    throw gbemu::gbemu_exception{"res_6_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 6);
 }
 
 // CBBF RES 7, A
 /* Reset bit 7 in register A to 0. */
 IMPL_INSTR(res_7_a) {
-    throw gbemu::gbemu_exception{"res_7_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.res(cpu.regs.af.hi, 7);
 }
 
 // CBB8 RES 7, B
 /* Reset bit 7 in register B to 0. */
 IMPL_INSTR(res_7_b) {
-    throw gbemu::gbemu_exception{"res_7_b not implemented"};
+    cpu.regs.bc.hi = cpu.alu.res(cpu.regs.bc.hi, 7);
 }
 
 // CBB9 RES 7, C
 /* Reset bit 7 in register C to 0. */
 IMPL_INSTR(res_7_c) {
-    throw gbemu::gbemu_exception{"res_7_c not implemented"};
+    cpu.regs.bc.lo = cpu.alu.res(cpu.regs.bc.lo, 7);
 }
 
 // CBBA RES 7, D
 /* Reset bit 7 in register D to 0. */
 IMPL_INSTR(res_7_d) {
-    throw gbemu::gbemu_exception{"res_7_d not implemented"};
+    cpu.regs.de.hi = cpu.alu.res(cpu.regs.de.hi, 7);
 }
 
 // CBBB RES 7, E
 /* Reset bit 7 in register E to 0. */
 IMPL_INSTR(res_7_e) {
-    throw gbemu::gbemu_exception{"res_7_e not implemented"};
+    cpu.regs.de.lo = cpu.alu.res(cpu.regs.de.lo, 7);
 }
 
 // CBBC RES 7, H
 /* Reset bit 7 in register H to 0. */
 IMPL_INSTR(res_7_h) {
-    throw gbemu::gbemu_exception{"res_7_h not implemented"};
+    cpu.regs.hl.hi = cpu.alu.res(cpu.regs.hl.hi, 7);
 }
 
 // CBBD RES 7, L
 /* Reset bit 7 in register L to 0. */
 IMPL_INSTR(res_7_l) {
-    throw gbemu::gbemu_exception{"res_7_l not implemented"};
+    cpu.regs.hl.lo = cpu.alu.res(cpu.regs.hl.lo, 7);
 }
 
 // CB86 RES 0, (HL)
 /* Reset bit 0 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_0__hl_) {
-    throw gbemu::gbemu_exception{"res_0__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 0));
 }
 
 // CB8E RES 1, (HL)
 /* Reset bit 1 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_1__hl_) {
-    throw gbemu::gbemu_exception{"res_1__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 1));
 }
 
 // CB96 RES 2, (HL)
 /* Reset bit 2 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_2__hl_) {
-    throw gbemu::gbemu_exception{"res_2__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 2));
 }
 
 // CB9E RES 3, (HL)
 /* Reset bit 3 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_3__hl_) {
-    throw gbemu::gbemu_exception{"res_3__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 3));
 }
 
 // CBA6 RES 4, (HL)
 /* Reset bit 4 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_4__hl_) {
-    throw gbemu::gbemu_exception{"res_4__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 4));
 }
 
 // CBAE RES 5, (HL)
 /* Reset bit 5 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_5__hl_) {
-    throw gbemu::gbemu_exception{"res_5__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 5));
 }
 
 // CBB6 RES 6, (HL)
 /* Reset bit 6 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_6__hl_) {
-    throw gbemu::gbemu_exception{"res_6__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 6));
 }
 
 // CBBE RES 7, (HL)
 /* Reset bit 7 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_7__hl_) {
-    throw gbemu::gbemu_exception{"res_7__hl_ not implemented"};
+    const auto addr = cpu.regs.hl.u16;
+    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 7));
 }
 
 // C3 JP a16
@@ -3114,6 +3128,7 @@ the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_nz_a16) {
     auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    cpu.regs.pc += 2;
     if (!cpu.regs.z_flag()) {
         cpu.regs.pc = nn;
         cpu.extra_cycles = this->cycles_taken - this->cycles;
@@ -3128,6 +3143,7 @@ the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_z_a16) {
     auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    cpu.regs.pc += 2;
     if (cpu.regs.z_flag()) {
         cpu.regs.pc = nn;
         cpu.extra_cycles = this->cycles_taken - this->cycles;
@@ -3142,6 +3158,7 @@ the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_nc_a16) {
     auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    cpu.regs.pc += 2;
     if (!cpu.regs.c_flag()) {
         cpu.regs.pc = nn;
         cpu.extra_cycles = this->cycles_taken - this->cycles;
@@ -3156,6 +3173,7 @@ the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_c_a16) {
     auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    cpu.regs.pc += 2;
     if (cpu.regs.c_flag()) {
         cpu.regs.pc = nn;
         cpu.extra_cycles = this->cycles_taken - this->cycles;

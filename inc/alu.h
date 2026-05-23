@@ -266,6 +266,23 @@ namespace gbemu {
             return r;
         }
 
+        // BIT n, v: Z = !(v & (1<<n)); N=0; H=1; C invariato. Non modifica v.
+        void bit(std::uint8_t v, std::uint8_t n) {
+            regs.z_flag((v & (1u << n)) == 0);
+            regs.n_flag(false);
+            regs.h_flag(true);
+        }
+
+        // RES n, v: ritorna v con bit n a 0. Nessun flag affected.
+        static std::uint8_t res(std::uint8_t v, std::uint8_t n) {
+            return static_cast<std::uint8_t>(v & ~(1u << n));
+        }
+
+        // SET n, v: ritorna v con bit n a 1. Nessun flag affected.
+        static std::uint8_t set(std::uint8_t v, std::uint8_t n) {
+            return static_cast<std::uint8_t>(v | (1u << n));
+        }
+
     private:
         registers& regs;
     };
