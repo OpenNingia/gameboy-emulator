@@ -13,20 +13,24 @@
 #include <irq.h>
 #include <ppu.h>
 #include <mmu.h>
+#include <serial.h>
+#include <dma.h>
 #include <card.h>
 
 namespace gbemu {
 
 	struct core {
 
-		core() : 
-			regs(), mmu(), ppu(mmu), cpu(mmu, regs), irq(cpu, mmu), crd(), pc_ring(), pc_idx(0) {}
+		core() :
+			regs(), mmu(), ppu(mmu), cpu(mmu, regs), irq(cpu, mmu), serial(mmu), dma(mmu), crd(), pc_ring(), pc_idx(0) {}
 
         cpu cpu;
 		registers regs;
 		mmu mmu;
 		ppu ppu;
 		irq irq;
+		serial serial;
+		dma dma;
         
 		std::optional<rom_file> crd;
 

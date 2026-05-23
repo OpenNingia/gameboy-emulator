@@ -1,5 +1,19 @@
 #include <mmu.h>
 
+gbemu::mmu::mmu()
+{
+	// Boot ROM disable lives in MMU itself: writing nonzero to 0xFF50 unmaps
+	// the BIOS from 0x0000-0x00FF. On DMG this is one-shot until reset.
+	set_mmio_write_handler(0xFF50, [this](std::uint8_t v) {
+		if (v != 0) bios_accessible = false;
+	});
+}
+
+void gbemu::mmu::set_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn)
+{
+	mmio_write_handlers[addr - 0xFF00] = std::move(fn);
+}
+
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const
 {
 	switch (addr & 0xF000) {
@@ -125,25 +139,8 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val)
 		// memory mapped i/o
 		else if (addr < 0xFF80) {
 			mmio[addr - 0xFF00] = val;
-
-			// stampa a console i dati scritti nella porta seriale
-			if (addr == 0xFF02 && val == 0x81) {
-				std::putchar(static_cast<char>(read_u8(0xFF01)));
-				std::fflush(stdout);
-				mmio[0xFF02 - 0xFF00] = 0x01;   // <-- clear bit 7 ("transfer done")
-				// opzionale: set IF.3 per generare interrupt seriale
-			}
-			else if (addr == 0xFF46) {
-				// OAM DMA transfer: copy 160 bytes from (val * 0x100) to OAM
-				std::uint16_t src = static_cast<std::uint16_t>(val) << 8;
-				for (std::size_t i = 0; i < sram.size(); ++i) {
-					sram[i] = read_u8(src + i);
-				}
-			}
-			else if (addr == 0xFF50 && val != 0) {
-				// boot ROM disable: unmap BIOS from 0x0000-0x00FF.
-				// One-shot on DMG: any nonzero write locks it off until reset.
-				bios_accessible = false;
+			if (auto& fn = mmio_write_handlers[addr - 0xFF00]; fn) {
+				fn(val);
 			}
 		}
 		// zram
