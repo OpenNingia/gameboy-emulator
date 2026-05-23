@@ -486,9 +486,9 @@ IMPL_INSTR(pop_af) { cpu.regs.af.u16 = cpu.pop_u16() & 0xFFF0; }
 
 // F8 LD HL, SP+s8
 /* Add the 8-bit signed operand s8 (values -128 to +127) to the stack pointer SP, and store the result in register pair HL. */
-IMPL_INSTR(ld_hl_spps8) { 
+IMPL_INSTR(ld_hl_spps8) {
 	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
-	cpu.regs.hl.u16 = cpu.regs.sp + s8;
+	cpu.regs.hl.u16 = cpu.alu.add_sp_s8(cpu.regs.sp, s8);
 }
 
 // 08 LD (a16), SP
@@ -905,162 +905,145 @@ IMPL_INSTR(inc_l) { cpu.regs.hl.lo = cpu.alu.inc(cpu.regs.hl.lo); }
 
 // 34 INC (HL)
 /* Increment the contents of memory specified by register pair HL by 1. */
-IMPL_INSTR(inc__hl_) { throw gbemu::gbemu_exception{"inc__hl_ not implemented"}; }
+IMPL_INSTR(inc__hl_) { cpu.regs.hl.u16 = cpu.alu.inc(cpu.regs.hl.u16); }
 
 // 3D DEC A
 /* Decrement the contents of register A by 1. */
-IMPL_INSTR(dec_a) {
-	cpu.regs.af.hi = cpu.alu.dec(cpu.regs.af.hi);
-}
+IMPL_INSTR(dec_a) { cpu.regs.af.hi = cpu.alu.dec(cpu.regs.af.hi); }
 
 // 05 DEC B
 /* Decrement the contents of register B by 1. */
-IMPL_INSTR(dec_b) {
-	cpu.regs.bc.hi = cpu.alu.dec(cpu.regs.bc.hi);
-}
+IMPL_INSTR(dec_b) { cpu.regs.bc.hi = cpu.alu.dec(cpu.regs.bc.hi); }
 
 // 0D DEC C
 /* Decrement the contents of register C by 1. */
-IMPL_INSTR(dec_c) { 
-	cpu.regs.bc.lo = cpu.alu.dec(cpu.regs.bc.lo);
-}
+IMPL_INSTR(dec_c) { cpu.regs.bc.lo = cpu.alu.dec(cpu.regs.bc.lo); }
 
 // 15 DEC D
 /* Decrement the contents of register D by 1. */
-IMPL_INSTR(dec_d) { 
-	cpu.regs.de.hi = cpu.alu.dec(cpu.regs.de.hi);
-}
+IMPL_INSTR(dec_d) { cpu.regs.de.hi = cpu.alu.dec(cpu.regs.de.hi); }
 
 // 1D DEC E
 /* Decrement the contents of register E by 1. */
-IMPL_INSTR(dec_e) {
-	cpu.regs.de.lo = cpu.alu.dec(cpu.regs.de.lo);
-}
+IMPL_INSTR(dec_e) { cpu.regs.de.lo = cpu.alu.dec(cpu.regs.de.lo); }
 
 // 25 DEC H
 /* Decrement the contents of register H by 1. */
-IMPL_INSTR(dec_h) { 
-	cpu.regs.hl.hi = cpu.alu.dec(cpu.regs.hl.hi);
-}
+IMPL_INSTR(dec_h) { cpu.regs.hl.hi = cpu.alu.dec(cpu.regs.hl.hi); }
 
 // 2D DEC L
 /* Decrement the contents of register L by 1. */
-IMPL_INSTR(dec_l) { 
-	cpu.regs.hl.lo = cpu.alu.dec(cpu.regs.hl.lo);
-}
+IMPL_INSTR(dec_l) { cpu.regs.hl.lo = cpu.alu.dec(cpu.regs.hl.lo); }
 
 // 35 DEC (HL)
 /* Decrement the contents of memory specified by register pair HL by 1. */
-IMPL_INSTR(dec__hl_) { throw gbemu::gbemu_exception{"dec__hl_ not implemented"}; }
+IMPL_INSTR(dec__hl_) { cpu.regs.hl.u16 = cpu.alu.dec(cpu.regs.hl.u16); }
 
 // 09 ADD HL, BC
 /* Add the contents of register pair BC to the contents of register pair HL, and store the results in register pair HL. */
-IMPL_INSTR(add_hl_bc) { throw gbemu::gbemu_exception{"add_hl_bc not implemented"}; }
+IMPL_INSTR(add_hl_bc) { cpu.regs.hl.u16 = cpu.alu.add_hl(cpu.regs.hl.u16, cpu.regs.bc.u16); }
 
 // 19 ADD HL, DE
 /* Add the contents of register pair DE to the contents of register pair HL, and store the results in register pair HL. */
-IMPL_INSTR(add_hl_de) { throw gbemu::gbemu_exception{"add_hl_de not implemented"}; }
+IMPL_INSTR(add_hl_de) { cpu.regs.hl.u16 = cpu.alu.add_hl(cpu.regs.hl.u16, cpu.regs.de.u16); }
 
 // 29 ADD HL, HL
 /* Add the contents of register pair HL to the contents of register pair HL, and store the results in register pair HL. */
-IMPL_INSTR(add_hl_hl) { throw gbemu::gbemu_exception{"add_hl_hl not implemented"}; }
+IMPL_INSTR(add_hl_hl) { cpu.regs.hl.u16 = cpu.alu.add_hl(cpu.regs.hl.u16, cpu.regs.hl.u16); }
 
 // 39 ADD HL, SP
 /* Add the contents of register pair SP to the contents of register pair HL, and store the results in register pair HL. */
-IMPL_INSTR(add_hl_sp) { throw gbemu::gbemu_exception{"add_hl_sp not implemented"}; }
+IMPL_INSTR(add_hl_sp) { cpu.regs.hl.u16 = cpu.alu.add_hl(cpu.regs.hl.u16, cpu.regs.sp); }
 
 // E8 ADD SP, s8
 /* Add the contents of the 8-bit signed (2's complement) immediate operand s8 and the stack pointer SP and store the results in SP. */
-IMPL_INSTR(add_sp_s8) { throw gbemu::gbemu_exception{"add_sp_s8 not implemented"}; }
+IMPL_INSTR(add_sp_s8) {
+	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+	cpu.regs.sp = cpu.alu.add_sp_s8(cpu.regs.sp, s8);
+}
 
 // 03 INC BC
 /* Increment the contents of register pair BC by 1. */
-IMPL_INSTR(inc_bc) { 
-	cpu.regs.bc.u16++;
-}
+IMPL_INSTR(inc_bc) { cpu.regs.bc.u16 = cpu.alu.inc(cpu.regs.bc.u16); }
 
 // 13 INC DE
 /* Increment the contents of register pair DE by 1. */
-IMPL_INSTR(inc_de) { 
-	cpu.regs.de.u16++;
-}
+IMPL_INSTR(inc_de) { cpu.regs.de.u16 = cpu.alu.inc(cpu.regs.de.u16); }
 
 // 23 INC HL
 /* Increment the contents of register pair HL by 1. */
-IMPL_INSTR(inc_hl) {
-	cpu.regs.hl.u16++;
-}
+IMPL_INSTR(inc_hl) { cpu.regs.hl.u16 = cpu.alu.inc(cpu.regs.hl.u16); }
 
 // 33 INC SP
 /* Increment the contents of register pair SP by 1. */
-IMPL_INSTR(inc_sp) { throw gbemu::gbemu_exception{"inc_sp not implemented"}; }
+IMPL_INSTR(inc_sp) { cpu.regs.sp = cpu.alu.inc(cpu.regs.sp); }
 
 // 0B DEC BC
 /* Decrement the contents of register pair BC by 1. */
-IMPL_INSTR(dec_bc) { throw gbemu::gbemu_exception{"dec_bc not implemented"}; }
+IMPL_INSTR(dec_bc) { cpu.regs.bc.u16 = cpu.alu.dec(cpu.regs.bc.u16); }
 
 // 1B DEC DE
 /* Decrement the contents of register pair DE by 1. */
-IMPL_INSTR(dec_de) { throw gbemu::gbemu_exception{"dec_de not implemented"}; }
+IMPL_INSTR(dec_de) { cpu.regs.de.u16 = cpu.alu.dec(cpu.regs.de.u16); }
 
 // 2B DEC HL
 /* Decrement the contents of register pair HL by 1. */
-IMPL_INSTR(dec_hl) { throw gbemu::gbemu_exception{"dec_hl not implemented"}; }
+IMPL_INSTR(dec_hl) { cpu.regs.hl.u16 = cpu.alu.dec(cpu.regs.hl.u16); }
 
 // 3B DEC SP
 /* Decrement the contents of register pair SP by 1. */
-IMPL_INSTR(dec_sp) { throw gbemu::gbemu_exception{"dec_sp not implemented"}; }
+IMPL_INSTR(dec_sp) { cpu.regs.sp = cpu.alu.dec(cpu.regs.sp); }
 
 // 07 RLCA
 /* Rotate the contents of register A to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register A. */
-IMPL_INSTR(rlca) { throw gbemu::gbemu_exception{"rlca not implemented"}; }
+IMPL_INSTR(rlca) { cpu.regs.af.hi = cpu.alu.rlca(cpu.regs.af.hi); }
 
 // 17 RLA
 /* Rotate the contents of register A to the left, through the carry (CY) flag. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry flag are copied to bit 0. */
-IMPL_INSTR(rla) {
-	cpu.regs.af.hi = cpu.alu.rl(cpu.regs.af.hi);
-	cpu.regs.z_flag(false);   // <-- RLA forza Z=0 sempre
-}
+IMPL_INSTR(rla) { cpu.regs.af.hi = cpu.alu.rla(cpu.regs.af.hi); }
 
 // 0F RRCA
 /* Rotate the contents of register A to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register A. */
-IMPL_INSTR(rrca) { throw gbemu::gbemu_exception{"rrca not implemented"}; }
+IMPL_INSTR(rrca) { cpu.regs.af.hi = cpu.alu.rrca(cpu.regs.af.hi); }
 
 // 1F RRA
 /* Rotate the contents of register A to the right, through the carry (CY) flag. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry flag are copied to bit 7. */
-IMPL_INSTR(rra) { throw gbemu::gbemu_exception{"rra not implemented"}; }
+IMPL_INSTR(rra) { cpu.regs.af.hi = cpu.alu.rra(cpu.regs.af.hi); }
 
 // CB07 RLC A
 /* Rotate the contents of register A to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register A. */
-IMPL_INSTR(rlc_a) { throw gbemu::gbemu_exception{"rlc_a not implemented"}; }
+IMPL_INSTR(rlc_a) { cpu.regs.af.hi = cpu.alu.rlc(cpu.regs.af.hi); }
 
 // CB00 RLC B
 /* Rotate the contents of register B to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register B. */
-IMPL_INSTR(rlc_b) { throw gbemu::gbemu_exception{"rlc_b not implemented"}; }
+IMPL_INSTR(rlc_b) { cpu.regs.bc.hi = cpu.alu.rlc(cpu.regs.bc.hi); }
 
 // CB01 RLC C
 /* Rotate the contents of register C to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register C. */
-IMPL_INSTR(rlc_c) { throw gbemu::gbemu_exception{"rlc_c not implemented"}; }
+IMPL_INSTR(rlc_c) { cpu.regs.bc.lo = cpu.alu.rlc(cpu.regs.bc.lo); }
 
 // CB02 RLC D
 /* Rotate the contents of register D to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register D. */
-IMPL_INSTR(rlc_d) { throw gbemu::gbemu_exception{"rlc_d not implemented"}; }
+IMPL_INSTR(rlc_d) { cpu.regs.de.hi = cpu.alu.rlc(cpu.regs.de.hi); }
 
 // CB03 RLC E
 /* Rotate the contents of register E to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register E. */
-IMPL_INSTR(rlc_e) { throw gbemu::gbemu_exception{"rlc_e not implemented"}; }
+IMPL_INSTR(rlc_e) { cpu.regs.de.lo = cpu.alu.rlc(cpu.regs.de.lo); }
 
 // CB04 RLC H
 /* Rotate the contents of register H to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register H. */
-IMPL_INSTR(rlc_h) { throw gbemu::gbemu_exception{"rlc_h not implemented"}; }
+IMPL_INSTR(rlc_h) { cpu.regs.hl.hi = cpu.alu.rlc(cpu.regs.hl.hi); }
 
 // CB05 RLC L
 /* Rotate the contents of register L to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are placed in both the CY flag and bit 0 of register L. */
-IMPL_INSTR(rlc_l) { throw gbemu::gbemu_exception{"rlc_l not implemented"}; }
+IMPL_INSTR(rlc_l) { cpu.regs.hl.lo = cpu.alu.rlc(cpu.regs.hl.lo); }
 
 // CB06 RLC (HL)
 /* Rotate the contents of memory specified by register pair HL to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the memory location. The contents of bit 7 are placed in both the CY flag and bit 0 of (HL). */
-IMPL_INSTR(rlc__hl_) { throw gbemu::gbemu_exception{"rlc__hl_ not implemented"}; }
+IMPL_INSTR(rlc__hl_) {
+	auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.rlc(v));
+}
 
 // CB17 RL A
 /* Rotate the contents of register A to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 0 of register A. */
@@ -1099,67 +1082,73 @@ IMPL_INSTR(rl__hl_) {
 
 // CB0F RRC A
 /* Rotate the contents of register A to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register A. */
-IMPL_INSTR(rrc_a) { throw gbemu::gbemu_exception{"rrc_a not implemented"}; }
+IMPL_INSTR(rrc_a) { cpu.regs.af.hi = cpu.alu.rrc(cpu.regs.af.hi); }
 
 // CB08 RRC B
 /* Rotate the contents of register B to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register B. */
-IMPL_INSTR(rrc_b) { throw gbemu::gbemu_exception{"rrc_b not implemented"}; }
+IMPL_INSTR(rrc_b) { cpu.regs.bc.hi = cpu.alu.rrc(cpu.regs.bc.hi); }
 
 // CB09 RRC C
 /* Rotate the contents of register C to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register C. */
-IMPL_INSTR(rrc_c) { throw gbemu::gbemu_exception{"rrc_c not implemented"}; }
+IMPL_INSTR(rrc_c) { cpu.regs.bc.lo = cpu.alu.rrc(cpu.regs.bc.lo); }
 
 // CB0A RRC D
 /* Rotate the contents of register D to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register D. */
-IMPL_INSTR(rrc_d) { throw gbemu::gbemu_exception{"rrc_d not implemented"}; }
+IMPL_INSTR(rrc_d) { cpu.regs.de.hi = cpu.alu.rrc(cpu.regs.de.hi); }
 
 // CB0B RRC E
 /* Rotate the contents of register E to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register E. */
-IMPL_INSTR(rrc_e) { throw gbemu::gbemu_exception{"rrc_e not implemented"}; }
+IMPL_INSTR(rrc_e) { cpu.regs.de.lo = cpu.alu.rrc(cpu.regs.de.lo); }
 
 // CB0C RRC H
 /* Rotate the contents of register H to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register H. */
-IMPL_INSTR(rrc_h) { throw gbemu::gbemu_exception{"rrc_h not implemented"}; }
+IMPL_INSTR(rrc_h) { cpu.regs.hl.hi = cpu.alu.rrc(cpu.regs.hl.hi); }
 
 // CB0D RRC L
 /* Rotate the contents of register L to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are placed in both the CY flag and bit 7 of register L. */
-IMPL_INSTR(rrc_l) { throw gbemu::gbemu_exception{"rrc_l not implemented"}; }
+IMPL_INSTR(rrc_l) { cpu.regs.hl.lo = cpu.alu.rrc(cpu.regs.hl.lo); }
 
 // CB0E RRC (HL)
 /* Rotate the contents of memory specified by register pair HL to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the memory location. The contents of bit 0 are placed in both the CY flag and bit 7 of (HL). */
-IMPL_INSTR(rrc__hl_) { throw gbemu::gbemu_exception{"rrc__hl_ not implemented"}; }
+IMPL_INSTR(rrc__hl_) {
+	auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.rrc(v));
+}
 
 // CB1F RR A
 /* Rotate the contents of register A to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 7 of register A. */
-IMPL_INSTR(rr_a) { throw gbemu::gbemu_exception{"rr_a not implemented"}; }
+IMPL_INSTR(rr_a) { cpu.regs.af.hi = cpu.alu.rr(cpu.regs.af.hi); }
 
 // CB18 RR B
 /* Rotate the contents of register B to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 7 of register B. */
-IMPL_INSTR(rr_b) { throw gbemu::gbemu_exception{"rr_b not implemented"}; }
+IMPL_INSTR(rr_b) { cpu.regs.bc.hi = cpu.alu.rr(cpu.regs.bc.hi); }
 
 // CB19 RR C
 /* Rotate the contents of register C to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 7 of register C. */
-IMPL_INSTR(rr_c) { throw gbemu::gbemu_exception{"rr_c not implemented"}; }
+IMPL_INSTR(rr_c) { cpu.regs.bc.lo = cpu.alu.rr(cpu.regs.bc.lo); }
 
 // CB1A RR D
 /* Rotate the contents of register D to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 7 of register D. */
-IMPL_INSTR(rr_d) { throw gbemu::gbemu_exception{"rr_d not implemented"}; }
+IMPL_INSTR(rr_d) { cpu.regs.de.hi = cpu.alu.rr(cpu.regs.de.hi); }
 
 // CB1B RR E
 /* Rotate the contents of register E to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 7 of register E. */
-IMPL_INSTR(rr_e) { throw gbemu::gbemu_exception{"rr_e not implemented"}; }
+IMPL_INSTR(rr_e) { cpu.regs.de.lo = cpu.alu.rr(cpu.regs.de.lo); }
 
 // CB1C RR H
 /* Rotate the contents of register H to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 7 of register H. */
-IMPL_INSTR(rr_h) { throw gbemu::gbemu_exception{"rr_h not implemented"}; }
+IMPL_INSTR(rr_h) { cpu.regs.hl.hi = cpu.alu.rr(cpu.regs.hl.hi); }
 
 // CB1D RR L
 /* Rotate the contents of register L to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The previous contents of the carry (CY) flag are copied to bit 7 of register L. */
-IMPL_INSTR(rr_l) { throw gbemu::gbemu_exception{"rr_l not implemented"}; }
+IMPL_INSTR(rr_l) { cpu.regs.hl.lo = cpu.alu.rr(cpu.regs.hl.lo); }
 
 // CB1E RR (HL)
 /* Rotate the contents of memory specified by register pair HL to the right, through the carry flag. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the memory location. The previous contents of the CY flag are copied into bit 7 of (HL). */
-IMPL_INSTR(rr__hl_) { throw gbemu::gbemu_exception{"rr__hl_ not implemented"}; }
+IMPL_INSTR(rr__hl_) {
+	auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.rr(v));
+}
 
 // CB27 SLA A
 /* Shift the contents of register A to the left. That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2. The same operation is repeated in sequence for the rest of the register. The contents of bit 7 are copied to the CY flag, and bit 0 of register A is reset to 0. */

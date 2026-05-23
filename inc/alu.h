@@ -25,7 +25,16 @@ namespace gbemu {
 			regs.n_flag(false);
 			regs.h_flag((a & 0xFFF) + (b & 0xFFF) > 0xFFF);
 			return static_cast<std::uint16_t>(r);
-		}		
+		}
+
+		std::uint16_t add_sp_s8(std::uint16_t sp, std::int8_t s8) {
+			auto u = static_cast<std::uint8_t>(s8);
+			regs.z_flag(false);
+			regs.n_flag(false);
+			regs.h_flag(((sp & 0x0F) + (u & 0x0F)) > 0x0F);
+			regs.c_flag(((sp & 0xFF) + (u & 0xFF)) > 0xFF);
+			return static_cast<std::uint16_t>(sp + static_cast<std::int16_t>(s8));
+		}
 
 		std::uint16_t sub(std::uint16_t a, std::uint16_t b) {
 			auto r = static_cast<std::uint32_t>(a) - b;
@@ -59,6 +68,14 @@ namespace gbemu {
 			return r;
 		}
 
+		std::uint16_t inc(std::uint16_t a) {
+			auto r = a + 1;
+			regs.z_flag(static_cast<std::uint16_t>(r) == 0);
+			regs.n_flag(false);
+			regs.h_flag((a & 0xFFF) == 0xFFF);
+			return r;
+		}		
+
 		std::uint8_t dec(std::uint8_t a) {
 			auto r = a - 1;
 			regs.z_flag(static_cast<std::uint8_t>(r) == 0);
@@ -67,6 +84,14 @@ namespace gbemu {
 			return r;
 		}		
 
+		std::uint16_t dec(std::uint16_t a) {
+			auto r = a - 1;
+			regs.z_flag(static_cast<std::uint16_t>(r) == 0);
+			regs.n_flag(true);
+			regs.h_flag((a & 0xFFF) == 0x0);
+			return r;
+		}
+
 		std::uint8_t rl(std::uint8_t a) {
 			std::uint8_t old_carry = regs.c_flag() ? 1 : 0;
 			std::uint8_t r = static_cast<std::uint8_t>((a << 1) | old_carry);
@@ -74,6 +99,72 @@ namespace gbemu {
 			regs.n_flag(false);
 			regs.h_flag(false);
 			regs.c_flag((a & 0x80) != 0);
+			return r;
+		}
+
+		std::uint8_t rlc(std::uint8_t a) {
+			std::uint8_t r = static_cast<std::uint8_t>((a << 1) | (a >> 7));
+			regs.z_flag(r == 0);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x80) != 0);
+			return r;
+		}
+
+		std::uint8_t rr(std::uint8_t a) {
+			std::uint8_t old_carry = regs.c_flag() ? 0x80 : 0x00;
+			std::uint8_t r = static_cast<std::uint8_t>((a >> 1) | old_carry);
+			regs.z_flag(r == 0);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x01) != 0);
+			return r;
+		}
+
+		std::uint8_t rrc(std::uint8_t a) {
+			std::uint8_t r = static_cast<std::uint8_t>((a >> 1) | (a << 7));
+			regs.z_flag(r == 0);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x01) != 0);
+			return r;
+		}
+
+		std::uint8_t rla(std::uint8_t a) {
+			std::uint8_t old_carry = regs.c_flag() ? 1 : 0;
+			std::uint8_t r = static_cast<std::uint8_t>((a << 1) | old_carry);
+			regs.z_flag(false);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x80) != 0);
+			return r;
+		}
+
+		std::uint8_t rlca(std::uint8_t a) {
+			std::uint8_t r = static_cast<std::uint8_t>((a << 1) | (a >> 7));
+			regs.z_flag(false);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x80) != 0);
+			return r;
+		}
+
+		std::uint8_t rra(std::uint8_t a) {
+			std::uint8_t old_carry = regs.c_flag() ? 0x80 : 0x00;
+			std::uint8_t r = static_cast<std::uint8_t>((a >> 1) | old_carry);
+			regs.z_flag(false);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x01) != 0);
+			return r;
+		}
+
+		std::uint8_t rrca(std::uint8_t a) {
+			std::uint8_t r = static_cast<std::uint8_t>((a >> 1) | (a << 7));
+			regs.z_flag(false);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x01) != 0);
 			return r;
 		}
 
