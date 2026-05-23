@@ -52,7 +52,7 @@ void core::init() {
     }
 }
 
-void core::step() {
+std::uint32_t core::step() {
     pc_ring[pc_idx] = regs.pc;
     pc_idx = (pc_idx + 1) % pc_ring.size();
     auto saved_pc = regs.pc;
@@ -65,6 +65,7 @@ void core::step() {
         }
 
         ppu.step(total);
+        return total;
     } catch (const gbemu_exception& e) {
         LOG_ERROR(gbemu::log::root(), "@PC={:04x} AF={:04x} BC={:04x} DE={:04x} HL={:04x} SP={:04x} : {}", saved_pc,
                   regs.af.u16, regs.bc.u16, regs.de.u16, regs.hl.u16, regs.sp, e.what());

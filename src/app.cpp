@@ -56,7 +56,7 @@ void Application::run() {
 
     core.init();
 
-    const int speed = 16;
+    //const int speed = 16;
 
     bool quit = false;
 
@@ -76,8 +76,11 @@ void Application::run() {
             }
         }
 
-        for (int i = 0; i < speed; i++) {
-            core.step();
+        // 4.19 MHz / 60 fps ≈ 69905 T-cycles per frame
+        constexpr std::uint32_t CYCLES_PER_FRAME = 70224;  // valore esatto DMG
+        std::uint32_t budget = 0;
+        while (budget < CYCLES_PER_FRAME) {
+            budget += core.step();   // step ora deve ritornare i T-cycle consumati
         }
 
         if (core.ppu.consume_frame_ready()) {

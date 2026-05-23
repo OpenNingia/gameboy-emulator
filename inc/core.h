@@ -52,7 +52,7 @@ namespace gbemu {
         // init registers
         void init();
         // execute an emulation step
-        void step();
+        std::uint32_t step();
     };
 } // namespace gbemu
 
