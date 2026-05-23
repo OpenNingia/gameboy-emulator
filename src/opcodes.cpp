@@ -911,49 +911,49 @@ IMPL_INSTR(sbc_a__hl_) {
 /* Take the logical AND for each bit of the contents of register A and the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(and_a) {
-    throw gbemu::gbemu_exception{"and_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, cpu.regs.af.hi);
 }
 
 // A0 AND B
 /* Take the logical AND for each bit of the contents of register B and the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(and_b) {
-    throw gbemu::gbemu_exception{"and_b not implemented"};
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, cpu.regs.bc.hi);
 }
 
 // A1 AND C
 /* Take the logical AND for each bit of the contents of register C and the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(and_c) {
-    throw gbemu::gbemu_exception{"and_c not implemented"};
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, cpu.regs.bc.lo);
 }
 
 // A2 AND D
 /* Take the logical AND for each bit of the contents of register D and the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(and_d) {
-    throw gbemu::gbemu_exception{"and_d not implemented"};
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, cpu.regs.de.hi);
 }
 
 // A3 AND E
 /* Take the logical AND for each bit of the contents of register E and the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(and_e) {
-    throw gbemu::gbemu_exception{"and_e not implemented"};
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, cpu.regs.de.lo);
 }
 
 // A4 AND H
 /* Take the logical AND for each bit of the contents of register H and the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(and_h) {
-    throw gbemu::gbemu_exception{"and_h not implemented"};
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, cpu.regs.hl.hi);
 }
 
 // A5 AND L
 /* Take the logical AND for each bit of the contents of register L and the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(and_l) {
-    throw gbemu::gbemu_exception{"and_l not implemented"};
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, cpu.regs.hl.lo);
 }
 
 // E6 AND d8
@@ -961,18 +961,15 @@ IMPL_INSTR(and_l) {
  * store the results in register A. */
 IMPL_INSTR(and_d8) {
     auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
-    cpu.regs.af.hi &= d8;
-    cpu.regs.z_flag(cpu.regs.af.hi == 0);
-    cpu.regs.n_flag(false);
-    cpu.regs.h_flag(true);
-    cpu.regs.c_flag(false);
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, d8);
 }
 
 // A6 AND (HL)
 /* Take the logical AND for each bit of the contents of memory specified by register pair HL and the contents of
  * register A, and store the results in register A. */
 IMPL_INSTR(and__hl_) {
-    throw gbemu::gbemu_exception{"and__hl_ not implemented"};
+    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, value);
 }
 
 // B7 OR A
@@ -3515,15 +3512,19 @@ IMPL_INSTR(cpl) {
 IMPL_INSTR(nop) {}
 
 // 3F CCF
-/* Flip the carry flag CY. */
+/* Flip the carry flag CY. N=0, H=0, Z invariato. */
 IMPL_INSTR(ccf) {
     cpu.regs.c_flag(!cpu.regs.c_flag());
+    cpu.regs.n_flag(false);
+    cpu.regs.h_flag(false);
 }
 
 // 37 SCF
-/* Set the carry flag CY. */
+/* Set the carry flag CY. N=0, H=0, Z invariato. */
 IMPL_INSTR(scf) {
     cpu.regs.c_flag(true);
+    cpu.regs.n_flag(false);
+    cpu.regs.h_flag(false);
 }
 
 // F3 DI

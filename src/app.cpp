@@ -26,6 +26,10 @@ static void load_bios(gbemu::core& core, const std::string& path) {
     core.load(c);
 }
 
+void Application::set_rom_file(std::string_view path) {
+    cfg.rom.path = path;
+}
+
 void Application::run() {
     gbemu::core core;
 
