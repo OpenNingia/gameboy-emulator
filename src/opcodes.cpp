@@ -575,7 +575,7 @@ IMPL_INSTR(add_a_l) { cpu.regs.af.hi = cpu.alu.add(cpu.regs.af.hi, cpu.regs.hl.l
 // C6 ADD A, d8
 /* Add the contents of the 8-bit immediate operand d8 to the contents of register A, and store the results in register A. */
 IMPL_INSTR(add_a_d8) {
-	auto d8 = cpu.mmu.read_u8(cpu.regs.pc);
+	auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
 	cpu.regs.af.hi = cpu.alu.add(cpu.regs.af.hi, d8);
 }
 
@@ -628,11 +628,11 @@ IMPL_INSTR(sub_a) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.af.hi)
 
 // 90 SUB B
 /* Subtract the contents of register B from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_b) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.bc.lo); }
+IMPL_INSTR(sub_b) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.bc.hi); }
 
 // 91 SUB C
 /* Subtract the contents of register C from the contents of register A, and store the results in register A. */
-IMPL_INSTR(sub_c) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.bc.hi); }
+IMPL_INSTR(sub_c) { cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, cpu.regs.bc.lo); }
 
 // 92 SUB D
 /* Subtract the contents of register D from the contents of register A, and store the results in register A. */
@@ -725,7 +725,7 @@ IMPL_INSTR(and_l) { throw gbemu::gbemu_exception{"and_l not implemented"}; }
 // E6 AND d8
 /* Take the logical AND for each bit of the contents of 8-bit immediate operand d8 and the contents of register A, and store the results in register A. */
 IMPL_INSTR(and_d8) {
-	auto d8 = cpu.mmu.read_u8(cpu.regs.pc);
+	auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
 	cpu.regs.af.hi &= d8;
 	cpu.regs.z_flag(cpu.regs.af.hi == 0);
 	cpu.regs.n_flag(false);

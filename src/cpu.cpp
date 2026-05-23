@@ -82,9 +82,12 @@ uint8_t cpu::tick() {
 	pc_idx = (pc_idx + 1) % pc_ring.size();	
 	auto saved_pc = regs.pc;
 
-	if (halted) {
+	if (halted || stopped) {
 		auto pending = mmu.hwr_if() & mmu.hwr_ie() & 0x1F;
-		if (pending) halted = false;
+		if (pending) { 
+			halted = false;
+			stopped = false;
+		}
 		ppu.tick(4);
 		return 4;
 	}	
