@@ -130,6 +130,15 @@ namespace gbemu {
 			return r;
 		}
 
+		std::uint8_t sla(std::uint8_t a) {
+			std::uint8_t r = static_cast<std::uint8_t>(a << 1);
+			regs.z_flag(r == 0);
+			regs.n_flag(false);
+			regs.h_flag(false);
+			regs.c_flag((a & 0x80) != 0);
+			return r;
+		}
+
 		std::uint8_t rla(std::uint8_t a) {
 			std::uint8_t old_carry = regs.c_flag() ? 1 : 0;
 			std::uint8_t r = static_cast<std::uint8_t>((a << 1) | old_carry);
