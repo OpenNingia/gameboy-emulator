@@ -1187,99 +1187,108 @@ IMPL_INSTR(sla__hl_) {
 
 // CB2F SRA A
 /* Shift the contents of register A to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register A is unchanged. */
-IMPL_INSTR(sra_a) { throw gbemu::gbemu_exception{"sra_a not implemented"}; }
+IMPL_INSTR(sra_a) { cpu.regs.af.hi = cpu.alu.sra(cpu.regs.af.hi); }
 
 // CB28 SRA B
 /* Shift the contents of register B to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register B is unchanged. */
-IMPL_INSTR(sra_b) { throw gbemu::gbemu_exception{"sra_b not implemented"}; }
+IMPL_INSTR(sra_b) { cpu.regs.bc.hi = cpu.alu.sra(cpu.regs.bc.hi); }
 
 // CB29 SRA C
 /* Shift the contents of register C to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register C is unchanged. */
-IMPL_INSTR(sra_c) { throw gbemu::gbemu_exception{"sra_c not implemented"}; }
+IMPL_INSTR(sra_c) { cpu.regs.bc.lo = cpu.alu.sra(cpu.regs.bc.lo); }
 
 // CB2A SRA D
 /* Shift the contents of register D to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register D is unchanged. */
-IMPL_INSTR(sra_d) { throw gbemu::gbemu_exception{"sra_d not implemented"}; }
+IMPL_INSTR(sra_d) { cpu.regs.de.hi = cpu.alu.sra(cpu.regs.de.hi); }
 
 // CB2B SRA E
 /* Shift the contents of register E to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register E is unchanged. */
-IMPL_INSTR(sra_e) { throw gbemu::gbemu_exception{"sra_e not implemented"}; }
+IMPL_INSTR(sra_e) { cpu.regs.de.lo = cpu.alu.sra(cpu.regs.de.lo); }
 
 // CB2C SRA H
 /* Shift the contents of register H to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register H is unchanged. */
-IMPL_INSTR(sra_h) { throw gbemu::gbemu_exception{"sra_h not implemented"}; }
+IMPL_INSTR(sra_h) { cpu.regs.hl.hi = cpu.alu.sra(cpu.regs.hl.hi); }
 
 // CB2D SRA L
 /* Shift the contents of register L to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register L is unchanged. */
-IMPL_INSTR(sra_l) { throw gbemu::gbemu_exception{"sra_l not implemented"}; }
+IMPL_INSTR(sra_l) { cpu.regs.hl.lo = cpu.alu.sra(cpu.regs.hl.lo); }
 
 // CB2E SRA (HL)
 /* Shift the contents of memory specified by register pair HL to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the memory location. The contents of bit 0 are copied to the CY flag, and bit 7 of (HL) is unchanged. */
-IMPL_INSTR(sra__hl_) { throw gbemu::gbemu_exception{"sra__hl_ not implemented"}; }
+IMPL_INSTR(sra__hl_) {
+	auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.sra(v));
+}
 
 // CB3F SRL A
 /* Shift the contents of register A to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register A is reset to 0. */
-IMPL_INSTR(srl_a) { throw gbemu::gbemu_exception{"srl_a not implemented"}; }
+IMPL_INSTR(srl_a) { cpu.regs.af.hi = cpu.alu.srl(cpu.regs.af.hi); }
 
 // CB38 SRL B
 /* Shift the contents of register B to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register B is reset to 0. */
-IMPL_INSTR(srl_b) { throw gbemu::gbemu_exception{"srl_b not implemented"}; }
+IMPL_INSTR(srl_b) { cpu.regs.bc.hi = cpu.alu.srl(cpu.regs.bc.hi); }
 
 // CB39 SRL C
 /* Shift the contents of register C to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register C is reset to 0. */
-IMPL_INSTR(srl_c) { throw gbemu::gbemu_exception{"srl_c not implemented"}; }
+IMPL_INSTR(srl_c) { cpu.regs.bc.lo = cpu.alu.srl(cpu.regs.bc.lo); }
 
 // CB3A SRL D
 /* Shift the contents of register D to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register D is reset to 0. */
-IMPL_INSTR(srl_d) { throw gbemu::gbemu_exception{"srl_d not implemented"}; }
+IMPL_INSTR(srl_d) { cpu.regs.de.hi = cpu.alu.srl(cpu.regs.de.hi); }
 
 // CB3B SRL E
 /* Shift the contents of register E to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register E is reset to 0. */
-IMPL_INSTR(srl_e) { throw gbemu::gbemu_exception{"srl_e not implemented"}; }
+IMPL_INSTR(srl_e) { cpu.regs.de.lo = cpu.alu.srl(cpu.regs.de.lo); }
 
 // CB3C SRL H
 /* Shift the contents of register H to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register H is reset to 0. */
-IMPL_INSTR(srl_h) { throw gbemu::gbemu_exception{"srl_h not implemented"}; }
+IMPL_INSTR(srl_h) { cpu.regs.hl.hi = cpu.alu.srl(cpu.regs.hl.hi); }
 
 // CB3D SRL L
 /* Shift the contents of register L to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the register. The contents of bit 0 are copied to the CY flag, and bit 7 of register L is reset to 0. */
-IMPL_INSTR(srl_l) { throw gbemu::gbemu_exception{"srl_l not implemented"}; }
+IMPL_INSTR(srl_l) { cpu.regs.hl.lo = cpu.alu.srl(cpu.regs.hl.lo); }
 
 // CB3E SRL (HL)
 /* Shift the contents of memory specified by register pair HL to the right. That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy operation) are copied to bit 5. The same operation is repeated in sequence for the rest of the memory location. The contents of bit 0 are copied to the CY flag, and bit 7 of (HL) is reset to 0. */
-IMPL_INSTR(srl__hl_) { throw gbemu::gbemu_exception{"srl__hl_ not implemented"}; }
+IMPL_INSTR(srl__hl_) {
+	auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.srl(v));
+}
 
 // CB37 SWAP A
 /* Shift the contents of the lower-order four bits (0-3) of register A to the higher-order four bits (4-7) of the register, and shift the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap_a) { throw gbemu::gbemu_exception{"swap_a not implemented"}; }
+IMPL_INSTR(swap_a) { cpu.regs.af.hi = cpu.alu.swap(cpu.regs.af.hi); }
 
 // CB30 SWAP B
 /* Shift the contents of the lower-order four bits (0-3) of register B to the higher-order four bits (4-7) of the register, and shift the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap_b) { throw gbemu::gbemu_exception{"swap_b not implemented"}; }
+IMPL_INSTR(swap_b) { cpu.regs.bc.hi = cpu.alu.swap(cpu.regs.bc.hi); }
 
 // CB31 SWAP C
 /* Shift the contents of the lower-order four bits (0-3) of register C to the higher-order four bits (4-7) of the register, and shift the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap_c) { throw gbemu::gbemu_exception{"swap_c not implemented"}; }
+IMPL_INSTR(swap_c) { cpu.regs.bc.lo = cpu.alu.swap(cpu.regs.bc.lo); }
 
 // CB32 SWAP D
 /* Shift the contents of the lower-order four bits (0-3) of register D to the higher-order four bits (4-7) of the register, and shift the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap_d) { throw gbemu::gbemu_exception{"swap_d not implemented"}; }
+IMPL_INSTR(swap_d) { cpu.regs.de.hi = cpu.alu.swap(cpu.regs.de.hi); }
 
 // CB33 SWAP E
 /* Shift the contents of the lower-order four bits (0-3) of register E to the higher-order four bits (4-7) of the register, and shift the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap_e) { throw gbemu::gbemu_exception{"swap_e not implemented"}; }
+IMPL_INSTR(swap_e) { cpu.regs.de.lo = cpu.alu.swap(cpu.regs.de.lo); }
 
 // CB34 SWAP H
 /* Shift the contents of the lower-order four bits (0-3) of register H to the higher-order four bits (4-7) of the register, and shift the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap_h) { throw gbemu::gbemu_exception{"swap_h not implemented"}; }
+IMPL_INSTR(swap_h) { cpu.regs.hl.hi = cpu.alu.swap(cpu.regs.hl.hi); }
 
 // CB35 SWAP L
 /* Shift the contents of the lower-order four bits (0-3) of register L to the higher-order four bits (4-7) of the register, and shift the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap_l) { throw gbemu::gbemu_exception{"swap_l not implemented"}; }
+IMPL_INSTR(swap_l) { cpu.regs.hl.lo = cpu.alu.swap(cpu.regs.hl.lo); }
 
 // CB36 SWAP (HL)
 /* Shift the contents of the lower-order four bits (0-3) of the contents of memory specified by register pair HL to the higher-order four bits (4-7) of that memory location, and shift the contents of the higher-order four bits to the lower-order four bits. */
-IMPL_INSTR(swap__hl_) { throw gbemu::gbemu_exception{"swap__hl_ not implemented"}; }
+IMPL_INSTR(swap__hl_) {
+	auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.swap(v));
+}
 
 // CB47 BIT 0, A
 /* Copy the complement of the contents of bit 0 in register A to the Z flag of the program status word (PSW). */
