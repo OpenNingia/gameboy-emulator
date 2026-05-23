@@ -174,3 +174,4 @@ void gbemu::mmu::initialize_registers() {
     hwr_ie(0x00);
     hwr_dma(0xFF);
 }
+

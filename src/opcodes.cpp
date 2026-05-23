@@ -846,63 +846,65 @@ IMPL_INSTR(sub__hl_) {
 /* Subtract the contents of register A and the CY flag from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sbc_a_a) {
-    throw gbemu::gbemu_exception{"sbc_a_a not implemented"};
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, cpu.regs.af.hi);
 }
 
 // 98 SBC A, B
 /* Subtract the contents of register B and the CY flag from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sbc_a_b) {
-    throw gbemu::gbemu_exception{"sbc_a_b not implemented"};
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, cpu.regs.bc.hi);
 }
 
 // 99 SBC A, C
 /* Subtract the contents of register C and the CY flag from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sbc_a_c) {
-    throw gbemu::gbemu_exception{"sbc_a_c not implemented"};
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, cpu.regs.bc.lo);
 }
 
 // 9A SBC A, D
 /* Subtract the contents of register D and the CY flag from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sbc_a_d) {
-    throw gbemu::gbemu_exception{"sbc_a_d not implemented"};
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, cpu.regs.de.hi);
 }
 
 // 9B SBC A, E
 /* Subtract the contents of register E and the CY flag from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sbc_a_e) {
-    throw gbemu::gbemu_exception{"sbc_a_e not implemented"};
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, cpu.regs.de.lo);
 }
 
 // 9C SBC A, H
 /* Subtract the contents of register H and the CY flag from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sbc_a_h) {
-    throw gbemu::gbemu_exception{"sbc_a_h not implemented"};
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, cpu.regs.hl.hi);
 }
 
 // 9D SBC A, L
 /* Subtract the contents of register L and the CY flag from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sbc_a_l) {
-    throw gbemu::gbemu_exception{"sbc_a_l not implemented"};
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, cpu.regs.hl.lo);
 }
 
 // DE SBC A, d8
 /* Subtract the contents of the 8-bit immediate operand d8 and the carry flag CY from the contents of register A, and
  * store the results in register A. */
 IMPL_INSTR(sbc_a_d8) {
-    throw gbemu::gbemu_exception{"sbc_a_d8 not implemented"};
+    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, d8);
 }
 
 // 9E SBC A, (HL)
 /* Subtract the contents of memory specified by register pair HL and the carry flag CY from the contents of register A,
  * and store the results in register A. */
 IMPL_INSTR(sbc_a__hl_) {
-    throw gbemu::gbemu_exception{"sbc_a__hl_ not implemented"};
+    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, value);
 }
 
 // A7 AND A
@@ -1241,7 +1243,9 @@ IMPL_INSTR(inc_l) {
 // 34 INC (HL)
 /* Increment the contents of memory specified by register pair HL by 1. */
 IMPL_INSTR(inc__hl_) {
-    cpu.regs.hl.u16 = cpu.alu.inc(cpu.regs.hl.u16);
+    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    v = cpu.alu.inc(v);
+    cpu.mmu.write_u8(cpu.regs.hl.u16, v);
 }
 
 // 3D DEC A
@@ -1289,7 +1293,9 @@ IMPL_INSTR(dec_l) {
 // 35 DEC (HL)
 /* Decrement the contents of memory specified by register pair HL by 1. */
 IMPL_INSTR(dec__hl_) {
-    cpu.regs.hl.u16 = cpu.alu.dec(cpu.regs.hl.u16);
+    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    v = cpu.alu.dec(v);
+    cpu.mmu.write_u8(cpu.regs.hl.u16, v);
 }
 
 // 09 ADD HL, BC

@@ -35,7 +35,7 @@ uint8_t cpu::step() {
         return 4;
     }
 
-    // EI delay: applica IME=true se EI eseguito al tick precedente
+    // EI delay: applica IME=true se EI eseguito allo step precedente
     if (ime_pending && !ei_just_executed) {
         interrupt_enabled = true;
         ime_pending = false;

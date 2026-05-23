@@ -66,11 +66,8 @@ namespace gbemu {
         }
 
         std::uint16_t inc(std::uint16_t a) {
-            auto r = a + 1;
-            regs.z_flag(static_cast<std::uint16_t>(r) == 0);
-            regs.n_flag(false);
-            regs.h_flag((a & 0xFFF) == 0xFFF);
-            return r;
+            // INC rr / INC SP: nessun flag affected (Z/N/H/C invariati).
+            return static_cast<std::uint16_t>(a + 1);
         }
 
         std::uint8_t dec(std::uint8_t a) {
@@ -82,11 +79,8 @@ namespace gbemu {
         }
 
         std::uint16_t dec(std::uint16_t a) {
-            auto r = a - 1;
-            regs.z_flag(static_cast<std::uint16_t>(r) == 0);
-            regs.n_flag(true);
-            regs.h_flag((a & 0xFFF) == 0x0);
-            return r;
+            // DEC rr / DEC SP: nessun flag affected (Z/N/H/C invariati).
+            return static_cast<std::uint16_t>(a - 1);
         }
 
         std::uint8_t rl(std::uint8_t a) {
