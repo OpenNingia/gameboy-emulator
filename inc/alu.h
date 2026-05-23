@@ -243,6 +243,37 @@ namespace gbemu {
 			regs.c_flag(false);
 			return r;
 		}
+
+		std::uint8_t and_(std::uint8_t a, std::uint8_t b) {
+			auto r = a &= b;
+			regs.z_flag(r == 0);
+			regs.n_flag(false);
+			regs.h_flag(true);
+			regs.c_flag(false);
+			return r;
+		}
+
+		std::uint8_t daa(std::uint8_t a) {
+			std::uint8_t correction = 0;
+			if (regs.h_flag() || (!regs.n_flag() && (a & 0xF) > 9)) {
+				correction |= 0x06;
+			}
+			if (regs.c_flag() || (!regs.n_flag() && a > 0x99)) {
+				correction |= 0x60;
+				regs.c_flag(true);
+			}
+			a += regs.n_flag() ? -correction : correction;
+			regs.z_flag(a == 0);
+			regs.h_flag(false);
+			return a;
+		}
+
+		std::uint8_t cpl(std::uint8_t a) {
+			auto r = ~a;
+			regs.n_flag(true);
+			regs.h_flag(true);
+			return r;
+		}
 	
 	private:
 		registers& regs;

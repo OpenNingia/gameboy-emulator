@@ -718,27 +718,33 @@ IMPL_INSTR(or_c) { cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, cpu.regs.bc.lo);
 
 // B2 OR D
 /* Take the logical OR for each bit of the contents of register D and the contents of register A, and store the results in register A. */
-IMPL_INSTR(or_d) { throw gbemu::gbemu_exception{"or_d not implemented"}; }
+IMPL_INSTR(or_d) { cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, cpu.regs.de.hi); }
 
 // B3 OR E
 /* Take the logical OR for each bit of the contents of register E and the contents of register A, and store the results in register A. */
-IMPL_INSTR(or_e) { throw gbemu::gbemu_exception{"or_e not implemented"}; }
+IMPL_INSTR(or_e) { cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, cpu.regs.de.lo); }
 
 // B4 OR H
 /* Take the logical OR for each bit of the contents of register H and the contents of register A, and store the results in register A. */
-IMPL_INSTR(or_h) { throw gbemu::gbemu_exception{"or_h not implemented"}; }
+IMPL_INSTR(or_h) { cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, cpu.regs.hl.hi); }
 
 // B5 OR L
 /* Take the logical OR for each bit of the contents of register L and the contents of register A, and store the results in register A. */
-IMPL_INSTR(or_l) { throw gbemu::gbemu_exception{"or_l not implemented"}; }
+IMPL_INSTR(or_l) { cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, cpu.regs.hl.lo); }
 
 // F6 OR d8
 /* Take the logical OR for each bit of the contents of the 8-bit immediate operand d8 and the contents of register A, and store the results in register A. */
-IMPL_INSTR(or_d8) { throw gbemu::gbemu_exception{"or_d8 not implemented"}; }
+IMPL_INSTR(or_d8) { 
+	auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+	cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, d8);
+}
 
 // B6 OR (HL)
 /* Take the logical OR for each bit of the contents of memory specified by register pair HL and the contents of register A, and store the results in register A. */
-IMPL_INSTR(or__hl_) { throw gbemu::gbemu_exception{"or__hl_ not implemented"}; }
+IMPL_INSTR(or__hl_) {
+	auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+	cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, value);
+}
 
 // AF XOR A
 /* Take the logical exclusive-OR for each bit of the contents of register A and the contents of register A, and store the results in register A. */
@@ -2068,30 +2074,51 @@ The second byte of the object code (immediately following the opcode) correspond
 IMPL_INSTR(jp_a16) { 
 	auto nn = cpu.mmu.read_u16(cpu.regs.pc);
 	cpu.regs.pc = nn;
-
-	// clock.m(3)
-	// clock.t(16)
 }
 
 // C2 JP NZ, a16
 /* Load the 16-bit immediate operand a16 into the program counter PC if the Z flag is 0. If the Z flag is 0, then the subsequent instruction starts at address a16. If not, the contents of PC are incremented, and the next instruction following the current JP instruction is executed (as usual).
 The second byte of the object code (immediately following the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to the higher-order byte (bits 8-15). */
-IMPL_INSTR(jp_nz_a16) { throw gbemu::gbemu_exception{"jp_nz_a16 not implemented"}; }
+IMPL_INSTR(jp_nz_a16) { 
+	auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+	if (!cpu.regs.z_flag()) {
+		cpu.regs.pc = nn;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
+}
 
 // CA JP Z, a16
 /* Load the 16-bit immediate operand a16 into the program counter PC if the Z flag is 1. If the Z flag is 1, then the subsequent instruction starts at address a16. If not, the contents of PC are incremented, and the next instruction following the current JP instruction is executed (as usual).
 The second byte of the object code (immediately following the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to the higher-order byte (bits 8-15). */
-IMPL_INSTR(jp_z_a16) { throw gbemu::gbemu_exception{"jp_z_a16 not implemented"}; }
+IMPL_INSTR(jp_z_a16) { 
+	auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+	if (cpu.regs.z_flag()) {
+		cpu.regs.pc = nn;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
+}
 
 // D2 JP NC, a16
 /* Load the 16-bit immediate operand a16 into the program counter PC if the CY flag is 0. If the CY flag is 0, then the subsequent instruction starts at address a16. If not, the contents of PC are incremented, and the next instruction following the current JP instruction is executed (as usual).
 The second byte of the object code (immediately following the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to the higher-order byte (bits 8-15). */
-IMPL_INSTR(jp_nc_a16) { throw gbemu::gbemu_exception{"jp_nc_a16 not implemented"}; }
+IMPL_INSTR(jp_nc_a16) { 
+	auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+	if (!cpu.regs.c_flag()) {
+		cpu.regs.pc = nn;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
+}
 
 // DA JP C, a16
 /* Load the 16-bit immediate operand a16 into the program counter PC if the CY flag is 1. If the CY flag is 1, then the subsequent instruction starts at address a16. If not, the contents of PC are incremented, and the next instruction following the current JP instruction is executed (as usual).
 The second byte of the object code (immediately following the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to the higher-order byte (bits 8-15). */
-IMPL_INSTR(jp_c_a16) { throw gbemu::gbemu_exception{"jp_c_a16 not implemented"}; }
+IMPL_INSTR(jp_c_a16) { 
+	auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+	if (cpu.regs.c_flag()) {
+		cpu.regs.pc = nn;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
+}
 
 // 18 JR s8
 /* Jump s8 steps from the current address in the program counter (PC). (Jump relative.) */
@@ -2122,15 +2149,27 @@ IMPL_INSTR(jr_z_s8) {
 
 // 30 JR NC, s8
 /* If the CY flag is 0, jump s8 steps from the current address stored in the program counter (PC). If not, the instruction following the current JP instruction is executed (as usual). */
-IMPL_INSTR(jr_nc_s8) { throw gbemu::gbemu_exception{"jr_nc_s8 not implemented"}; }
+IMPL_INSTR(jr_nc_s8) { 
+	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+	if (!cpu.regs.c_flag()) {
+		cpu.regs.pc += s8;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
+}
 
 // 38 JR C, s8
 /* If the CY flag is 1, jump s8 steps from the current address stored in the program counter (PC). If not, the instruction following the current JP instruction is executed (as usual). */
-IMPL_INSTR(jr_c_s8) { throw gbemu::gbemu_exception{"jr_c_s8 not implemented"}; }
+IMPL_INSTR(jr_c_s8) { 
+	auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+	if (cpu.regs.c_flag()) {
+		cpu.regs.pc += s8;
+		cpu.extra_cycles = this->cycles_taken - this->cycles;
+	}
+}
 
 // E9 JP HL
 /* Load the contents of register pair HL into the program counter PC. The next instruction is fetched from the location specified by the new value of PC. */
-IMPL_INSTR(jp_hl) { throw gbemu::gbemu_exception{"jp_hl not implemented"}; }
+IMPL_INSTR(jp_hl) { cpu.regs.pc = cpu.regs.hl.u16; }
 
 // CD CALL a16
 /* In memory, push the program counter PC value corresponding to the address following the CALL instruction to the 2 bytes following the byte specified by the current stack pointer SP. Then load the 16-bit immediate operand a16 into PC.
@@ -2299,11 +2338,11 @@ IMPL_INSTR(rst_7) { throw gbemu::gbemu_exception{"rst_7 not implemented"}; }
 
 // 27 DAA
 /* Adjust the accumulator (register A) too a binary-coded decimal (BCD) number after BCD addition and subtraction operations. */
-IMPL_INSTR(daa) { throw gbemu::gbemu_exception{"daa not implemented"}; }
+IMPL_INSTR(daa) { cpu.regs.af.hi = cpu.alu.daa(cpu.regs.af.hi); }
 
 // 2F CPL
 /* Take the one's complement (i.e., flip all bits) of the contents of register A. */
-IMPL_INSTR(cpl) { throw gbemu::gbemu_exception{"cpl not implemented"}; }
+IMPL_INSTR(cpl) { cpu.regs.af.hi = cpu.alu.cpl(cpu.regs.af.hi); }
 
 // 00 NOP
 /* Only advances the program counter by 1. Performs no other operations that would have an effect. */
@@ -2311,11 +2350,11 @@ IMPL_INSTR(nop) { }
 
 // 3F CCF
 /* Flip the carry flag CY. */
-IMPL_INSTR(ccf) { throw gbemu::gbemu_exception{"ccf not implemented"}; }
+IMPL_INSTR(ccf) { cpu.regs.c_flag(!cpu.regs.c_flag()); }
 
 // 37 SCF
 /* Set the carry flag CY. */
-IMPL_INSTR(scf) { throw gbemu::gbemu_exception{"scf not implemented"}; }
+IMPL_INSTR(scf) { cpu.regs.c_flag(true); }
 
 // F3 DI
 /* Reset the interrupt master enable (IME) flag and prohibit maskable interrupts.
