@@ -1,7 +1,7 @@
-#include <serial.h>
-#include <mmu.h>
-
 #include <cstdio>
+
+#include <mmu.h>
+#include <serial.h>
 
 using namespace gbemu;
 

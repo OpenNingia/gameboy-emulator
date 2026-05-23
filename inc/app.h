@@ -4,10 +4,11 @@
 
 class Application {
 public:
-	Application();
-	~Application();
+    Application();
+    ~Application();
 
-	void run();
+    void run();
+
 private:
-	gbemu::config cfg;
+    gbemu::config cfg;
 };

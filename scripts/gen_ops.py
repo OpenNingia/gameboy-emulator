@@ -169,6 +169,8 @@ HEADER_PREAMBLE = """// Generated from scripts/opcodes.json (https://gbdev.io/gb
 // Hand-written instruction bodies live in src/opcodes.cpp and are NOT
 // touched by the generator.
 
+// clang-format off
+
 #pragma once
 #ifndef _H_OPCODES_H_
 #define _H_OPCODES_H_

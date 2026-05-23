@@ -1,5 +1,6 @@
-#include <irq.h>
 #include <bit>
+
+#include <irq.h>
 
 using namespace gbemu;
 

@@ -1,55 +1,44 @@
+#include <fstream>
+
+#include <SDL2/SDL.h>
 #include <app.h>
 #include <core.h>
 #include <exc.hpp>
 
-#include <SDL2/SDL.h>
-
-#include <fstream>
-
 Application::Application() : cfg("cfg/gbemu.conf") {
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
-		throw gbemu::gbemu_exception{ "SDL Initialization failed!" };
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
+        throw gbemu::gbemu_exception{"SDL Initialization failed!"};
 }
 
 Application::~Application() {
-	SDL_Quit();
+    SDL_Quit();
 }
 
-static void load_rom(gbemu::core& core, const std::string& path)
-{
+static void load_rom(gbemu::core& core, const std::string& path) {
     gbemu::rom_file c{};
     c.load_from(path);
     core.load(c);
 }
 
-static void load_bios(gbemu::core& core, const std::string& path)
-{
+static void load_bios(gbemu::core& core, const std::string& path) {
     gbemu::bios_file c{};
     c.load_from(path);
     core.load(c);
 }
 
 void Application::run() {
-
     gbemu::core core;
 
-    auto window = SDL_CreateWindow(
-        "GbEmu",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        cfg.win.width, cfg.win.height,
-        SDL_WINDOW_SHOWN
-    );
+    auto window = SDL_CreateWindow("GbEmu", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, cfg.win.width,
+                                   cfg.win.height, SDL_WINDOW_SHOWN);
 
     if (!window)
-        throw gbemu::gbemu_exception{ "SDL Window creation failed!" };
+        throw gbemu::gbemu_exception{"SDL Window creation failed!"};
 
-    auto renderer = SDL_CreateRenderer(
-        window,
-        -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    auto renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
     if (!renderer)
-        throw gbemu::gbemu_exception{ "SDL Renderer creation failed!" };
+        throw gbemu::gbemu_exception{"SDL Renderer creation failed!"};
 
     SDL_RenderSetLogicalSize(renderer, 160, 144);
 
@@ -63,20 +52,14 @@ void Application::run() {
 
     core.init();
 
-
     const int speed = 16;
 
     bool quit = false;
 
     // texture
-    auto texture = SDL_CreateTexture(
-        renderer,
-        SDL_PIXELFORMAT_ARGB8888,
-        SDL_TEXTUREACCESS_STREAMING,
-        160, 144);
+    auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 160, 144);
 
     std::array<std::uint32_t, 160 * 144> framebuffer{};
-
 
     while (!quit) {
         SDL_Event e;
@@ -84,8 +67,7 @@ void Application::run() {
             if (e.type == SDL_QUIT) {
                 quit = true;
                 break;
-            }
-            else if (e.type == SDL_KEYDOWN) {
+            } else if (e.type == SDL_KEYDOWN) {
                 // game.input(e.key.keysym.scancode);
             }
         }

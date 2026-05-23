@@ -1,8 +1,7 @@
 #include <app.h>
 #include <log.h>
 
-int main()
-{
+int main() {
     gbemu::log::init();
     try {
         Application app;

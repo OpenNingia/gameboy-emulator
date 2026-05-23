@@ -1,21 +1,21 @@
 #pragma once
 #ifndef _H_IRQ_H_
-#define _H_IRQ_H_
+#    define _H_IRQ_H_
 
-#include <cpu.h>
-#include <mmu.h>
+#    include <cpu.h>
+#    include <mmu.h>
 
 namespace gbemu {
     struct irq {
         irq(cpu& c, mmu& m) : cpu(c), mmu(m) {}
-        
+
         // returns true if an interrupt was dispatched
         bool dispatch();
 
-        private:
-            cpu& cpu;
-            mmu& mmu;
+    private:
+        cpu& cpu;
+        mmu& mmu;
     };
-}
+} // namespace gbemu
 
 #endif // _H_IRQ_H_
