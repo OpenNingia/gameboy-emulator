@@ -2292,49 +2292,73 @@ IMPL_INSTR(ret_c) {
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 1th byte of page 0 memory addresses, 0x00. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x00 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_0) { throw gbemu::gbemu_exception{"rst_0 not implemented"}; }
+IMPL_INSTR(rst_0) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0000;
+}
 
 // CF RST 1
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 2th byte of page 0 memory addresses, 0x08. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x08 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_1) { throw gbemu::gbemu_exception{"rst_1 not implemented"}; }
+IMPL_INSTR(rst_1) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0008;
+}
 
 // D7 RST 2
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 3th byte of page 0 memory addresses, 0x10. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x10 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_2) { throw gbemu::gbemu_exception{"rst_2 not implemented"}; }
+IMPL_INSTR(rst_2) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0010;
+}
 
 // DF RST 3
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 4th byte of page 0 memory addresses, 0x18. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x18 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_3) { throw gbemu::gbemu_exception{"rst_3 not implemented"}; }
+IMPL_INSTR(rst_3) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0018;
+}
 
 // E7 RST 4
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 5th byte of page 0 memory addresses, 0x20. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x20 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_4) { throw gbemu::gbemu_exception{"rst_4 not implemented"}; }
+IMPL_INSTR(rst_4) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0020;
+}
 
 // EF RST 5
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 6th byte of page 0 memory addresses, 0x28. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x28 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_5) { throw gbemu::gbemu_exception{"rst_5 not implemented"}; }
+IMPL_INSTR(rst_5) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0028;
+}
 
 // F7 RST 6
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 7th byte of page 0 memory addresses, 0x30. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x30 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_6) { throw gbemu::gbemu_exception{"rst_6 not implemented"}; }
+IMPL_INSTR(rst_6) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0030;
+}
 
 // FF RST 7
 /* Push the current value of the program counter PC onto the memory stack, and load into PC the 8th byte of page 0 memory addresses, 0x38. The next instruction is fetched from the address specified by the new content of PC (as usual).
 With the push, the contents of the stack pointer SP are decremented by 1, and the higher-order byte of PC is loaded in the memory address specified by the new SP value. The value of SP is then again decremented by 1, and the lower-order byte of the PC is loaded in the memory address specified by that value of SP.
 The RST instruction can be used to jump to 1 of 8 addresses. Because all ofthe addresses are held in page 0 memory, 0x00 is loaded in the higher-orderbyte of the PC, and 0x38 is loaded in the lower-order byte. */
-IMPL_INSTR(rst_7) { throw gbemu::gbemu_exception{"rst_7 not implemented"}; }
+IMPL_INSTR(rst_7) { 
+	cpu.push(cpu.regs.pc);
+	cpu.regs.pc = 0x0038;
+}
 
 // 27 DAA
 /* Adjust the accumulator (register A) too a binary-coded decimal (BCD) number after BCD addition and subtraction operations. */
