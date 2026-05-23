@@ -140,6 +140,11 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val)
 					sram[i] = read_u8(src + i);
 				}
 			}
+			else if (addr == 0xFF50 && val != 0) {
+				// boot ROM disable: unmap BIOS from 0x0000-0x00FF.
+				// One-shot on DMG: any nonzero write locks it off until reset.
+				bios_accessible = false;
+			}
 		}
 		// zram
 		else
