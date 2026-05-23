@@ -1,5 +1,5 @@
 #include <app.h>
-#include <cpu.h>
+#include <core.h>
 #include <exc.hpp>
 
 #include <SDL2/SDL.h>
@@ -15,14 +15,14 @@ Application::~Application() {
 	SDL_Quit();
 }
 
-static void load_rom(gbemu::cpu& core, const std::string& path)
+static void load_rom(gbemu::core& core, const std::string& path)
 {
     gbemu::rom_file c{};
     c.load_from(path);
     core.load(c);
 }
 
-static void load_bios(gbemu::cpu& core, const std::string& path)
+static void load_bios(gbemu::core& core, const std::string& path)
 {
     gbemu::bios_file c{};
     c.load_from(path);
@@ -31,7 +31,7 @@ static void load_bios(gbemu::cpu& core, const std::string& path)
 
 void Application::run() {
 
-    gbemu::cpu core;
+    gbemu::core core;
 
     auto window = SDL_CreateWindow(
         "GbEmu",
@@ -91,7 +91,7 @@ void Application::run() {
         }
 
         for (int i = 0; i < speed; i++) {
-            core.tick();
+            core.step();
         }
 
         if (core.ppu.consume_frame_ready()) {
