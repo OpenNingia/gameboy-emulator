@@ -1,10 +1,11 @@
 #include <gb_layout.h>
+#include <irq.h>
 #include <joypad.h>
 #include <mmu.h>
 
 using namespace gbemu;
 
-joypad::joypad(mmu& m) : mmu_(m) {
+joypad::joypad(mmu& m, irq& i) : mmu_(m), irq_(i) {
     mmu_.add_mmio_write_handler(gb::io::P1, [this](std::uint8_t v) { on_p1_write(v); });
     refresh_p1();
 }
@@ -40,7 +41,7 @@ void joypad::set_button(button b, bool pressed) {
         const bool col_selected =
             is_dpad ? ((sel & gb::p1::dpad_select_n) == 0) : ((sel & gb::p1::button_select_n) == 0);
         if (col_selected)
-            mmu_.io_store(gb::io::IF, static_cast<std::uint8_t>(mmu_.io_read(gb::io::IF) | gb::irq_bit::joypad));
+            irq_.request(irq::source::joypad);
     }
 }
 

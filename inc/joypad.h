@@ -6,6 +6,7 @@
 
 namespace gbemu {
     struct mmu;
+    struct irq;
 
     // DMG joypad ($FF00, "P1/JOYP"). The host UI (Application) calls
     // set_button() on each SDL_KEYDOWN/SDL_KEYUP (and SDL_CONTROLLERBUTTON*)
@@ -29,7 +30,7 @@ namespace gbemu {
             start = 7,
         };
 
-        explicit joypad(mmu& m);
+        joypad(mmu& m, irq& i);
 
         // Transition a single key. A 1→0 transition (press) on any line of
         // the currently-selected column also raises the joypad IRQ
@@ -42,6 +43,7 @@ namespace gbemu {
         void refresh_p1();
 
         mmu& mmu_;
+        irq& irq_;
         std::uint8_t dpad_{0}; // bit n set ⇒ button n (right/left/up/down) held
         std::uint8_t btns_{0}; // bit n set ⇒ button (n+4) (a/b/select/start) held
     };

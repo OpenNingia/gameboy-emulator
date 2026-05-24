@@ -5,6 +5,11 @@
 
 using namespace gbemu;
 
+void irq::request(source s) {
+    const auto bit = static_cast<std::uint8_t>(1u << static_cast<std::uint8_t>(s));
+    mmu.hwr_if(static_cast<std::uint8_t>(mmu.hwr_if() | bit));
+}
+
 bool irq::dispatch() {
     const auto pending = static_cast<std::uint8_t>(mmu.hwr_if() & mmu.hwr_ie() & gb::irq_bit::all_mask);
     if (cpu.interrupt_enabled && pending) {

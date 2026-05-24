@@ -1,10 +1,11 @@
 #include <gb_layout.h>
+#include <irq.h>
 #include <mmu.h>
 #include <serial.h>
 
 using namespace gbemu;
 
-serial::serial(mmu& m) : mmu_(m) {
+serial::serial(mmu& m, irq& i) : mmu_(m), irq_(i) {
     m.add_mmio_write_handler(gb::io::SC, [this](std::uint8_t v) { on_sc_write(v); });
 }
 
@@ -27,6 +28,6 @@ void serial::on_sc_write(std::uint8_t val) {
     // val == 0x81: bit 7 = transfer start, bit 0 = internal clock source.
     if (val == 0x81) {
         mmu_.hwr_sc(0x01); // clear bit 7 (transfer complete), leave clock-source bit set
-        mmu_.hwr_if(mmu_.hwr_if() | gb::irq_bit::serial);
+        irq_.request(irq::source::serial);
     }
 }

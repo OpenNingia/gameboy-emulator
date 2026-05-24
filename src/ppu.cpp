@@ -1,11 +1,12 @@
 #include <algorithm>
 
 #include <gb_layout.h>
+#include <irq.h>
 #include <ppu.h>
 
 using namespace gbemu;
 
-ppu::ppu(mmu& m) : mmu_(m) {}
+ppu::ppu(mmu& m, irq& i) : mmu_(m), irq_(i) {}
 
 void ppu::step(std::uint32_t t_cycles) {
     const auto lcdc = mmu_.hwr_lcdc();
@@ -76,7 +77,7 @@ std::uint32_t ppu::dots_for(mode_e mode) const {
 void ppu::enter_oam_scan() {
     set_stat_mode(mode_e::OAM_SCAN);
     if (mmu_.hwr_stat() & gb::stat::mode2_irq_enable)
-        request_irq(gb::irq_bit::lcd_stat);
+        irq_.request(irq::source::lcd_stat);
 }
 
 void ppu::enter_drawing() {
@@ -92,14 +93,14 @@ void ppu::enter_hblank() {
     render_sprites_scanline(ly);
     set_stat_mode(mode_e::HBLANK);
     if (mmu_.hwr_stat() & gb::stat::mode0_irq_enable)
-        request_irq(gb::irq_bit::lcd_stat);
+        irq_.request(irq::source::lcd_stat);
 }
 
 void ppu::enter_vblank() {
     set_stat_mode(mode_e::VBLANK);
-    request_irq(gb::irq_bit::vblank);
+    irq_.request(irq::source::vblank);
     if (mmu_.hwr_stat() & gb::stat::mode1_irq_enable)
-        request_irq(gb::irq_bit::lcd_stat);
+        irq_.request(irq::source::lcd_stat);
     frame_ready = true;
 }
 
@@ -332,11 +333,7 @@ void ppu::update_lyc_coincidence() {
     const bool coinc = (mmu_.hwr_ly() == mmu_.hwr_lyc());
     mmu_.hwr_stat((mmu_.hwr_stat() & ~gb::stat::lyc_coincidence) | (coinc ? gb::stat::lyc_coincidence : 0));
     if (coinc && (mmu_.hwr_stat() & gb::stat::lyc_irq_enable))
-        request_irq(gb::irq_bit::lcd_stat);
-}
-
-void ppu::request_irq(std::uint8_t mask) {
-    mmu_.hwr_if(mmu_.hwr_if() | mask);
+        irq_.request(irq::source::lcd_stat);
 }
 
 bool ppu::consume_frame_ready() {

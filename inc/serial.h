@@ -6,12 +6,14 @@
 
 namespace gbemu {
     struct mmu;
+    struct irq;
 
     struct serial {
-        explicit serial(mmu& m);
+        serial(mmu& m, irq& i);
 
     private:
         mmu& mmu_;
+        irq& irq_;
         void on_sc_write(std::uint8_t val);
     };
 } // namespace gbemu

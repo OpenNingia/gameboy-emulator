@@ -24,16 +24,16 @@ namespace gbemu {
 
     struct core {
         core()
-            : regs(),
+            : cpu(mmu, regs),
+              regs(),
               mmu(),
-              ppu(mmu),
-              cpu(mmu, regs),
+              ppu(mmu, irq),
               irq(cpu, mmu),
-              serial(mmu),
+              serial(mmu, irq),
               dma(mmu),
-              timer(mmu),
+              timer(mmu, irq),
               apu(mmu),
-              joypad(mmu),
+              joypad(mmu, irq),
               pc_ring(),
               pc_idx(0) {}
 

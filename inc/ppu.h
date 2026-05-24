@@ -7,6 +7,8 @@
 #include <mmu.h>
 
 namespace gbemu {
+    struct irq;
+
     struct ppu {
         // PPU mode — underlying values match bits 0-1 of the STAT register,
         // so writing the mode to STAT is just `(stat & ~mode_mask) | uint8_t(mode)`.
@@ -17,12 +19,13 @@ namespace gbemu {
             DRAWING = 3,
         };
 
-        explicit ppu(mmu& m);
+        ppu(mmu& m, irq& i);
         void step(std::uint32_t t_cycles);
         const std::uint32_t* framebuffer() const { return fb.data(); }
         bool consume_frame_ready(); // edge-trigger SDL present
     private:
         mmu& mmu_;
+        irq& irq_;
         mode_e mode{mode_e::OAM_SCAN};
         std::uint32_t dots_in_mode{0};
         bool frame_ready{false};
@@ -54,7 +57,5 @@ namespace gbemu {
         void render_sprites_scanline(std::uint8_t ly);
         void set_stat_mode(mode_e new_mode);
         void update_lyc_coincidence();
-        // Raise one or more IRQs in IF; pass a gb::irq_bit::* mask.
-        void request_irq(std::uint8_t mask);
     };
 } // namespace gbemu

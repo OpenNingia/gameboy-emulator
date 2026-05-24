@@ -7,8 +7,10 @@
 #    include <mmu.h>
 
 namespace gbemu {
+    struct irq;
+
     struct timer {
-        explicit timer(mmu& mmu);
+        timer(mmu& mmu, irq& i);
 
         // step the timer and return the number of cycles consumed
         void step(std::uint32_t cycles);
@@ -18,6 +20,7 @@ namespace gbemu {
 
     private:
         mmu& mmu_;
+        irq& irq_;
         std::uint32_t div_cnt{0};
         std::uint32_t tima_cnt{0};
     };

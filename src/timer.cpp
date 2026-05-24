@@ -1,9 +1,10 @@
 #include <gb_layout.h>
+#include <irq.h>
 #include <timer.h>
 
 using namespace gbemu;
 
-timer::timer(mmu& m) : mmu_(m) {
+timer::timer(mmu& m, irq& i) : mmu_(m), irq_(i) {
     m.add_mmio_write_handler(gb::io::DIV, [this](std::uint8_t v) { div_trigger(v); });
 }
 
@@ -37,7 +38,7 @@ void timer::step(std::uint32_t cycles) {
         const auto tima = mmu_.hwr_tima() + 1;
         if (tima > 0xFF) {
             mmu_.hwr_tima(mmu_.hwr_tma());
-            mmu_.hwr_if(mmu_.hwr_if() | gb::irq_bit::timer);
+            irq_.request(irq::source::timer);
         } else {
             mmu_.hwr_tima(static_cast<std::uint8_t>(tima));
         }
