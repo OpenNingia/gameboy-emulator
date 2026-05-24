@@ -55,7 +55,8 @@ namespace gbemu {
         // ----------------------------------------------------------------
         class no_mbc final : public mbc {
         public:
-            no_mbc(std::vector<std::uint8_t> rom, std::size_t ram_bytes) : rom_(std::move(rom)), ram_(ram_bytes, 0u) {}
+            no_mbc(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type)
+                : rom_(std::move(rom)), ram_(ram_bytes, 0u), type_(type) {}
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x8000) {
@@ -78,9 +79,19 @@ namespace gbemu {
                 // Writes to 0x0000-0x7FFF on a no-MBC cart are ignored.
             }
 
+            mbc_debug_state debug_state() const override {
+                // No banking: slot1 is fixed at bank 1, RAM (if present) at bank 0.
+                // Without an enable line in hardware we treat any cart-RAM as always
+                // accessible — matches what the read/write methods actually do.
+                return mbc_debug_state{type_, /*rom_bank*/ static_cast<std::uint8_t>(1), /*ram_bank*/ 0,
+                                       /*ram_enabled*/ !ram_.empty(),
+                                       /*mode*/ 0};
+            }
+
         private:
             std::vector<std::uint8_t> rom_;
             std::vector<std::uint8_t> ram_;
+            std::uint8_t type_{0};
         };
 
         // ----------------------------------------------------------------
@@ -104,8 +115,11 @@ namespace gbemu {
         // ----------------------------------------------------------------
         class mbc1 final : public mbc {
         public:
-            mbc1(std::vector<std::uint8_t> rom, std::size_t ram_bytes)
-                : rom_(std::move(rom)), ram_(ram_bytes, 0u), rom_bank_mask_(rom_bank_mask_for(rom_.size())) {}
+            mbc1(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type)
+                : rom_(std::move(rom)),
+                  ram_(ram_bytes, 0u),
+                  rom_bank_mask_(rom_bank_mask_for(rom_.size())),
+                  type_(type) {}
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x4000) {
@@ -145,6 +159,12 @@ namespace gbemu {
                 }
             }
 
+            mbc_debug_state debug_state() const override {
+                const auto bank = static_cast<std::uint8_t>(((upper_bits_ << 5) | lower_bits_) &
+                                                            (rom_bank_mask_ ? rom_bank_mask_ : 1));
+                return mbc_debug_state{type_, bank, upper_bits_, ram_enabled_, mode_};
+            }
+
         private:
             std::uint8_t rom_byte(std::size_t offset) const {
                 return offset < rom_.size() ? rom_[offset] : std::uint8_t{0xFF};
@@ -165,6 +185,7 @@ namespace gbemu {
             std::uint8_t mode_{0};
             bool ram_enabled_{false};
             std::uint8_t rom_bank_mask_{0};
+            std::uint8_t type_{0};
         };
 
     } // namespace
@@ -185,14 +206,14 @@ namespace gbemu {
 
         switch (type) {
             case 0x00: // ROM ONLY
-                return std::make_unique<no_mbc>(std::move(rom), 0);
+                return std::make_unique<no_mbc>(std::move(rom), 0, type);
             case 0x08: // ROM + RAM
             case 0x09: // ROM + RAM + BATTERY
-                return std::make_unique<no_mbc>(std::move(rom), ram_size);
+                return std::make_unique<no_mbc>(std::move(rom), ram_size, type);
             case 0x01: // MBC1
             case 0x02: // MBC1 + RAM
             case 0x03: // MBC1 + RAM + BATTERY
-                return std::make_unique<mbc1>(std::move(rom), ram_size);
+                return std::make_unique<mbc1>(std::move(rom), ram_size, type);
             default:
                 throw gbemu_exception{"Unsupported cartridge type"};
         }

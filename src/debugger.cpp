@@ -283,16 +283,25 @@ void debugger::dump_ppu(std::ostream& os) const {
 }
 
 void debugger::dump_mbc(std::ostream& os) const {
-    // PR5 will add mbc::debug_state() for bank/RAM-enable info.  For PR2 we
-    // just expose the cartridge header bytes that classify the chip.
-    const auto cart_type = core_.mmu.read_u8(0x0147);
     const auto rom_size = core_.mmu.read_u8(0x0148);
     const auto ram_size = core_.mmu.read_u8(0x0149);
 
-    char buf[128];
-    std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X\n", cart_type, rom_size, ram_size);
-    os << buf;
-    os << "bank_state=(PR5)\n";
+    char buf[160];
+    if (core_.mmu.cart) {
+        const auto st = core_.mmu.cart->debug_state();
+        std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X\n", st.type, rom_size, ram_size);
+        os << buf;
+        std::snprintf(buf, sizeof(buf), "rom_bank=%u ram_bank=%u ram_enabled=%d mode=%u\n",
+                      static_cast<unsigned>(st.rom_bank), static_cast<unsigned>(st.ram_bank), st.ram_enabled ? 1 : 0,
+                      static_cast<unsigned>(st.mode));
+        os << buf;
+    } else {
+        const auto cart_type = core_.mmu.read_u8(0x0147);
+        std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X\n", cart_type, rom_size,
+                      ram_size);
+        os << buf;
+        os << "bank_state=(no cartridge attached)\n";
+    }
 }
 
 void debugger::dump_stack(std::ostream& os, std::size_t n) const {

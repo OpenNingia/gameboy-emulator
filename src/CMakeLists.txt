@@ -9,7 +9,11 @@ find_package(CLI11 CONFIG REQUIRED)
 find_package(absl CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 
-add_executable(GbEmu "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp" "ui.cpp")
+# WIN32 sets the /SUBSYSTEM:WINDOWS linker flag on MSVC so the executable
+# does not open a console window when launched.  On non-Windows platforms
+# the keyword is a no-op.  SDL2main provides the WinMain entry point that
+# forwards to our standard `int main(int, char**)`.
+add_executable(GbEmu WIN32 "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp" "ui.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(GbEmu

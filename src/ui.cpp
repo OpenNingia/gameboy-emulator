@@ -1,9 +1,12 @@
-// ImGui scaffolding (docking branch) + the PR3/PR4 panel set.
+// ImGui scaffolding (docking branch) + the full PR3-PR5 panel set.
 //
 // Panels: Display, CPU, Disassembly, Memory (per-region tabs via the vendored
-// imgui_memory_editor.h), Breakpoints + Watchpoints.  All panel-drawing code
-// lives here until the panel count grows enough to justify splitting (PR5
-// adds PPU / MBC / Serial / PC-ring).  At that point this file is the seam.
+// imgui_memory_editor.h), Breakpoints + Watchpoints, PPU (LCDC/STAT decode +
+// palette swatches + VRAM tile viewer + BG tile-map viewer), MBC (banking
+// state via mbc::debug_state), Serial (scrollback of debugger serial buffer),
+// PC-ring (clickable history of recent PCs).  Kept in one file — the panel
+// count is high but each panel is small and the shared `context` lookup is
+// trivial.  If this grows past ~1.5kLOC consider splitting per-panel.
 
 #include <algorithm>
 #include <array>
@@ -20,6 +23,7 @@
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include <imgui_internal.h>
+#include <mbc.h>
 #include <third_party/imgui_memory_editor.h>
 #include <ui.h>
 
@@ -47,6 +51,10 @@ namespace gbemu::ui {
         bool show_disasm{true};
         bool show_memory{true};
         bool show_breakpoints{true};
+        bool show_ppu{true};
+        bool show_mbc{true};
+        bool show_serial{true};
+        bool show_pc_ring{true};
 
         // Set by `View → Reset layout`; honoured at the start of the next
         // frame before DockSpace re-binds the node.
@@ -61,40 +69,61 @@ namespace gbemu::ui {
         char bp_input_buf[8]{};
         char wp_input_buf[8]{};
         int wp_len_input{1};
+
+        // PPU panel: streaming textures for the VRAM tile grid (128x192 px,
+        // 16x24 tiles of 8x8) and the BG tile map viewer (256x256 px).  Both
+        // are created lazily on first use and recycled across frames.  The
+        // map_idx flag selects which of the two BG maps to view ($9800 vs
+        // $9C00); independent of LCDC.3 so the user can inspect either.
+        SDL_Texture* ppu_tiles_tex{nullptr};
+        SDL_Texture* ppu_bgmap_tex{nullptr};
+        int ppu_bgmap_idx{0}; // 0 → $9800, 1 → $9C00
     };
 
     namespace {
 
-        // Default first-run dock layout — left column for Display (top) and
-        // Memory (bottom), right column split into three rows for CPU,
-        // Disassembly, and Breakpoints.  Extend here when PR5 adds PPU /
-        // MBC / Serial / PC-ring panels.
+        // Default first-run dock layout.  Three columns:
+        //   - Left (40%): Display (top), Memory + PPU as tabs (bottom).
+        //   - Middle (35%): CPU (top), Disassembly (bottom).
+        //   - Right (25%): Breakpoints + MBC tabs (top), Serial + PC-ring
+        //     tabs (bottom).
+        // Tabbed panels share a dock node — users can tear them off via the
+        // tab handles.  The check in setup_dockspace_and_menubar against
+        // DockBuilderGetNode preserves any post-first-launch customisation.
         void build_default_layout(ImGuiID dockspace_id, ImVec2 size) {
             ImGui::DockBuilderRemoveNode(dockspace_id);
             ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dockspace_id, size);
 
-            ImGuiID dock_right{};
+            ImGuiID dock_rest{};
             const ImGuiID dock_left =
-                ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.60f, nullptr, &dock_right);
+                ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.40f, nullptr, &dock_rest);
+
+            ImGuiID dock_right{};
+            const ImGuiID dock_middle =
+                ImGui::DockBuilderSplitNode(dock_rest, ImGuiDir_Left, 0.58f, nullptr, &dock_right);
 
             ImGuiID dock_left_bot{};
             const ImGuiID dock_left_top =
                 ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.55f, nullptr, &dock_left_bot);
 
-            ImGuiID dock_right_rest{};
-            const ImGuiID dock_right_top =
-                ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Up, 0.33f, nullptr, &dock_right_rest);
+            ImGuiID dock_middle_bot{};
+            const ImGuiID dock_middle_top =
+                ImGui::DockBuilderSplitNode(dock_middle, ImGuiDir_Up, 0.40f, nullptr, &dock_middle_bot);
 
             ImGuiID dock_right_bot{};
-            const ImGuiID dock_right_mid =
-                ImGui::DockBuilderSplitNode(dock_right_rest, ImGuiDir_Up, 0.50f, nullptr, &dock_right_bot);
+            const ImGuiID dock_right_top =
+                ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Up, 0.50f, nullptr, &dock_right_bot);
 
             ImGui::DockBuilderDockWindow("Display", dock_left_top);
             ImGui::DockBuilderDockWindow("Memory", dock_left_bot);
-            ImGui::DockBuilderDockWindow("CPU", dock_right_top);
-            ImGui::DockBuilderDockWindow("Disassembly", dock_right_mid);
-            ImGui::DockBuilderDockWindow("Breakpoints", dock_right_bot);
+            ImGui::DockBuilderDockWindow("PPU", dock_left_bot);
+            ImGui::DockBuilderDockWindow("CPU", dock_middle_top);
+            ImGui::DockBuilderDockWindow("Disassembly", dock_middle_bot);
+            ImGui::DockBuilderDockWindow("Breakpoints", dock_right_top);
+            ImGui::DockBuilderDockWindow("MBC", dock_right_top);
+            ImGui::DockBuilderDockWindow("Serial", dock_right_bot);
+            ImGui::DockBuilderDockWindow("PC ring", dock_right_bot);
 
             ImGui::DockBuilderFinish(dockspace_id);
         }
@@ -135,6 +164,10 @@ namespace gbemu::ui {
                     ImGui::MenuItem("Disassembly", nullptr, &c.show_disasm);
                     ImGui::MenuItem("Memory", nullptr, &c.show_memory);
                     ImGui::MenuItem("Breakpoints", nullptr, &c.show_breakpoints);
+                    ImGui::MenuItem("PPU", nullptr, &c.show_ppu);
+                    ImGui::MenuItem("MBC", nullptr, &c.show_mbc);
+                    ImGui::MenuItem("Serial", nullptr, &c.show_serial);
+                    ImGui::MenuItem("PC ring", nullptr, &c.show_pc_ring);
                     ImGui::Separator();
                     if (ImGui::MenuItem("Reset layout"))
                         c.layout_reset_requested = true;
@@ -477,6 +510,253 @@ namespace gbemu::ui {
             ImGui::End();
         }
 
+        // ---------- PR5: PPU / MBC / Serial / PC-ring ----------
+
+        // Shared DMG four-shade palette used by the BGP/OBP swatches and the
+        // tile / map viewers.  Matches the ARGB constants in ppu.cpp.
+        constexpr std::array<std::uint32_t, 4> kDmgPalette = {0xFFFFFFFFu, 0xFFAAAAAAu, 0xFF555555u, 0xFF000000u};
+
+        // Decode an 8x8 GB tile (16 bytes at vram_offset) into `out` (a
+        // row-major buffer of dst_stride pixels per row), placing the
+        // top-left corner of the tile at (dst_x, dst_y).  Each output pixel
+        // is ARGB8888 driven by `palette` (BGP-mapped).
+        void decode_tile_8x8(const std::uint8_t* vram, std::uint32_t vram_offset, std::uint32_t* out,
+                             std::uint32_t dst_stride, std::uint32_t dst_x, std::uint32_t dst_y,
+                             const std::uint8_t bgp) {
+            for (std::uint32_t row = 0; row < 8; ++row) {
+                const std::uint8_t lo = vram[vram_offset + row * 2];
+                const std::uint8_t hi = vram[vram_offset + row * 2 + 1];
+                for (std::uint32_t col = 0; col < 8; ++col) {
+                    const std::uint8_t shift = static_cast<std::uint8_t>(7 - col);
+                    const std::uint8_t ci = static_cast<std::uint8_t>((((hi >> shift) & 1) << 1) | ((lo >> shift) & 1));
+                    const std::uint8_t shade = (bgp >> (ci * 2)) & 0x03;
+                    out[(dst_y + row) * dst_stride + (dst_x + col)] = kDmgPalette[shade];
+                }
+            }
+        }
+
+        // Repaint the 16x24 tile-data grid covering VRAM $8000-$97FF.  Tiles
+        // are laid out row-major: index 0 top-left, index 15 top-right,
+        // index 16 second row, etc.  Result is uploaded into ppu_tiles_tex.
+        void refresh_tile_viewer_texture(context& c) {
+            if (!c.ppu_tiles_tex) {
+                c.ppu_tiles_tex =
+                    SDL_CreateTexture(c.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 128, 192);
+                if (!c.ppu_tiles_tex)
+                    return;
+            }
+            std::array<std::uint32_t, 128 * 192> pixels{};
+            const std::uint8_t bgp = c.core->mmu.hwr_bgp();
+            const std::uint8_t* vram = c.core->mmu.vram.data();
+            for (std::uint32_t t = 0; t < 384; ++t) {
+                const std::uint32_t tx = (t % 16) * 8;
+                const std::uint32_t ty = (t / 16) * 8;
+                decode_tile_8x8(vram, t * 16, pixels.data(), 128, tx, ty, bgp);
+            }
+            SDL_UpdateTexture(c.ppu_tiles_tex, nullptr, pixels.data(), 128 * 4);
+        }
+
+        // Repaint a 256x256 BG tile-map viewer.  Reads tile indices from the
+        // map area selected by c.ppu_bgmap_idx ($9800 vs $9C00) and resolves
+        // tile data through the current LCDC.4 addressing mode (the same
+        // logic ppu::render_bg_scanline uses).
+        void refresh_bgmap_viewer_texture(context& c) {
+            if (!c.ppu_bgmap_tex) {
+                c.ppu_bgmap_tex =
+                    SDL_CreateTexture(c.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 256);
+                if (!c.ppu_bgmap_tex)
+                    return;
+            }
+            std::array<std::uint32_t, 256 * 256> pixels{};
+            const std::uint8_t lcdc = c.core->mmu.hwr_lcdc();
+            const std::uint8_t bgp = c.core->mmu.hwr_bgp();
+            const bool data_8000 = (lcdc & 0x10) != 0;
+            const std::uint16_t map_base = c.ppu_bgmap_idx ? 0x9C00 : 0x9800;
+            const std::uint8_t* vram = c.core->mmu.vram.data();
+            for (std::uint32_t ty = 0; ty < 32; ++ty) {
+                for (std::uint32_t tx = 0; tx < 32; ++tx) {
+                    const std::uint8_t idx = vram[(map_base - 0x8000) + ty * 32 + tx];
+                    const std::uint32_t tile_off =
+                        data_8000 ? static_cast<std::uint32_t>(idx) * 16u
+                                  : static_cast<std::uint32_t>(
+                                        0x1000 + static_cast<std::int32_t>(static_cast<std::int8_t>(idx)) * 16);
+                    decode_tile_8x8(vram, tile_off, pixels.data(), 256, tx * 8, ty * 8, bgp);
+                }
+            }
+            SDL_UpdateTexture(c.ppu_bgmap_tex, nullptr, pixels.data(), 256 * 4);
+        }
+
+        void palette_swatch(const char* label, std::uint8_t pal) {
+            ImGui::TextUnformatted(label);
+            for (int i = 0; i < 4; ++i) {
+                const std::uint8_t shade = (pal >> (i * 2)) & 0x03;
+                const std::uint32_t argb = kDmgPalette[shade];
+                const ImVec4 col{((argb >> 16) & 0xFF) / 255.0f, ((argb >> 8) & 0xFF) / 255.0f, (argb & 0xFF) / 255.0f,
+                                 1.0f};
+                ImGui::SameLine();
+                ImGui::PushID(label);
+                ImGui::PushID(i);
+                ImGui::ColorButton("##swatch", col,
+                                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop |
+                                       ImGuiColorEditFlags_NoBorder,
+                                   ImVec2(18, 18));
+                ImGui::PopID();
+                ImGui::PopID();
+            }
+        }
+
+        void draw_ppu_panel(context& c) {
+            if (!c.show_ppu)
+                return;
+            if (!ImGui::Begin("PPU", &c.show_ppu)) {
+                ImGui::End();
+                return;
+            }
+
+            const auto& mmu = c.core->mmu;
+            const auto lcdc = mmu.hwr_lcdc();
+            const auto stat = mmu.hwr_stat();
+
+            // Registers block (matches the dump_ppu format so a glance at the
+            // panel maps 1:1 to a `dump ppu` from the headless runner).
+            ImGui::Text("LCDC=%02X STAT=%02X", lcdc, stat);
+            ImGui::Text("SCY=%02X SCX=%02X LY=%02X LYC=%02X", mmu.hwr_scy(), mmu.hwr_scx(), mmu.hwr_ly(),
+                        mmu.hwr_lyc());
+            ImGui::Text("WY=%02X  WX=%02X", mmu.hwr_wy(), mmu.hwr_wx());
+
+            ImGui::SeparatorText("LCDC");
+            ImGui::Text("enable %d  win_map %d  win_en %d  tile_data %d", (lcdc >> 7) & 1, (lcdc >> 6) & 1,
+                        (lcdc >> 5) & 1, (lcdc >> 4) & 1);
+            ImGui::Text("bg_map %d  obj_size %d  obj_en %d  bg_en %d", (lcdc >> 3) & 1, (lcdc >> 2) & 1,
+                        (lcdc >> 1) & 1, lcdc & 1);
+
+            ImGui::SeparatorText("STAT");
+            ImGui::Text("lyc_ie %d  m2_ie %d  m1_ie %d  m0_ie %d  coinc %d  mode %d", (stat >> 6) & 1, (stat >> 5) & 1,
+                        (stat >> 4) & 1, (stat >> 3) & 1, (stat >> 2) & 1, stat & 3);
+
+            ImGui::SeparatorText("Palettes");
+            palette_swatch("BGP ", mmu.hwr_bgp());
+            palette_swatch("OBP0", mmu.hwr_obp0());
+            palette_swatch("OBP1", mmu.hwr_obp1());
+
+            // Heavy-cost viewers refresh only when we're actually drawing the
+            // panel — the early-return on `ImGui::Begin(... ) == false` above
+            // already gates this for collapsed / unselected-tab cases, so a
+            // docked-but-hidden PPU panel stays cheap.  Textures live across
+            // hides (only freed in ui::shutdown) so reopening is instant.
+            ImGui::SeparatorText("VRAM tiles ($8000-$97FF)");
+            refresh_tile_viewer_texture(c);
+            if (c.ppu_tiles_tex)
+                ImGui::Image(reinterpret_cast<ImTextureID>(c.ppu_tiles_tex), ImVec2(128 * 2, 192 * 2));
+
+            ImGui::SeparatorText("BG map");
+            ImGui::RadioButton("$9800", &c.ppu_bgmap_idx, 0);
+            ImGui::SameLine();
+            ImGui::RadioButton("$9C00", &c.ppu_bgmap_idx, 1);
+            refresh_bgmap_viewer_texture(c);
+            if (c.ppu_bgmap_tex)
+                ImGui::Image(reinterpret_cast<ImTextureID>(c.ppu_bgmap_tex), ImVec2(256, 256));
+
+            ImGui::End();
+        }
+
+        void draw_mbc_panel(context& c) {
+            if (!c.show_mbc)
+                return;
+            if (!ImGui::Begin("MBC", &c.show_mbc)) {
+                ImGui::End();
+                return;
+            }
+
+            if (!c.core->mmu.cart) {
+                ImGui::TextUnformatted("(no cartridge attached)");
+                ImGui::End();
+                return;
+            }
+
+            const auto st = c.core->mmu.cart->debug_state();
+            ImGui::Text("Type        $%02X", st.type);
+            ImGui::Text("ROM bank    %u", static_cast<unsigned>(st.rom_bank));
+            ImGui::Text("RAM bank    %u", static_cast<unsigned>(st.ram_bank));
+            ImGui::Text("RAM enabled %s", st.ram_enabled ? "yes" : "no");
+            ImGui::Text("Mode        %u", static_cast<unsigned>(st.mode));
+
+            ImGui::Separator();
+            // Header bytes are stable, but surfacing them next to the live
+            // banking state saves a trip to the Memory panel.
+            ImGui::Text("Header  ROM size $%02X   RAM size $%02X", c.core->mmu.read_u8(0x0148),
+                        c.core->mmu.read_u8(0x0149));
+
+            ImGui::End();
+        }
+
+        void draw_serial_panel(context& c) {
+            if (!c.show_serial)
+                return;
+            if (!ImGui::Begin("Serial", &c.show_serial)) {
+                ImGui::End();
+                return;
+            }
+
+            auto& dbg = *c.dbg;
+            const auto& buf = dbg.serial_buffer();
+
+            if (ImGui::SmallButton("Clear"))
+                dbg.serial_clear();
+            ImGui::SameLine();
+            ImGui::Text("%u bytes", static_cast<unsigned>(buf.size()));
+
+            ImGui::Separator();
+
+            ImGui::BeginChild("##serial_scroll", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            if (!buf.empty()) {
+                // Treat the ring as a single text blob.  We pass begin/end so
+                // a buffer without a terminating NUL still renders correctly.
+                ImGui::TextUnformatted(buf.data(), buf.data() + buf.size());
+            } else {
+                ImGui::TextDisabled("(no bytes received)");
+            }
+            // Auto-scroll to bottom when new data lands at the tail.
+            if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+                ImGui::SetScrollHereY(1.0f);
+            ImGui::EndChild();
+
+            ImGui::End();
+        }
+
+        void draw_pc_ring_panel(context& c) {
+            if (!c.show_pc_ring)
+                return;
+            if (!ImGui::Begin("PC ring", &c.show_pc_ring)) {
+                ImGui::End();
+                return;
+            }
+
+            const auto& ring = c.core->pc_ring;
+            const std::size_t idx = c.core->pc_idx;
+            const std::size_t cap = ring.size();
+
+            ImGui::TextDisabled("Click an entry to jump the Disassembly view");
+            ImGui::Separator();
+
+            ImGui::BeginChild("##pc_ring_scroll", ImVec2(0, 0), false);
+            // Walk newest → oldest.  pc_idx points at the next *write* slot,
+            // so the entry at idx-1 is the most recently recorded PC.
+            for (std::size_t i = 0; i < cap; ++i) {
+                const std::size_t k = (idx + cap - 1 - i) % cap;
+                const std::uint16_t pc = ring[k];
+                char label[24];
+                std::snprintf(label, sizeof(label), "%3zu: $%04X##pc_ring", i, pc);
+                if (ImGui::Selectable(label)) {
+                    c.disasm_view_addr = pc;
+                    c.disasm_follow_pc = false;
+                }
+            }
+            ImGui::EndChild();
+
+            ImGui::End();
+        }
+
     } // namespace
 
     context* init(SDL_Window* window, SDL_Renderer* renderer, debugger& dbg, gbemu::core& c) {
@@ -502,6 +782,14 @@ namespace gbemu::ui {
     void shutdown(context* ctx) {
         if (!ctx)
             return;
+        if (ctx->ppu_tiles_tex) {
+            SDL_DestroyTexture(ctx->ppu_tiles_tex);
+            ctx->ppu_tiles_tex = nullptr;
+        }
+        if (ctx->ppu_bgmap_tex) {
+            SDL_DestroyTexture(ctx->ppu_bgmap_tex);
+            ctx->ppu_bgmap_tex = nullptr;
+        }
         ImGui_ImplSDLRenderer2_Shutdown();
         ImGui_ImplSDL2_Shutdown();
         ImGui::DestroyContext();
@@ -528,6 +816,10 @@ namespace gbemu::ui {
         draw_disasm_panel(*ctx);
         draw_memory_panel(*ctx);
         draw_breakpoints_panel(*ctx);
+        draw_ppu_panel(*ctx);
+        draw_mbc_panel(*ctx);
+        draw_serial_panel(*ctx);
+        draw_pc_ring_panel(*ctx);
 
         ImGui::Render();
         ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), ctx->renderer);

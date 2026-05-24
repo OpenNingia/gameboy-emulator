@@ -75,19 +75,10 @@ void Application::run() {
     gbemu::core core;
     gbemu::debugger debugger{core};
 
-    // Stdout-echo of bytes the cartridge transmits via the serial link.  The
-    // hardware-emulation half of $FF02 (clear SC bit 7, raise IF.3) lives in
-    // serial::on_sc_write; this observer is just for human-visible output and
-    // will be removed once the PR5 ImGui serial panel ships.  Skipped in
-    // headless mode (the debugger's serial ring buffer serves serial-dump).
-    if (!headless_) {
-        core.mmu.add_mmio_write_handler(0xFF02, [&core](std::uint8_t v) {
-            if (v == 0x81) {
-                std::putchar(static_cast<char>(core.mmu.hwr_sb()));
-                std::fflush(stdout);
-            }
-        });
-    }
+    // The debugger's own $FF02 handler (installed in its ctor) is now the
+    // single canonical serial sink — read by the headless `serial-dump`
+    // command and rendered live by the ImGui Serial panel.  The previous
+    // stdout-echo handler was retired in PR5.
 
     // load bios
     if (!cfg.bios.path.empty()) {

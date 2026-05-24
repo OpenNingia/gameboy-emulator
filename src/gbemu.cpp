@@ -2,6 +2,9 @@
 #include <string>
 
 #include <CLI/CLI.hpp>
+#include <SDL2/SDL.h> // Renames `main` → `SDL_main` so SDL2main's WinMain (linked
+                      // via SDL2::SDL2main on Windows) can dispatch to us.  Required
+                      // for /SUBSYSTEM:WINDOWS builds; harmless on other platforms.
 #include <app.h>
 #include <log.h>
 
