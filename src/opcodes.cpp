@@ -654,7 +654,7 @@ IMPL_INSTR(pop_af) {
 /* Add the 8-bit signed operand s8 (values -128 to +127) to the stack pointer SP, and store the result in register pair
  * HL. */
 IMPL_INSTR(ld_hl_spps8) {
-    auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+    auto s8 = cpu.bus_read_i8(cpu.regs.pc++);
     cpu.regs.hl.u16 = cpu.alu.add_sp_s8(cpu.regs.sp, s8);
 }
 
@@ -1326,7 +1326,7 @@ IMPL_INSTR(add_hl_sp) {
 /* Add the contents of the 8-bit signed (2's complement) immediate operand s8 and the stack pointer SP and store the
  * results in SP. */
 IMPL_INSTR(add_sp_s8) {
-    auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+    auto s8 = cpu.bus_read_i8(cpu.regs.pc++);
     cpu.regs.sp = cpu.alu.add_sp_s8(cpu.regs.sp, s8);
 }
 
@@ -3179,7 +3179,7 @@ IMPL_INSTR(jp_c_a16) {
 // 18 JR s8
 /* Jump s8 steps from the current address in the program counter (PC). (Jump relative.) */
 IMPL_INSTR(jr_s8) {
-    auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+    auto s8 = cpu.bus_read_i8(cpu.regs.pc++);
     cpu.regs.pc += s8;
 }
 
@@ -3187,7 +3187,7 @@ IMPL_INSTR(jr_s8) {
 /* If the Z flag is 0, jump s8 steps from the current address stored in the program counter (PC). If not, the
  * instruction following the current JP instruction is executed (as usual). */
 IMPL_INSTR(jr_nz_s8) {
-    auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+    auto s8 = cpu.bus_read_i8(cpu.regs.pc++);
     if (!cpu.regs.z_flag()) {
         cpu.regs.pc += s8;
         cpu.extra_cycles = 4;
@@ -3198,7 +3198,7 @@ IMPL_INSTR(jr_nz_s8) {
 /* If the Z flag is 1, jump s8 steps from the current address stored in the program counter (PC). If not, the
  * instruction following the current JP instruction is executed (as usual). */
 IMPL_INSTR(jr_z_s8) {
-    auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+    auto s8 = cpu.bus_read_i8(cpu.regs.pc++);
     if (cpu.regs.z_flag()) {
         cpu.regs.pc += s8;
         cpu.extra_cycles = 4;
@@ -3209,7 +3209,7 @@ IMPL_INSTR(jr_z_s8) {
 /* If the CY flag is 0, jump s8 steps from the current address stored in the program counter (PC). If not, the
  * instruction following the current JP instruction is executed (as usual). */
 IMPL_INSTR(jr_nc_s8) {
-    auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+    auto s8 = cpu.bus_read_i8(cpu.regs.pc++);
     if (!cpu.regs.c_flag()) {
         cpu.regs.pc += s8;
         cpu.extra_cycles = 4;
@@ -3220,7 +3220,7 @@ IMPL_INSTR(jr_nc_s8) {
 /* If the CY flag is 1, jump s8 steps from the current address stored in the program counter (PC). If not, the
  * instruction following the current JP instruction is executed (as usual). */
 IMPL_INSTR(jr_c_s8) {
-    auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
+    auto s8 = cpu.bus_read_i8(cpu.regs.pc++);
     if (cpu.regs.c_flag()) {
         cpu.regs.pc += s8;
         cpu.extra_cycles = 4;

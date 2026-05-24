@@ -54,18 +54,14 @@ std::uint32_t core::step() {
     auto saved_pc = regs.pc;
 
     try {
-        auto total = cpu.step();
-
+        // Under M-cycle accounting cpu.step() ticks PPU/APU/timer via the
+        // callback installed in core::core(); irq.dispatch() does the same
+        // (its 20 T of servicing flow through cpu.tick). total_cycles is
+        // updated by the callback, so no explicit accounting here.
+        auto total = static_cast<std::uint32_t>(cpu.step());
         if (irq.dispatch()) {
             total += 20;
         }
-
-        ppu.step(total);
-        apu.step(total); // step the APU with the same cadence as the PPU so that audio timing tracks video timing
-        timer.step(total);
-
-        total_cycles += total;
-
         return total;
     } catch (const gbemu_exception& e) {
         LOG_ERROR(gbemu::log::root(), "@PC={:04x} AF={:04x} BC={:04x} DE={:04x} HL={:04x} SP={:04x} : {}", saved_pc,

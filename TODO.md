@@ -33,7 +33,40 @@ versionato (`magic + version + sezioni`). Slot multipli + hotkey F5/F9.
 
 ---
 
-## 3. Shader effetto green-LCD
+## 3. Moltiplicatore di velocità
+
+Feature UX: x0.25, x0.5, x1.0, x1.5, x2.0, x4.0. Più fast-forward uncapped
+"tieni premuto" come modalità separata.
+
+**Stato**: vive sull'`Application` (è frame-pacing, non emulation state).
+Hotkey suggerite: `+` / `-` per step discreti, `Tab` (tieni premuto) per
+fast-forward uncapped. Entry esposta anche come combo nel menu ImGui
+("Emulation → Speed") + indicatore corrente in titlebar.
+
+**Implementazione**:
+- Il main loop oggi esegue `frame_cycles = 70224` T-cycle per VSync tick.
+  Per `multiplier > 1.0` → `frame_cycles = round(70224 * multiplier)` (più
+  emulazione per frame reale). Per `multiplier < 1.0` → si lascia
+  `frame_cycles = 70224` e si introduce un `SDL_Delay` di
+  `(1/multiplier - 1) * frame_time_ms` (meno emulazione per frame reale).
+- Fast-forward uncapped: scollegare dal VSync (`SDL_RenderSetVSync(0)` o
+  swap-interval 0) e iterare quante volte possibile entro un budget wall-clock
+  (es. 16 ms).
+
+**Audio**: a velocità ≠ 1.0 il pitch cambia se non si resample. Scelta v1 =
+mute automatico quando `multiplier != 1.0` (semplice e accettata). Resampling
+(SoundTouch o simile) resta come follow-up.
+
+**Interazione con il debugger**: in modalità Paused il moltiplicatore non ha
+effetto (lo step è manuale). Su `Step` singolo idem. Il moltiplicatore si
+applica solo nel ramo `run_until(stop_kind::none, frame_cycles)` del main loop.
+
+**Headless**: non si applica — `script_runner` gira sempre full-speed (è il
+suo punto).
+
+---
+
+## 4. Shader effetto green-LCD
 
 Riferimento: <https://github.com/libretro/glsl-shaders/blob/master/handheld/gameboy.glslp>
 
@@ -69,7 +102,7 @@ del canale alpha attraverso i pass 1-3, Y-flip delle texcoord).
 
 ---
 
-## 4. MBC2 / MBC3 / MBC5
+## 5. MBC2 / MBC3 / MBC5
 
 Oggi `src/mbc.cpp` implementa solo `no_mbc` (56) e `mbc1` (116). Test ROM oltre
 `cpu_instrs.gb` (es. Pokémon Red/Blue → MBC3, Pokémon Crystal → MBC3+RTC,
@@ -83,50 +116,184 @@ Priorità:
 
 ---
 
-## 5. Refactor: sub-instruction (M-cycle) timing
+## 6. Battery save (SRAM persistente su cartuccia)
 
-Oggi `core::step()` (`src/core.cpp:50-74`) esegue l'intera istruzione via
-`cpu.step()` e *poi* avanza PPU/APU/timer del totale dei T-cycle. Modello
-troppo grossolano per i Blargg `mem_timing` / `mem_timing-2`, che misurano
-su quale M-cycle interno di un'istruzione cade un read/write.
+Giochi come Zelda: Link's Awakening (MBC1+RAM+BATTERY, type `0x03`), Pokémon
+(MBC3+RAM+BATTERY+RTC) e in generale tutti i titoli con salvataggio interno
+scrivono il progresso in RAM esterna mantenuta da una batteria sulla cartuccia.
+Oggi `src/mbc.cpp:207-219` distingue già nei commenti i tipi BATTERY (0x03,
+0x09) ma la RAM è solo allocata in memoria e muore al process exit.
 
-**Sintomo**: `mem_timing.gb` fallisce perché TIMA viene incrementato in blocco
-*dopo* l'istruzione, invece di poter incrementare fra un M-cycle e l'altro
-(es. tra l'opcode fetch e il memory read di `LD A,(HL)`). I test che dipendono
-solo dalle durate **totali** (`instr_timing.gb`) dovrebbero già passare.
+**Cosa serve:**
 
-**Strada (PR a sé, alta densità di cambiamenti)**:
+- Rilevamento header: tipi battery-backed da gestire sono `0x03`, `0x06`,
+  `0x09`, `0x0F`, `0x10`, `0x13`, `0x1B`, `0x1E` (alcuni dipendono da MBC
+  ancora da implementare in sezione 5 — si avanza in parallelo).
+- API sull'`mbc`: `ram_load(span<const uint8_t>)`, `ram_data() const`,
+  `ram_dirty() const` (flag settato da ogni write a `$A000-$BFFF`),
+  `ram_clear_dirty()`. Già virtuali sulla base in modo che no_mbc/mbc1/…
+  possano fare override.
+- All'avvio (`core::load(rom_file)`): se l'MBC è battery, cercare
+  `<rom_path>.sav` accanto al ROM e caricarlo via `ram_load`. Dimensione
+  attesa = quella decodificata da `ram_size_code`; mismatch → log warning +
+  ignore.
+- Persistenza: flush a chiusura applicazione (sempre) + flush periodico
+  (~2 s se `ram_dirty`) per sopravvivere ai crash. Scrittura atomica
+  (`.sav.tmp` + rename).
+- Path: di default accanto al ROM (`zelda.gb` → `zelda.sav`); opzionale
+  override via `cfg/gbemu.conf` (`save.directory`).
 
-- Esporre `core::tick(uint8_t m_cycles)` che avanza timer/PPU/APU di
-  `m_cycles * 4` T-cycle.
-- Modificare `mmu::read_u8`/`write_u8` (o wrapper sul lato CPU) in modo che
-  ogni accesso emetta prima un `core::tick(...)` proporzionale agli M-cycle
-  accumulati dall'ultimo accesso.
-- Spezzare il body di ogni opcode in `inc/opcodes.hpp` / `src/opcodes.cpp`
-  così che le fasi (fetch operand, read, ALU, write, internal) emettano tick
-  negli M-cycle corretti. `cpu::extra_cycles` come somma postuma diventa
-  obsoleto.
-- Aggiornare `irq::dispatch()` per spalmare i suoi 5 M-cycle in tick discreti
-  (2 wait, push hi, push lo, jump).
-- Non-regressione: `cpu_instrs.gb`, `instr_timing.gb` restano verdi;
-  `mem_timing.gb` / `mem_timing-2.gb` diventano il nuovo target.
+**Formato**: `.sav` = dump raw della SRAM, byte-per-byte. Compatibile con
+BGB, mGBA, SameBoy, VBA-M, ecc. — il giocatore può portarsi il salvataggio
+fra emulatori.
 
-**Test Blargg da marcare "skip" finché il refactor non c'è:**
-- `interrupt_time/interrupt_time.gb` — `REQUIRE_CGB 1` (CGB-only, indipendente
-  dal refactor).
-- `mem_timing/mem_timing.gb` + `01-read_timing.gb` / `02-write_timing.gb` /
-  `03-modify_timing.gb`.
-- `mem_timing-2/mem_timing-2.gb`.
-- `oam_bug/oam_bug.gb` + sotto-ROM `1-lcd_sync.gb` … `8-instr_effect.gb`.
-  Verifica la corruzione OAM DMG durante incrementi 16-bit di register pair
-  con valore in `$FE00-$FEFF` nei primi 20 cicli di una scanline visibile —
-  dipende dal modello M-cycle del refactor e da un PPU che esponga la finestra
-  di mode-2 OAM scan al ciclo esatto. Nessun gioco commerciale dipende da
-  questo quirk: "nice-to-have" da affrontare *dopo* il refactor M-cycle.
+**RTC (MBC3)**: addendum opzionale, file `.rtc` separato (base time + ultimi
+valori dei registri RTC). Molti emulatori non lo fanno e la RTC riparte da
+zero — rimandabile, non blocca i giochi.
+
+**Distinzione da Save State (sezione 2)**: il battery save è solo la SRAM
+del cart, è il salvataggio *del gioco* (il giocatore lo crea via menu
+in-game, "Save and continue"). Save state = snapshot completo dell'emulatore
+(hotkey). Le due feature coesistono.
 
 ---
 
-## 6. Release pipeline
+## 7. DMG OAM bug emulation
+
+Blargg `oam_bug.gb` fallisce: dipende da un hardware quirk DMG documentato
+ma non implementato. Quando un'istruzione fa un 16-bit INC/DEC su un register
+pair (`INC rr` / `DEC rr` / `LD A,(HL+)` / `PUSH rr` / `POP rr` / ecc.) e il
+*valore precedente* del pair è in `$FE00-$FEFF` *durante PPU mode 2* (OAM
+scan, primi 20 M-cycle di una scanline visibile), il datapath interno della
+CPU corrompe una riga OAM con un pattern specifico. Il bug non è triggerato
+da nessun gioco commerciale — è un test puro di accuratezza hardware.
+
+Suite (8 sotto-ROM, `1-lcd_sync.gb` … `8-instr_effect.gb`):
+- `1-lcd_sync` — calibrazione: assicura che il test possa allinearsi al
+  boundary di mode 2.
+- `2-causes` — istruzioni che CAUSANO la corruzione.
+- `3-non_causes` — controprova: istruzioni simili che NON la causano (es. un
+  `INC r` 8-bit non triggera).
+- `4-scanline_timing` — finestra temporale di mode 2 entro la scanline.
+- `5-timing_bug` — quando il bug si attiva entro l'istruzione.
+- `6-timing_no_bug` — controprova fuori finestra.
+- `7-timing_effect` — pattern di corruzione (quale byte OAM viene alterato
+  e con quale valore).
+- `8-instr_effect` — effetto per categoria di istruzione.
+
+**Cosa serve:**
+
+1. **PPU espone la modalità corrente con granularità M-cycle**: già
+   parzialmente vero (`hwr_stat` ha la mode aggiornata in `ppu::step`), ma
+   serve un getter dedicato `bool ppu::oam_scan_active() const` consultabile
+   da CPU senza un round-trip via MMIO.
+2. **Hook nei body delle istruzioni "cause"**: `inc_bc` / `inc_de` / `inc_hl`
+   / `inc_sp` (+ `dec_*`), `ld_a__hlp__` / `ld_a__hlm__` / `ld__hlp__a` /
+   `ld__hlm__a`, `pop_*`, `push_*` e affini — prima del bump del registro,
+   se il valore corrente è in `$FE00-$FEFF` AND `ppu.oam_scan_active()`,
+   eseguire la corruzione documentata.
+3. **Logica di corruzione OAM** (Pan Docs §"OAM Corruption Bug"):
+   - Pattern read-modify-write su una "riga OAM" da 8 byte (40 sprite × 4
+     byte → 20 righe da 8 byte ciascuna).
+   - Il tipo di corruzione varia per istruzione: alcune fanno glitch di
+     tipo "read", altre "write", altre "read-write".
+   - `INC HL` e `LD A,(HLI)` hanno comportamenti leggermente diversi.
+4. **Verifica**: ogni sotto-ROM stampa un risultato confrontabile con il
+   reference mGBA/SameBoy. Procedere in ordine 1-8: il `1-lcd_sync` va
+   chiuso per primo per validare che le altre sotto-ROM possano partire.
+
+**Costo stimato**: 1-2 giorni di lavoro mirato, oracolo = i test stessi.
+
+**Priorità**: bassa. Nessun gioco commerciale rompe senza questo. Ha senso
+solo se l'obiettivo è "DMG-accurate al 100%" sul piano dei quirk hardware.
+
+---
+
+## 8. DMG APU wave RAM access bug (CH3)
+
+Blargg `dmg_sound` fallisce su tre sotto-ROM, tutte sintomo dello stesso
+hardware quirk DMG sul canale 3 (wave): l'accesso CPU a `$FF30-$FF3F`
+mentre il canale è attivo segue regole speciali, e ri-triggerare il canale
+mentre è attivo corrompe wave RAM.
+
+Sotto-ROM fallite:
+- `09-wave_read_while_on:01` — read di `$FF30-$FF3F` mentre CH3 on. Atteso
+  DMG: `0xFF` salvo nell'M-cycle in cui CH3 fa il fetch del nibble (in
+  quel caso ritorna il byte di wave RAM corrente).
+- `12-wave_write_while_on:01` — speculare per le write: ignorate, tranne
+  nella stessa finestra di allineamento.
+- `10-wave_trigger_while_on:01` — il "wave RAM corruption bug":
+  ri-triggerare CH3 mentre sta suonando, in una finestra precisa rispetto
+  al prossimo sample fetch, copia il byte (o 4 byte allineati) che CH3
+  sta per leggere nei primi 1 o 4 byte di wave RAM.
+
+**Cosa c'è oggi:**
+- `wave_channel` (`inc/apu.h:82` + `src/apu.cpp:285`) traccia `wave_pos`
+  (0..31) e `sample_buffer` ma NON il momento esatto in cui ha fatto
+  l'ultimo fetch.
+- `mmu::wave_ram()` espone uno span sui 16 byte. Il routing di
+  `$FF30-$FF3F` passa per il normale path mmio: nessun gating in funzione
+  di `channel_enabled`, nessuna logica di corruzione su trigger.
+
+**Cosa serve:**
+
+1. **Gating delle read/write a `$FF30-$FF3F`** (chiude i `:01` di 09 e 12):
+   - Esporre `bool apu::ch3_active() const`.
+   - Negli mmio handler di `$FF30-$FF3F`: se `ch3_active()`, read ritorna
+     `0xFF` e write è ignorata. Su CGB (quando supportato) il comportamento
+     è diverso — read/write redirigono sempre al byte attualmente fetchato.
+2. **Wave RAM corruption on trigger** (chiude `10:01`):
+   - In `wave_channel::trigger()`, prima del reset di `wave_pos`, se
+     `channel_enabled` era già true E `freq_timer` è vicino a 0 (il prossimo
+     fetch è imminente — finestra esatta da derivare dai Pan Docs),
+     eseguire la corruzione:
+     - `next_pos = (wave_pos + 1) & 0x1F; next_byte = next_pos >> 1;`
+     - se `next_byte ∈ 0..3`: `wave_ram[0] = wave_ram[next_byte]`.
+     - se `next_byte ∈ 4..15`: copia 4 byte allineati a `next_byte & 0x0C`
+       in `wave_ram[0..3]`.
+3. **Sub-test timing (sotto-ROM `:02` e oltre)**: per chiudere i sotto-test
+   non-`:01` serve esporre il timing del fetch CH3 con granularità M-cycle
+   e gestire la finestra di "aligned access" (2-cycle window in cui
+   read/write redirigono a `wave_ram[wave_pos >> 1]` invece di `0xFF` /
+   ignore). Lavoro più sottile, condizionato all'accuratezza APU che si
+   vuole.
+
+**Costo stimato**: ~mezza giornata per i tre `:01`, 1-2 giorni per chiudere
+tutti i sotto-test di 09 / 10 / 12.
+
+**Priorità**: bassa. Nessun gioco commerciale dipende da queste sequenze
+(scrivono wave RAM con CH3 disabilitato — primo passo di qualsiasi setup
+sensato). Solo accuratezza hardware DMG sul piano audio.
+
+---
+
+## 9. Refactor: sub-instruction (M-cycle) timing — **fatto (hybrid)**
+
+Implementato il modello tick-driven: ogni accesso bus (`cpu::bus_read` /
+`bus_write` / `bus_read_u16` / `bus_write_u16` / `bus_read_i8`) chiama
+`cpu::tick(4)` prima del trasferimento e propaga al `tick_fn` installato da
+`core::core()` (lambda captureless → ppu.step + apu.step + timer.step +
+total_cycles). I cicli interni non coperti dagli accessi (preparazione SP di
+PUSH, ALU 16-bit di ADD HL,rr, branch PC update, ecc.) sono *bulk-ticked*
+alla fine di `cpu::step()` con `tick(target - step_cycles)` dove `target =
+e.cycles + extra_cycles`. `irq::dispatch()` ticca i suoi 20 T (8 entry + 8
+push + 4 jump-internal) via `cpu.tick`. `core::step()` non chiama più
+esplicitamente `ppu/apu/timer.step` e non somma a mano i 20 T dell'IRQ.
+
+**Stato test Blargg:**
+- `cpu_instrs.gb` ✅
+- `instr_timing.gb` ✅
+- `mem_timing.gb` ✅
+- `mem_timing-2.gb` ✅
+- `halt_bug.gb` ✅
+- `oam_bug.gb` ❌ — quirk DMG indipendente dall'M-cycle, vedi §7.
+- `interrupt_time/interrupt_time.gb` ❌ — `REQUIRE_CGB 1`, indipendente.
+- `dmg_sound` 09:01 / 10:01 / 12:01 ❌ — wave RAM access bug del CH3,
+  indipendente dall'M-cycle, vedi §8.
+
+---
+
+## 10. Release pipeline
 
 Tutto da fare; vanno fatti in quest'ordine perché ognuno dipende dal precedente.
 

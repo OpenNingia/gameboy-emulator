@@ -17,7 +17,13 @@ bool irq::dispatch() {
         // Clear the serviced bit in IF.
         mmu.hwr_if(static_cast<std::uint8_t>(mmu.hwr_if() & ~(1u << b)));
         cpu.interrupt_enabled = false;
+        // IRQ servicing is 5 M-cycles (20 T): 2 entry NOPs + 2 push writes
+        // + 1 internal jump cycle. push() ticks 8 T (2 bus_writes); we
+        // explicitly tick the remaining 12 T so the PPU/APU/timer see the
+        // dispatch overhead at roughly the right granularity.
+        cpu.tick(8);
         cpu.push(cpu.regs.pc);
+        cpu.tick(4);
         cpu.regs.pc = static_cast<std::uint16_t>(gb::IRQ_VECTOR_BASE + b * gb::IRQ_VECTOR_STRIDE);
         return true;
     }

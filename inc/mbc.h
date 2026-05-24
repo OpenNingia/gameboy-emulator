@@ -6,6 +6,38 @@
 
 namespace gbemu {
 
+    // Cartridge type byte at header $0147. Values follow Pan Docs.
+    enum class cartridge_type : std::uint8_t {
+        rom_only = 0x00,
+        mbc1 = 0x01,
+        mbc1_ram = 0x02,
+        mbc1_ram_battery = 0x03,
+        mbc2 = 0x05,
+        mbc2_battery = 0x06,
+        rom_ram = 0x08,
+        rom_ram_battery = 0x09,
+        mmm01 = 0x0B,
+        mmm01_ram = 0x0C,
+        mmm01_ram_battery = 0x0D,
+        mbc3_timer_battery = 0x0F,
+        mbc3_timer_ram_battery = 0x10,
+        mbc3 = 0x11,
+        mbc3_ram = 0x12,
+        mbc3_ram_battery = 0x13,
+        mbc5 = 0x19,
+        mbc5_ram = 0x1A,
+        mbc5_ram_battery = 0x1B,
+        mbc5_rumble = 0x1C,
+        mbc5_rumble_ram = 0x1D,
+        mbc5_rumble_ram_battery = 0x1E,
+        mbc6 = 0x20,
+        mbc7_sensor_rumble_ram_battery = 0x22,
+        pocket_camera = 0xFC,
+        bandai_tama5 = 0xFD,
+        huc3 = 0xFE,
+        huc1_ram_battery = 0xFF,
+    };
+
     // Snapshot of the MBC's banking state, surfaced to the debugger / MBC panel.
     struct mbc_debug_state {
         std::uint8_t type;     // cartridge type byte (header $0147)

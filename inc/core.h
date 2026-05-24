@@ -34,7 +34,21 @@ namespace gbemu {
               apu(mmu),
               joypad(mmu, irq),
               pc_ring(),
-              pc_idx(0) {}
+              pc_idx(0) {
+            // Wire the CPU's M-cycle tick callback. Every bus access (and
+            // every trailing internal-cycle top-up) flows through this so
+            // PPU / APU / timer advance during the instruction rather than
+            // in a single bulk step at the end. Captureless lambda decays
+            // to a plain function pointer — no heap, no virtual call.
+            cpu.tick_ctx = this;
+            cpu.tick_fn = [](void* ctx, std::uint8_t t) {
+                auto* c = static_cast<core*>(ctx);
+                c->ppu.step(t);
+                c->apu.step(t);
+                c->timer.step(t);
+                c->total_cycles += t;
+            };
+        }
 
         cpu cpu;
         registers regs;

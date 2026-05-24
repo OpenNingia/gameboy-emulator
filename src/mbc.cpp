@@ -204,15 +204,15 @@ namespace gbemu {
         LOG_INFO(log::root(), "Cartridge: type=0x{:02x} rom_size=0x{:02x} ({} KB) ram_size=0x{:02x} ({} KB)", type,
                  rom_size_code, expected_rom_size / 1024, ram_size_code, ram_size / 1024);
 
-        switch (type) {
-            case 0x00: // ROM ONLY
+        switch (static_cast<cartridge_type>(type)) {
+            case cartridge_type::rom_only:
                 return std::make_unique<no_mbc>(std::move(rom), 0, type);
-            case 0x08: // ROM + RAM
-            case 0x09: // ROM + RAM + BATTERY
+            case cartridge_type::rom_ram:
+            case cartridge_type::rom_ram_battery:
                 return std::make_unique<no_mbc>(std::move(rom), ram_size, type);
-            case 0x01: // MBC1
-            case 0x02: // MBC1 + RAM
-            case 0x03: // MBC1 + RAM + BATTERY
+            case cartridge_type::mbc1:
+            case cartridge_type::mbc1_ram:
+            case cartridge_type::mbc1_ram_battery:
                 return std::make_unique<mbc1>(std::move(rom), ram_size, type);
             default:
                 throw gbemu_exception{"Unsupported cartridge type"};
