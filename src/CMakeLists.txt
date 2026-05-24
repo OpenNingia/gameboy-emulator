@@ -13,7 +13,7 @@ find_package(imgui CONFIG REQUIRED)
 # does not open a console window when launched.  On non-Windows platforms
 # the keyword is a no-op.  SDL2main provides the WinMain entry point that
 # forwards to our standard `int main(int, char**)`.
-add_executable(GbEmu WIN32 "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp" "ui.cpp" "apu.cpp" "joypad.cpp" "gfx.cpp")
+add_executable(GbEmu WIN32 "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp" "ui.cpp" "apu.cpp" "joypad.cpp" "gfx.cpp" "paths.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(GbEmu
@@ -33,4 +33,16 @@ configure_file(
     ${CMAKE_SOURCE_DIR}/cfg/gbemu.conf
     ${CMAKE_CURRENT_BINARY_DIR}/cfg/gbemu.conf
     COPYONLY
+)
+
+# Materialize the empty data directories next to the executable so the
+# portable layout (bios/, roms/, savs/, sslots/) is visible at first run.
+# The app would create them on demand anyway when battery saves / save
+# slots land, but staging them at configure time keeps the build tree
+# self-documenting.
+file(MAKE_DIRECTORY
+    ${CMAKE_CURRENT_BINARY_DIR}/bios
+    ${CMAKE_CURRENT_BINARY_DIR}/roms
+    ${CMAKE_CURRENT_BINARY_DIR}/savs
+    ${CMAKE_CURRENT_BINARY_DIR}/sslots
 )

@@ -12,6 +12,8 @@
 #include <gb_layout.h>
 #include <gfx.h>
 #include <joypad.h>
+#include <log.h>
+#include <paths.h>
 #include <ui.h>
 
 namespace gbemu {
@@ -143,7 +145,10 @@ namespace {
     }
 } // namespace
 
-Application::Application() : cfg("cfg/gbemu.conf") {
+Application::Application()
+    : base_(gbemu::paths::resolve_base_dir()), cfg(gbemu::paths::resolve_under(base_, "cfg/gbemu.conf")) {
+    LOG_INFO(gbemu::log::root(), "base dir: {}", base_);
+
     // SDL_INIT_GAMECONTROLLER pulls in SDL_INIT_JOYSTICK and SDL_INIT_EVENTS;
     // we rely on it for both the SDL_GameController API used below and the
     // automatic SDL_CONTROLLERDEVICEADDED events fired at startup for
@@ -169,7 +174,7 @@ static void load_bios(gbemu::core& core, const std::string& path) {
 }
 
 void Application::set_rom_file(std::string_view path) {
-    cfg.rom.path = path;
+    rom_path_ = path;
 }
 
 void Application::run() {
@@ -181,15 +186,31 @@ void Application::run() {
     // command and rendered live by the ImGui Serial panel.  The previous
     // stdout-echo handler was retired in PR5.
 
-    // load bios
+    // load bios — resolved against <base>/<paths.bios_dir> when the
+    // config value is a bare filename, used as-is otherwise.
     if (!cfg.bios.path.empty() && !cfg.bios.skip) {
-        load_bios(core, cfg.bios.path);
+        auto resolved = gbemu::paths::resolve_data_path(base_, cfg.paths.bios_dir, cfg.bios.path);
+        LOG_INFO(gbemu::log::root(), "bios:     {}", resolved);
+        load_bios(core, resolved);
     }
 
-    // load rom
-    load_rom(core, cfg.rom.path);
+    // load rom — anchored under <base>/<paths.roms_dir> for bare names.
+    // An empty rom_path_ is legal: the MMU treats a missing cartridge as
+    // open-bus, and we pause the emulator below so the user can plug a
+    // ROM in via the future File -> Load ROM menu without the CPU
+    // hammering on 0xFF (RST 38h) bytes in the meantime.
+    const bool rom_present = !rom_path_.empty();
+    if (rom_present) {
+        auto resolved = gbemu::paths::resolve_data_path(base_, cfg.paths.roms_dir, rom_path_);
+        LOG_INFO(gbemu::log::root(), "rom:      {}", resolved);
+        load_rom(core, resolved);
+    }
 
     core.init();
+
+    if (!headless_ && !rom_present) {
+        debugger.pause();
+    }
 
     if (headless_) {
         // No window, no renderer, no event loop — just run the script and

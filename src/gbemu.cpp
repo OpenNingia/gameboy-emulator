@@ -18,7 +18,9 @@ int main(int argc, char* argv[]) {
     std::string output_path{"dump.txt"};
     bool headless = false;
 
-    cli.add_option("rom", rom_path, "ROM file path (overrides cfg/gbemu.conf application.rom.path)");
+    cli.add_option("rom", rom_path,
+                   "ROM file. Bare filename -> resolved under <base>/<paths.roms_dir>; "
+                   "path with separators -> used as-is (absolute or CWD-relative).");
     cli.add_flag("--headless", headless, "Run without an SDL window; drive emulation via --script");
     cli.add_option("--script", script_path, "Debug script to execute (required with --headless)")
         ->check(CLI::ExistingFile);
@@ -30,6 +32,8 @@ int main(int argc, char* argv[]) {
         std::cerr << "--headless requires --script\n";
         return 2;
     }
+
+    LOG_INFO(gbemu::log::root(), "rom arg: {}", rom_path);
 
     try {
         Application app;

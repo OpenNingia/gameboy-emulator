@@ -5,7 +5,8 @@
       "name": "default (Debug)",
       "inherits": "vcpkg (Debug)",
       "environment": {
-        "VCPKG_ROOT": "C:\\code\\vcpkg"
+        "VCPKG_ROOT": "C:\\code\\vcpkg",
+        "GBEMU_HOME": "C:\\code\\emu\\gb_home"
       }
     },
     {

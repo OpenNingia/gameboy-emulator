@@ -510,6 +510,91 @@ di iniziare l'implementazione UI vera e propria.
 
 ---
 
+## 13. Rebranding — scelta nome + rinomina superfici pubbliche
+
+`GbEmu` è un placeholder generico. Prima di toccare la release pipeline (§10),
+l'About dialog (§11) e la Player UI (§12) serve scegliere un nome definitivo
+e propagarlo nelle parti pubbliche del codebase.
+
+**Vincoli per il nome:**
+
+- Non in collisione con emulatori esistenti (BGB, mGBA, SameBoy, Gambatte,
+  GBE+, BizHawk, …).
+- Non in collisione con marchi Nintendo / "Game Boy" / "GB".
+- Idealmente breve (≤ 8 char), pronunciabile, dominio plausibilmente
+  disponibile.
+- Candidati TBD — la scelta del nome è la parte lenta, il rename meccanico
+  è banale una volta deciso.
+
+**Superfici pubbliche da rinominare** (path concreti, da grep su `GbEmu` /
+`gbemu`):
+
+- **Eseguibile / build system**
+  - `CMakeLists.txt:3` e `src/CMakeLists.txt:3,16,17,19,30` — `project(GbEmu)`
+    + target `GbEmu` → produce `GbEmu.exe`.
+- **CLI / window title**
+  - `src/gbemu.cpp:14` — `CLI::App cli{"GbEmu — Game Boy emulator"}` (mostrato
+    in `--help`).
+  - `src/app.cpp:235` — `SDL_CreateWindow("GbEmu", …)` (titlebar).
+  - Filename `src/gbemu.cpp` (entry-point) — rinomina opzionale, va in coppia
+    con `add_executable(...)`.
+- **File su disco** (rottura compat accettata, è una v0.x)
+  - `cfg/gbemu.conf` — path hardcoded in `src/app.cpp:146`, copy rule in
+    `src/CMakeLists.txt:33-34`.
+  - `gbemu_window.state` — costante `WINDOW_STATE_FILE` in `src/app.cpp:34`.
+  - File futuri menzionati in §11/§12 (`gbemu_recent.txt`,
+    `gbemu_window_player.state`, `gbemu_window_debugger.state`,
+    `imgui_player.ini` / `imgui_debug.ini`): applicare il nuovo prefisso
+    direttamente quando si implementano — niente migrazione ex-post.
+- **ImGui dock IDs persistiti**
+  - `src/ui.cpp:152,155` — `"##GbEmuDockHost"` / `"##GbEmuDockSpace"`. Sono
+    ID interni ma vengono serializzati in `imgui.ini`: rinominarli invalida
+    il layout salvato dell'utente. Il fallback `DockBuilder*` ricostruisce
+    il default → si perde solo la personalizzazione.
+- **Namespace C++**
+  - `namespace gbemu { … }` (~46 file). Rename meccanico via IDE/sed.
+    Opzione alternativa: tenere `gbemu` come namespace interno e usare il
+    nuovo nome solo sulle superfici esterne — legittima se il nuovo nome
+    non si presta a uno short identifier C++.
+- **Variabili d'ambiente**
+  - Oggi **nessuna** env var `GBEMU_*` è letta dal codice (verificato: zero
+    match). Quando se ne aggiungeranno (es. override path save directory
+    §6, override config path §10) usare direttamente il nuovo prefisso.
+- **Documentazione**
+  - `CLAUDE.md` (riga 17, 21, 111, 113, 164 — riferimenti a `GbEmu.exe` e
+    `gbemu.conf`).
+  - `TODO.md` §11 ("About GbEmu…") e §10 (`cfg/gbemu.conf`).
+  - Script di smoke (`scripts/dbg_smoke.dbg`, `scripts/dmg_sound_check.dbg`)
+    — commenti con `.\GbEmu.exe`.
+  - `claude_review.md` — riferimenti storici, lasciabili.
+
+**Cosa NON rinominare** (intenzionalmente):
+
+- Directory del repo (`gameboy-emulator`) — è il nome del repo Git, non del
+  prodotto.
+- Logger root name `"root"` (`src/log.cpp`) — non è branding.
+- Mnemonic opcode, costanti hardware (`hwr_*`), nomi delle ROM Blargg —
+  terminologia di dominio, non branding.
+
+**Ordine consigliato:**
+
+1. Decidere il nome.
+2. Aggiornare CMake target + window title + CLI description (3 punti).
+   Build, verifica `GbEmu.exe` → `<NewName>.exe`.
+3. Rinominare i file su disco (`cfg/gbemu.conf`, `gbemu_window.state`),
+   aggiornare costanti in `app.cpp` e `configure_file` in `src/CMakeLists.txt`.
+4. Rinominare ImGui dockspace IDs.
+5. (Opzionale, PR separata) rinominare `namespace gbemu`.
+6. Aggiornare `CLAUDE.md` e script `.dbg`.
+
+**Dipendenze**: nessuna in ingresso. Bloccante per §10 (nome exe → zip /
+packaging), §11 (label "About …"), §12 (titlebar Player UI + file di stato
+dedicati). Va chiuso prima di queste tre.
+
+**Costo stimato**: 1-2 ore di rename meccanico una volta scelto il nome.
+
+---
+
 ## Note tecniche permanenti
 
 - `cfg/gbemu.conf` shipped ha path **assoluti** Windows per ROM e BIOS — va
