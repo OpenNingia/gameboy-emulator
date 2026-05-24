@@ -1,12 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
-#include <string>
 
 #include <alu.h>
 #include <card.h>
-#include <instruction.h>
 #include <mmu.h>
 #include <ppu.h>
 #include <registers.h>
@@ -36,13 +33,15 @@ namespace gbemu {
         void push(std::uint16_t u16);
         // pop u16 from the stack
         std::uint16_t pop_u16();
-        // execute the instruction
-        void execute(instruction op);
+
+        // helpers per M-cycle
+        uint8_t bus_read(uint16_t addr) { return mmu.read_u8(addr); }
+        void bus_write(uint16_t addr, uint8_t v) { mmu.write_u8(addr, v); }
+        uint16_t bus_read_u16(uint16_t addr) { return mmu.read_u16(addr); }
+        void bus_write_u16(uint16_t a, uint16_t v) { mmu.write_u16(a, v); }
 
     private:
         // fetch next op
         std::uint16_t fetch();
-        // decode an opcode into an instruction
-        instruction& decode(std::uint16_t op);
     };
 } // namespace gbemu

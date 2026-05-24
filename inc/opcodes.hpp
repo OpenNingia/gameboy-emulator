@@ -12,1041 +12,1036 @@
 
 #include <array>
 #include <cstdint>
-#include <cpu.h>
-
-// DEF_INSTR(opcode, struct_name, mnemonic, cycles_not_taken, cycles_taken)
-//
-// For unconditional opcodes cycles_not_taken == cycles_taken. For
-// conditional branches (JR cc / JP cc / CALL cc / RET cc) the two values
-// differ; the instruction body is expected to bump cpu.extra_cycles when
-// the branch is taken (see src/opcodes.cpp).
-//
-// The cycle counts are passed to the instruction base ctor; the user is
-// responsible for keeping inc/cpu.h's `instruction` constructor signature
-// in sync: instruction(std::string mnemonic, std::uint8_t cycles,
-//                      std::uint8_t cycles_taken).
-#define DEF_INSTR( o, x, y, c, ct ) \
-	struct x: instruction { \
-		x() : instruction(y, c, ct) { \
-			if constexpr (((o) & 0xFF00) == 0xCB00) \
-				instruction_set_cb[(o) & 0xFF] = this; \
-			else \
-				instruction_set[(o) & 0xFF] = this; \
-		} \
-		void execute(cpu& cpu) override; \
-	};
-
-#define INST_INSTR(x) extern gbemu::instruction_types::x x##_;
 
 namespace gbemu {
-	extern std::array<instruction*, 256> instruction_set;
-	extern std::array<instruction*, 256> instruction_set_cb;
+	struct cpu;
 
-	namespace instruction_types {
-		DEF_INSTR(0x0000, nop, "NOP", 4, 4);
-		DEF_INSTR(0x0001, ld_bc_d16, "LD BC, d16", 12, 12);
-		DEF_INSTR(0x0002, ld__bc__a, "LD (BC), A", 8, 8);
-		DEF_INSTR(0x0003, inc_bc, "INC BC", 8, 8);
-		DEF_INSTR(0x0004, inc_b, "INC B", 4, 4);
-		DEF_INSTR(0x0005, dec_b, "DEC B", 4, 4);
-		DEF_INSTR(0x0006, ld_b_d8, "LD B, d8", 8, 8);
-		DEF_INSTR(0x0007, rlca, "RLCA", 4, 4);
-		DEF_INSTR(0x0008, ld__a16__sp, "LD (a16), SP", 20, 20);
-		DEF_INSTR(0x0009, add_hl_bc, "ADD HL, BC", 8, 8);
-		DEF_INSTR(0x000A, ld_a__bc_, "LD A, (BC)", 8, 8);
-		DEF_INSTR(0x000B, dec_bc, "DEC BC", 8, 8);
-		DEF_INSTR(0x000C, inc_c, "INC C", 4, 4);
-		DEF_INSTR(0x000D, dec_c, "DEC C", 4, 4);
-		DEF_INSTR(0x000E, ld_c_d8, "LD C, d8", 8, 8);
-		DEF_INSTR(0x000F, rrca, "RRCA", 4, 4);
-		DEF_INSTR(0x0010, stop, "STOP", 4, 4);
-		DEF_INSTR(0x0011, ld_de_d16, "LD DE, d16", 12, 12);
-		DEF_INSTR(0x0012, ld__de__a, "LD (DE), A", 8, 8);
-		DEF_INSTR(0x0013, inc_de, "INC DE", 8, 8);
-		DEF_INSTR(0x0014, inc_d, "INC D", 4, 4);
-		DEF_INSTR(0x0015, dec_d, "DEC D", 4, 4);
-		DEF_INSTR(0x0016, ld_d_d8, "LD D, d8", 8, 8);
-		DEF_INSTR(0x0017, rla, "RLA", 4, 4);
-		DEF_INSTR(0x0018, jr_s8, "JR s8", 12, 12);
-		DEF_INSTR(0x0019, add_hl_de, "ADD HL, DE", 8, 8);
-		DEF_INSTR(0x001A, ld_a__de_, "LD A, (DE)", 8, 8);
-		DEF_INSTR(0x001B, dec_de, "DEC DE", 8, 8);
-		DEF_INSTR(0x001C, inc_e, "INC E", 4, 4);
-		DEF_INSTR(0x001D, dec_e, "DEC E", 4, 4);
-		DEF_INSTR(0x001E, ld_e_d8, "LD E, d8", 8, 8);
-		DEF_INSTR(0x001F, rra, "RRA", 4, 4);
-		DEF_INSTR(0x0020, jr_nz_s8, "JR NZ, s8", 8, 12);
-		DEF_INSTR(0x0021, ld_hl_d16, "LD HL, d16", 12, 12);
-		DEF_INSTR(0x0022, ld__hlp__a, "LD (HL+), A", 8, 8);
-		DEF_INSTR(0x0023, inc_hl, "INC HL", 8, 8);
-		DEF_INSTR(0x0024, inc_h, "INC H", 4, 4);
-		DEF_INSTR(0x0025, dec_h, "DEC H", 4, 4);
-		DEF_INSTR(0x0026, ld_h_d8, "LD H, d8", 8, 8);
-		DEF_INSTR(0x0027, daa, "DAA", 4, 4);
-		DEF_INSTR(0x0028, jr_z_s8, "JR Z, s8", 8, 12);
-		DEF_INSTR(0x0029, add_hl_hl, "ADD HL, HL", 8, 8);
-		DEF_INSTR(0x002A, ld_a__hlp_, "LD A, (HL+)", 8, 8);
-		DEF_INSTR(0x002B, dec_hl, "DEC HL", 8, 8);
-		DEF_INSTR(0x002C, inc_l, "INC L", 4, 4);
-		DEF_INSTR(0x002D, dec_l, "DEC L", 4, 4);
-		DEF_INSTR(0x002E, ld_l_d8, "LD L, d8", 8, 8);
-		DEF_INSTR(0x002F, cpl, "CPL", 4, 4);
-		DEF_INSTR(0x0030, jr_nc_s8, "JR NC, s8", 8, 12);
-		DEF_INSTR(0x0031, ld_sp_d16, "LD SP, d16", 12, 12);
-		DEF_INSTR(0x0032, ld__hlm__a, "LD (HL-), A", 8, 8);
-		DEF_INSTR(0x0033, inc_sp, "INC SP", 8, 8);
-		DEF_INSTR(0x0034, inc__hl_, "INC (HL)", 12, 12);
-		DEF_INSTR(0x0035, dec__hl_, "DEC (HL)", 12, 12);
-		DEF_INSTR(0x0036, ld__hl__d8, "LD (HL), d8", 12, 12);
-		DEF_INSTR(0x0037, scf, "SCF", 4, 4);
-		DEF_INSTR(0x0038, jr_c_s8, "JR C, s8", 8, 12);
-		DEF_INSTR(0x0039, add_hl_sp, "ADD HL, SP", 8, 8);
-		DEF_INSTR(0x003A, ld_a__hlm_, "LD A, (HL-)", 8, 8);
-		DEF_INSTR(0x003B, dec_sp, "DEC SP", 8, 8);
-		DEF_INSTR(0x003C, inc_a, "INC A", 4, 4);
-		DEF_INSTR(0x003D, dec_a, "DEC A", 4, 4);
-		DEF_INSTR(0x003E, ld_a_d8, "LD A, d8", 8, 8);
-		DEF_INSTR(0x003F, ccf, "CCF", 4, 4);
-		DEF_INSTR(0x0040, ld_b_b, "LD B, B", 4, 4);
-		DEF_INSTR(0x0041, ld_b_c, "LD B, C", 4, 4);
-		DEF_INSTR(0x0042, ld_b_d, "LD B, D", 4, 4);
-		DEF_INSTR(0x0043, ld_b_e, "LD B, E", 4, 4);
-		DEF_INSTR(0x0044, ld_b_h, "LD B, H", 4, 4);
-		DEF_INSTR(0x0045, ld_b_l, "LD B, L", 4, 4);
-		DEF_INSTR(0x0046, ld_b__hl_, "LD B, (HL)", 8, 8);
-		DEF_INSTR(0x0047, ld_b_a, "LD B, A", 4, 4);
-		DEF_INSTR(0x0048, ld_c_b, "LD C, B", 4, 4);
-		DEF_INSTR(0x0049, ld_c_c, "LD C, C", 4, 4);
-		DEF_INSTR(0x004A, ld_c_d, "LD C, D", 4, 4);
-		DEF_INSTR(0x004B, ld_c_e, "LD C, E", 4, 4);
-		DEF_INSTR(0x004C, ld_c_h, "LD C, H", 4, 4);
-		DEF_INSTR(0x004D, ld_c_l, "LD C, L", 4, 4);
-		DEF_INSTR(0x004E, ld_c__hl_, "LD C, (HL)", 8, 8);
-		DEF_INSTR(0x004F, ld_c_a, "LD C, A", 4, 4);
-		DEF_INSTR(0x0050, ld_d_b, "LD D, B", 4, 4);
-		DEF_INSTR(0x0051, ld_d_c, "LD D, C", 4, 4);
-		DEF_INSTR(0x0052, ld_d_d, "LD D, D", 4, 4);
-		DEF_INSTR(0x0053, ld_d_e, "LD D, E", 4, 4);
-		DEF_INSTR(0x0054, ld_d_h, "LD D, H", 4, 4);
-		DEF_INSTR(0x0055, ld_d_l, "LD D, L", 4, 4);
-		DEF_INSTR(0x0056, ld_d__hl_, "LD D, (HL)", 8, 8);
-		DEF_INSTR(0x0057, ld_d_a, "LD D, A", 4, 4);
-		DEF_INSTR(0x0058, ld_e_b, "LD E, B", 4, 4);
-		DEF_INSTR(0x0059, ld_e_c, "LD E, C", 4, 4);
-		DEF_INSTR(0x005A, ld_e_d, "LD E, D", 4, 4);
-		DEF_INSTR(0x005B, ld_e_e, "LD E, E", 4, 4);
-		DEF_INSTR(0x005C, ld_e_h, "LD E, H", 4, 4);
-		DEF_INSTR(0x005D, ld_e_l, "LD E, L", 4, 4);
-		DEF_INSTR(0x005E, ld_e__hl_, "LD E, (HL)", 8, 8);
-		DEF_INSTR(0x005F, ld_e_a, "LD E, A", 4, 4);
-		DEF_INSTR(0x0060, ld_h_b, "LD H, B", 4, 4);
-		DEF_INSTR(0x0061, ld_h_c, "LD H, C", 4, 4);
-		DEF_INSTR(0x0062, ld_h_d, "LD H, D", 4, 4);
-		DEF_INSTR(0x0063, ld_h_e, "LD H, E", 4, 4);
-		DEF_INSTR(0x0064, ld_h_h, "LD H, H", 4, 4);
-		DEF_INSTR(0x0065, ld_h_l, "LD H, L", 4, 4);
-		DEF_INSTR(0x0066, ld_h__hl_, "LD H, (HL)", 8, 8);
-		DEF_INSTR(0x0067, ld_h_a, "LD H, A", 4, 4);
-		DEF_INSTR(0x0068, ld_l_b, "LD L, B", 4, 4);
-		DEF_INSTR(0x0069, ld_l_c, "LD L, C", 4, 4);
-		DEF_INSTR(0x006A, ld_l_d, "LD L, D", 4, 4);
-		DEF_INSTR(0x006B, ld_l_e, "LD L, E", 4, 4);
-		DEF_INSTR(0x006C, ld_l_h, "LD L, H", 4, 4);
-		DEF_INSTR(0x006D, ld_l_l, "LD L, L", 4, 4);
-		DEF_INSTR(0x006E, ld_l__hl_, "LD L, (HL)", 8, 8);
-		DEF_INSTR(0x006F, ld_l_a, "LD L, A", 4, 4);
-		DEF_INSTR(0x0070, ld__hl__b, "LD (HL), B", 8, 8);
-		DEF_INSTR(0x0071, ld__hl__c, "LD (HL), C", 8, 8);
-		DEF_INSTR(0x0072, ld__hl__d, "LD (HL), D", 8, 8);
-		DEF_INSTR(0x0073, ld__hl__e, "LD (HL), E", 8, 8);
-		DEF_INSTR(0x0074, ld__hl__h, "LD (HL), H", 8, 8);
-		DEF_INSTR(0x0075, ld__hl__l, "LD (HL), L", 8, 8);
-		DEF_INSTR(0x0076, halt, "HALT", 4, 4);
-		DEF_INSTR(0x0077, ld__hl__a, "LD (HL), A", 8, 8);
-		DEF_INSTR(0x0078, ld_a_b, "LD A, B", 4, 4);
-		DEF_INSTR(0x0079, ld_a_c, "LD A, C", 4, 4);
-		DEF_INSTR(0x007A, ld_a_d, "LD A, D", 4, 4);
-		DEF_INSTR(0x007B, ld_a_e, "LD A, E", 4, 4);
-		DEF_INSTR(0x007C, ld_a_h, "LD A, H", 4, 4);
-		DEF_INSTR(0x007D, ld_a_l, "LD A, L", 4, 4);
-		DEF_INSTR(0x007E, ld_a__hl_, "LD A, (HL)", 8, 8);
-		DEF_INSTR(0x007F, ld_a_a, "LD A, A", 4, 4);
-		DEF_INSTR(0x0080, add_a_b, "ADD A, B", 4, 4);
-		DEF_INSTR(0x0081, add_a_c, "ADD A, C", 4, 4);
-		DEF_INSTR(0x0082, add_a_d, "ADD A, D", 4, 4);
-		DEF_INSTR(0x0083, add_a_e, "ADD A, E", 4, 4);
-		DEF_INSTR(0x0084, add_a_h, "ADD A, H", 4, 4);
-		DEF_INSTR(0x0085, add_a_l, "ADD A, L", 4, 4);
-		DEF_INSTR(0x0086, add_a__hl_, "ADD A, (HL)", 8, 8);
-		DEF_INSTR(0x0087, add_a_a, "ADD A, A", 4, 4);
-		DEF_INSTR(0x0088, adc_a_b, "ADC A, B", 4, 4);
-		DEF_INSTR(0x0089, adc_a_c, "ADC A, C", 4, 4);
-		DEF_INSTR(0x008A, adc_a_d, "ADC A, D", 4, 4);
-		DEF_INSTR(0x008B, adc_a_e, "ADC A, E", 4, 4);
-		DEF_INSTR(0x008C, adc_a_h, "ADC A, H", 4, 4);
-		DEF_INSTR(0x008D, adc_a_l, "ADC A, L", 4, 4);
-		DEF_INSTR(0x008E, adc_a__hl_, "ADC A, (HL)", 8, 8);
-		DEF_INSTR(0x008F, adc_a_a, "ADC A, A", 4, 4);
-		DEF_INSTR(0x0090, sub_b, "SUB B", 4, 4);
-		DEF_INSTR(0x0091, sub_c, "SUB C", 4, 4);
-		DEF_INSTR(0x0092, sub_d, "SUB D", 4, 4);
-		DEF_INSTR(0x0093, sub_e, "SUB E", 4, 4);
-		DEF_INSTR(0x0094, sub_h, "SUB H", 4, 4);
-		DEF_INSTR(0x0095, sub_l, "SUB L", 4, 4);
-		DEF_INSTR(0x0096, sub__hl_, "SUB (HL)", 8, 8);
-		DEF_INSTR(0x0097, sub_a, "SUB A", 4, 4);
-		DEF_INSTR(0x0098, sbc_a_b, "SBC A, B", 4, 4);
-		DEF_INSTR(0x0099, sbc_a_c, "SBC A, C", 4, 4);
-		DEF_INSTR(0x009A, sbc_a_d, "SBC A, D", 4, 4);
-		DEF_INSTR(0x009B, sbc_a_e, "SBC A, E", 4, 4);
-		DEF_INSTR(0x009C, sbc_a_h, "SBC A, H", 4, 4);
-		DEF_INSTR(0x009D, sbc_a_l, "SBC A, L", 4, 4);
-		DEF_INSTR(0x009E, sbc_a__hl_, "SBC A, (HL)", 8, 8);
-		DEF_INSTR(0x009F, sbc_a_a, "SBC A, A", 4, 4);
-		DEF_INSTR(0x00A0, and_b, "AND B", 4, 4);
-		DEF_INSTR(0x00A1, and_c, "AND C", 4, 4);
-		DEF_INSTR(0x00A2, and_d, "AND D", 4, 4);
-		DEF_INSTR(0x00A3, and_e, "AND E", 4, 4);
-		DEF_INSTR(0x00A4, and_h, "AND H", 4, 4);
-		DEF_INSTR(0x00A5, and_l, "AND L", 4, 4);
-		DEF_INSTR(0x00A6, and__hl_, "AND (HL)", 8, 8);
-		DEF_INSTR(0x00A7, and_a, "AND A", 4, 4);
-		DEF_INSTR(0x00A8, xor_b, "XOR B", 4, 4);
-		DEF_INSTR(0x00A9, xor_c, "XOR C", 4, 4);
-		DEF_INSTR(0x00AA, xor_d, "XOR D", 4, 4);
-		DEF_INSTR(0x00AB, xor_e, "XOR E", 4, 4);
-		DEF_INSTR(0x00AC, xor_h, "XOR H", 4, 4);
-		DEF_INSTR(0x00AD, xor_l, "XOR L", 4, 4);
-		DEF_INSTR(0x00AE, xor__hl_, "XOR (HL)", 8, 8);
-		DEF_INSTR(0x00AF, xor_a, "XOR A", 4, 4);
-		DEF_INSTR(0x00B0, or_b, "OR B", 4, 4);
-		DEF_INSTR(0x00B1, or_c, "OR C", 4, 4);
-		DEF_INSTR(0x00B2, or_d, "OR D", 4, 4);
-		DEF_INSTR(0x00B3, or_e, "OR E", 4, 4);
-		DEF_INSTR(0x00B4, or_h, "OR H", 4, 4);
-		DEF_INSTR(0x00B5, or_l, "OR L", 4, 4);
-		DEF_INSTR(0x00B6, or__hl_, "OR (HL)", 8, 8);
-		DEF_INSTR(0x00B7, or_a, "OR A", 4, 4);
-		DEF_INSTR(0x00B8, cp_b, "CP B", 4, 4);
-		DEF_INSTR(0x00B9, cp_c, "CP C", 4, 4);
-		DEF_INSTR(0x00BA, cp_d, "CP D", 4, 4);
-		DEF_INSTR(0x00BB, cp_e, "CP E", 4, 4);
-		DEF_INSTR(0x00BC, cp_h, "CP H", 4, 4);
-		DEF_INSTR(0x00BD, cp_l, "CP L", 4, 4);
-		DEF_INSTR(0x00BE, cp__hl_, "CP (HL)", 8, 8);
-		DEF_INSTR(0x00BF, cp_a, "CP A", 4, 4);
-		DEF_INSTR(0x00C0, ret_nz, "RET NZ", 8, 20);
-		DEF_INSTR(0x00C1, pop_bc, "POP BC", 12, 12);
-		DEF_INSTR(0x00C2, jp_nz_a16, "JP NZ, a16", 12, 16);
-		DEF_INSTR(0x00C3, jp_a16, "JP a16", 16, 16);
-		DEF_INSTR(0x00C4, call_nz_a16, "CALL NZ, a16", 12, 24);
-		DEF_INSTR(0x00C5, push_bc, "PUSH BC", 16, 16);
-		DEF_INSTR(0x00C6, add_a_d8, "ADD A, d8", 8, 8);
-		DEF_INSTR(0x00C7, rst_0, "RST 0", 16, 16);
-		DEF_INSTR(0x00C8, ret_z, "RET Z", 8, 20);
-		DEF_INSTR(0x00C9, ret, "RET", 16, 16);
-		DEF_INSTR(0x00CA, jp_z_a16, "JP Z, a16", 12, 16);
-		DEF_INSTR(0x00CC, call_z_a16, "CALL Z, a16", 12, 24);
-		DEF_INSTR(0x00CD, call_a16, "CALL a16", 24, 24);
-		DEF_INSTR(0x00CE, adc_a_d8, "ADC A, d8", 8, 8);
-		DEF_INSTR(0x00CF, rst_1, "RST 1", 16, 16);
-		DEF_INSTR(0x00D0, ret_nc, "RET NC", 8, 20);
-		DEF_INSTR(0x00D1, pop_de, "POP DE", 12, 12);
-		DEF_INSTR(0x00D2, jp_nc_a16, "JP NC, a16", 12, 16);
-		DEF_INSTR(0x00D4, call_nc_a16, "CALL NC, a16", 12, 24);
-		DEF_INSTR(0x00D5, push_de, "PUSH DE", 16, 16);
-		DEF_INSTR(0x00D6, sub_d8, "SUB d8", 8, 8);
-		DEF_INSTR(0x00D7, rst_2, "RST 2", 16, 16);
-		DEF_INSTR(0x00D8, ret_c, "RET C", 8, 20);
-		DEF_INSTR(0x00D9, reti, "RETI", 16, 16);
-		DEF_INSTR(0x00DA, jp_c_a16, "JP C, a16", 12, 16);
-		DEF_INSTR(0x00DC, call_c_a16, "CALL C, a16", 12, 24);
-		DEF_INSTR(0x00DE, sbc_a_d8, "SBC A, d8", 8, 8);
-		DEF_INSTR(0x00DF, rst_3, "RST 3", 16, 16);
-		DEF_INSTR(0x00E0, ld__a8__a, "LD (a8), A", 12, 12);
-		DEF_INSTR(0x00E1, pop_hl, "POP HL", 12, 12);
-		DEF_INSTR(0x00E2, ld__c__a, "LD (C), A", 8, 8);
-		DEF_INSTR(0x00E5, push_hl, "PUSH HL", 16, 16);
-		DEF_INSTR(0x00E6, and_d8, "AND d8", 8, 8);
-		DEF_INSTR(0x00E7, rst_4, "RST 4", 16, 16);
-		DEF_INSTR(0x00E8, add_sp_s8, "ADD SP, s8", 16, 16);
-		DEF_INSTR(0x00E9, jp_hl, "JP HL", 4, 4);
-		DEF_INSTR(0x00EA, ld__a16__a, "LD (a16), A", 16, 16);
-		DEF_INSTR(0x00EE, xor_d8, "XOR d8", 8, 8);
-		DEF_INSTR(0x00EF, rst_5, "RST 5", 16, 16);
-		DEF_INSTR(0x00F0, ld_a__a8_, "LD A, (a8)", 12, 12);
-		DEF_INSTR(0x00F1, pop_af, "POP AF", 12, 12);
-		DEF_INSTR(0x00F2, ld_a__c_, "LD A, (C)", 8, 8);
-		DEF_INSTR(0x00F3, di, "DI", 4, 4);
-		DEF_INSTR(0x00F5, push_af, "PUSH AF", 16, 16);
-		DEF_INSTR(0x00F6, or_d8, "OR d8", 8, 8);
-		DEF_INSTR(0x00F7, rst_6, "RST 6", 16, 16);
-		DEF_INSTR(0x00F8, ld_hl_spps8, "LD HL, SP+s8", 12, 12);
-		DEF_INSTR(0x00F9, ld_sp_hl, "LD SP, HL", 8, 8);
-		DEF_INSTR(0x00FA, ld_a__a16_, "LD A, (a16)", 16, 16);
-		DEF_INSTR(0x00FB, ei, "EI", 4, 4);
-		DEF_INSTR(0x00FE, cp_d8, "CP d8", 8, 8);
-		DEF_INSTR(0x00FF, rst_7, "RST 7", 16, 16);
-		DEF_INSTR(0xCB00, rlc_b, "RLC B", 8, 8);
-		DEF_INSTR(0xCB01, rlc_c, "RLC C", 8, 8);
-		DEF_INSTR(0xCB02, rlc_d, "RLC D", 8, 8);
-		DEF_INSTR(0xCB03, rlc_e, "RLC E", 8, 8);
-		DEF_INSTR(0xCB04, rlc_h, "RLC H", 8, 8);
-		DEF_INSTR(0xCB05, rlc_l, "RLC L", 8, 8);
-		DEF_INSTR(0xCB06, rlc__hl_, "RLC (HL)", 16, 16);
-		DEF_INSTR(0xCB07, rlc_a, "RLC A", 8, 8);
-		DEF_INSTR(0xCB08, rrc_b, "RRC B", 8, 8);
-		DEF_INSTR(0xCB09, rrc_c, "RRC C", 8, 8);
-		DEF_INSTR(0xCB0A, rrc_d, "RRC D", 8, 8);
-		DEF_INSTR(0xCB0B, rrc_e, "RRC E", 8, 8);
-		DEF_INSTR(0xCB0C, rrc_h, "RRC H", 8, 8);
-		DEF_INSTR(0xCB0D, rrc_l, "RRC L", 8, 8);
-		DEF_INSTR(0xCB0E, rrc__hl_, "RRC (HL)", 16, 16);
-		DEF_INSTR(0xCB0F, rrc_a, "RRC A", 8, 8);
-		DEF_INSTR(0xCB10, rl_b, "RL B", 8, 8);
-		DEF_INSTR(0xCB11, rl_c, "RL C", 8, 8);
-		DEF_INSTR(0xCB12, rl_d, "RL D", 8, 8);
-		DEF_INSTR(0xCB13, rl_e, "RL E", 8, 8);
-		DEF_INSTR(0xCB14, rl_h, "RL H", 8, 8);
-		DEF_INSTR(0xCB15, rl_l, "RL L", 8, 8);
-		DEF_INSTR(0xCB16, rl__hl_, "RL (HL)", 16, 16);
-		DEF_INSTR(0xCB17, rl_a, "RL A", 8, 8);
-		DEF_INSTR(0xCB18, rr_b, "RR B", 8, 8);
-		DEF_INSTR(0xCB19, rr_c, "RR C", 8, 8);
-		DEF_INSTR(0xCB1A, rr_d, "RR D", 8, 8);
-		DEF_INSTR(0xCB1B, rr_e, "RR E", 8, 8);
-		DEF_INSTR(0xCB1C, rr_h, "RR H", 8, 8);
-		DEF_INSTR(0xCB1D, rr_l, "RR L", 8, 8);
-		DEF_INSTR(0xCB1E, rr__hl_, "RR (HL)", 16, 16);
-		DEF_INSTR(0xCB1F, rr_a, "RR A", 8, 8);
-		DEF_INSTR(0xCB20, sla_b, "SLA B", 8, 8);
-		DEF_INSTR(0xCB21, sla_c, "SLA C", 8, 8);
-		DEF_INSTR(0xCB22, sla_d, "SLA D", 8, 8);
-		DEF_INSTR(0xCB23, sla_e, "SLA E", 8, 8);
-		DEF_INSTR(0xCB24, sla_h, "SLA H", 8, 8);
-		DEF_INSTR(0xCB25, sla_l, "SLA L", 8, 8);
-		DEF_INSTR(0xCB26, sla__hl_, "SLA (HL)", 16, 16);
-		DEF_INSTR(0xCB27, sla_a, "SLA A", 8, 8);
-		DEF_INSTR(0xCB28, sra_b, "SRA B", 8, 8);
-		DEF_INSTR(0xCB29, sra_c, "SRA C", 8, 8);
-		DEF_INSTR(0xCB2A, sra_d, "SRA D", 8, 8);
-		DEF_INSTR(0xCB2B, sra_e, "SRA E", 8, 8);
-		DEF_INSTR(0xCB2C, sra_h, "SRA H", 8, 8);
-		DEF_INSTR(0xCB2D, sra_l, "SRA L", 8, 8);
-		DEF_INSTR(0xCB2E, sra__hl_, "SRA (HL)", 16, 16);
-		DEF_INSTR(0xCB2F, sra_a, "SRA A", 8, 8);
-		DEF_INSTR(0xCB30, swap_b, "SWAP B", 8, 8);
-		DEF_INSTR(0xCB31, swap_c, "SWAP C", 8, 8);
-		DEF_INSTR(0xCB32, swap_d, "SWAP D", 8, 8);
-		DEF_INSTR(0xCB33, swap_e, "SWAP E", 8, 8);
-		DEF_INSTR(0xCB34, swap_h, "SWAP H", 8, 8);
-		DEF_INSTR(0xCB35, swap_l, "SWAP L", 8, 8);
-		DEF_INSTR(0xCB36, swap__hl_, "SWAP (HL)", 16, 16);
-		DEF_INSTR(0xCB37, swap_a, "SWAP A", 8, 8);
-		DEF_INSTR(0xCB38, srl_b, "SRL B", 8, 8);
-		DEF_INSTR(0xCB39, srl_c, "SRL C", 8, 8);
-		DEF_INSTR(0xCB3A, srl_d, "SRL D", 8, 8);
-		DEF_INSTR(0xCB3B, srl_e, "SRL E", 8, 8);
-		DEF_INSTR(0xCB3C, srl_h, "SRL H", 8, 8);
-		DEF_INSTR(0xCB3D, srl_l, "SRL L", 8, 8);
-		DEF_INSTR(0xCB3E, srl__hl_, "SRL (HL)", 16, 16);
-		DEF_INSTR(0xCB3F, srl_a, "SRL A", 8, 8);
-		DEF_INSTR(0xCB40, bit_0_b, "BIT 0, B", 8, 8);
-		DEF_INSTR(0xCB41, bit_0_c, "BIT 0, C", 8, 8);
-		DEF_INSTR(0xCB42, bit_0_d, "BIT 0, D", 8, 8);
-		DEF_INSTR(0xCB43, bit_0_e, "BIT 0, E", 8, 8);
-		DEF_INSTR(0xCB44, bit_0_h, "BIT 0, H", 8, 8);
-		DEF_INSTR(0xCB45, bit_0_l, "BIT 0, L", 8, 8);
-		DEF_INSTR(0xCB46, bit_0__hl_, "BIT 0, (HL)", 12, 12);
-		DEF_INSTR(0xCB47, bit_0_a, "BIT 0, A", 8, 8);
-		DEF_INSTR(0xCB48, bit_1_b, "BIT 1, B", 8, 8);
-		DEF_INSTR(0xCB49, bit_1_c, "BIT 1, C", 8, 8);
-		DEF_INSTR(0xCB4A, bit_1_d, "BIT 1, D", 8, 8);
-		DEF_INSTR(0xCB4B, bit_1_e, "BIT 1, E", 8, 8);
-		DEF_INSTR(0xCB4C, bit_1_h, "BIT 1, H", 8, 8);
-		DEF_INSTR(0xCB4D, bit_1_l, "BIT 1, L", 8, 8);
-		DEF_INSTR(0xCB4E, bit_1__hl_, "BIT 1, (HL)", 12, 12);
-		DEF_INSTR(0xCB4F, bit_1_a, "BIT 1, A", 8, 8);
-		DEF_INSTR(0xCB50, bit_2_b, "BIT 2, B", 8, 8);
-		DEF_INSTR(0xCB51, bit_2_c, "BIT 2, C", 8, 8);
-		DEF_INSTR(0xCB52, bit_2_d, "BIT 2, D", 8, 8);
-		DEF_INSTR(0xCB53, bit_2_e, "BIT 2, E", 8, 8);
-		DEF_INSTR(0xCB54, bit_2_h, "BIT 2, H", 8, 8);
-		DEF_INSTR(0xCB55, bit_2_l, "BIT 2, L", 8, 8);
-		DEF_INSTR(0xCB56, bit_2__hl_, "BIT 2, (HL)", 12, 12);
-		DEF_INSTR(0xCB57, bit_2_a, "BIT 2, A", 8, 8);
-		DEF_INSTR(0xCB58, bit_3_b, "BIT 3, B", 8, 8);
-		DEF_INSTR(0xCB59, bit_3_c, "BIT 3, C", 8, 8);
-		DEF_INSTR(0xCB5A, bit_3_d, "BIT 3, D", 8, 8);
-		DEF_INSTR(0xCB5B, bit_3_e, "BIT 3, E", 8, 8);
-		DEF_INSTR(0xCB5C, bit_3_h, "BIT 3, H", 8, 8);
-		DEF_INSTR(0xCB5D, bit_3_l, "BIT 3, L", 8, 8);
-		DEF_INSTR(0xCB5E, bit_3__hl_, "BIT 3, (HL)", 12, 12);
-		DEF_INSTR(0xCB5F, bit_3_a, "BIT 3, A", 8, 8);
-		DEF_INSTR(0xCB60, bit_4_b, "BIT 4, B", 8, 8);
-		DEF_INSTR(0xCB61, bit_4_c, "BIT 4, C", 8, 8);
-		DEF_INSTR(0xCB62, bit_4_d, "BIT 4, D", 8, 8);
-		DEF_INSTR(0xCB63, bit_4_e, "BIT 4, E", 8, 8);
-		DEF_INSTR(0xCB64, bit_4_h, "BIT 4, H", 8, 8);
-		DEF_INSTR(0xCB65, bit_4_l, "BIT 4, L", 8, 8);
-		DEF_INSTR(0xCB66, bit_4__hl_, "BIT 4, (HL)", 12, 12);
-		DEF_INSTR(0xCB67, bit_4_a, "BIT 4, A", 8, 8);
-		DEF_INSTR(0xCB68, bit_5_b, "BIT 5, B", 8, 8);
-		DEF_INSTR(0xCB69, bit_5_c, "BIT 5, C", 8, 8);
-		DEF_INSTR(0xCB6A, bit_5_d, "BIT 5, D", 8, 8);
-		DEF_INSTR(0xCB6B, bit_5_e, "BIT 5, E", 8, 8);
-		DEF_INSTR(0xCB6C, bit_5_h, "BIT 5, H", 8, 8);
-		DEF_INSTR(0xCB6D, bit_5_l, "BIT 5, L", 8, 8);
-		DEF_INSTR(0xCB6E, bit_5__hl_, "BIT 5, (HL)", 12, 12);
-		DEF_INSTR(0xCB6F, bit_5_a, "BIT 5, A", 8, 8);
-		DEF_INSTR(0xCB70, bit_6_b, "BIT 6, B", 8, 8);
-		DEF_INSTR(0xCB71, bit_6_c, "BIT 6, C", 8, 8);
-		DEF_INSTR(0xCB72, bit_6_d, "BIT 6, D", 8, 8);
-		DEF_INSTR(0xCB73, bit_6_e, "BIT 6, E", 8, 8);
-		DEF_INSTR(0xCB74, bit_6_h, "BIT 6, H", 8, 8);
-		DEF_INSTR(0xCB75, bit_6_l, "BIT 6, L", 8, 8);
-		DEF_INSTR(0xCB76, bit_6__hl_, "BIT 6, (HL)", 12, 12);
-		DEF_INSTR(0xCB77, bit_6_a, "BIT 6, A", 8, 8);
-		DEF_INSTR(0xCB78, bit_7_b, "BIT 7, B", 8, 8);
-		DEF_INSTR(0xCB79, bit_7_c, "BIT 7, C", 8, 8);
-		DEF_INSTR(0xCB7A, bit_7_d, "BIT 7, D", 8, 8);
-		DEF_INSTR(0xCB7B, bit_7_e, "BIT 7, E", 8, 8);
-		DEF_INSTR(0xCB7C, bit_7_h, "BIT 7, H", 8, 8);
-		DEF_INSTR(0xCB7D, bit_7_l, "BIT 7, L", 8, 8);
-		DEF_INSTR(0xCB7E, bit_7__hl_, "BIT 7, (HL)", 12, 12);
-		DEF_INSTR(0xCB7F, bit_7_a, "BIT 7, A", 8, 8);
-		DEF_INSTR(0xCB80, res_0_b, "RES 0, B", 8, 8);
-		DEF_INSTR(0xCB81, res_0_c, "RES 0, C", 8, 8);
-		DEF_INSTR(0xCB82, res_0_d, "RES 0, D", 8, 8);
-		DEF_INSTR(0xCB83, res_0_e, "RES 0, E", 8, 8);
-		DEF_INSTR(0xCB84, res_0_h, "RES 0, H", 8, 8);
-		DEF_INSTR(0xCB85, res_0_l, "RES 0, L", 8, 8);
-		DEF_INSTR(0xCB86, res_0__hl_, "RES 0, (HL)", 16, 16);
-		DEF_INSTR(0xCB87, res_0_a, "RES 0, A", 8, 8);
-		DEF_INSTR(0xCB88, res_1_b, "RES 1, B", 8, 8);
-		DEF_INSTR(0xCB89, res_1_c, "RES 1, C", 8, 8);
-		DEF_INSTR(0xCB8A, res_1_d, "RES 1, D", 8, 8);
-		DEF_INSTR(0xCB8B, res_1_e, "RES 1, E", 8, 8);
-		DEF_INSTR(0xCB8C, res_1_h, "RES 1, H", 8, 8);
-		DEF_INSTR(0xCB8D, res_1_l, "RES 1, L", 8, 8);
-		DEF_INSTR(0xCB8E, res_1__hl_, "RES 1, (HL)", 16, 16);
-		DEF_INSTR(0xCB8F, res_1_a, "RES 1, A", 8, 8);
-		DEF_INSTR(0xCB90, res_2_b, "RES 2, B", 8, 8);
-		DEF_INSTR(0xCB91, res_2_c, "RES 2, C", 8, 8);
-		DEF_INSTR(0xCB92, res_2_d, "RES 2, D", 8, 8);
-		DEF_INSTR(0xCB93, res_2_e, "RES 2, E", 8, 8);
-		DEF_INSTR(0xCB94, res_2_h, "RES 2, H", 8, 8);
-		DEF_INSTR(0xCB95, res_2_l, "RES 2, L", 8, 8);
-		DEF_INSTR(0xCB96, res_2__hl_, "RES 2, (HL)", 16, 16);
-		DEF_INSTR(0xCB97, res_2_a, "RES 2, A", 8, 8);
-		DEF_INSTR(0xCB98, res_3_b, "RES 3, B", 8, 8);
-		DEF_INSTR(0xCB99, res_3_c, "RES 3, C", 8, 8);
-		DEF_INSTR(0xCB9A, res_3_d, "RES 3, D", 8, 8);
-		DEF_INSTR(0xCB9B, res_3_e, "RES 3, E", 8, 8);
-		DEF_INSTR(0xCB9C, res_3_h, "RES 3, H", 8, 8);
-		DEF_INSTR(0xCB9D, res_3_l, "RES 3, L", 8, 8);
-		DEF_INSTR(0xCB9E, res_3__hl_, "RES 3, (HL)", 16, 16);
-		DEF_INSTR(0xCB9F, res_3_a, "RES 3, A", 8, 8);
-		DEF_INSTR(0xCBA0, res_4_b, "RES 4, B", 8, 8);
-		DEF_INSTR(0xCBA1, res_4_c, "RES 4, C", 8, 8);
-		DEF_INSTR(0xCBA2, res_4_d, "RES 4, D", 8, 8);
-		DEF_INSTR(0xCBA3, res_4_e, "RES 4, E", 8, 8);
-		DEF_INSTR(0xCBA4, res_4_h, "RES 4, H", 8, 8);
-		DEF_INSTR(0xCBA5, res_4_l, "RES 4, L", 8, 8);
-		DEF_INSTR(0xCBA6, res_4__hl_, "RES 4, (HL)", 16, 16);
-		DEF_INSTR(0xCBA7, res_4_a, "RES 4, A", 8, 8);
-		DEF_INSTR(0xCBA8, res_5_b, "RES 5, B", 8, 8);
-		DEF_INSTR(0xCBA9, res_5_c, "RES 5, C", 8, 8);
-		DEF_INSTR(0xCBAA, res_5_d, "RES 5, D", 8, 8);
-		DEF_INSTR(0xCBAB, res_5_e, "RES 5, E", 8, 8);
-		DEF_INSTR(0xCBAC, res_5_h, "RES 5, H", 8, 8);
-		DEF_INSTR(0xCBAD, res_5_l, "RES 5, L", 8, 8);
-		DEF_INSTR(0xCBAE, res_5__hl_, "RES 5, (HL)", 16, 16);
-		DEF_INSTR(0xCBAF, res_5_a, "RES 5, A", 8, 8);
-		DEF_INSTR(0xCBB0, res_6_b, "RES 6, B", 8, 8);
-		DEF_INSTR(0xCBB1, res_6_c, "RES 6, C", 8, 8);
-		DEF_INSTR(0xCBB2, res_6_d, "RES 6, D", 8, 8);
-		DEF_INSTR(0xCBB3, res_6_e, "RES 6, E", 8, 8);
-		DEF_INSTR(0xCBB4, res_6_h, "RES 6, H", 8, 8);
-		DEF_INSTR(0xCBB5, res_6_l, "RES 6, L", 8, 8);
-		DEF_INSTR(0xCBB6, res_6__hl_, "RES 6, (HL)", 16, 16);
-		DEF_INSTR(0xCBB7, res_6_a, "RES 6, A", 8, 8);
-		DEF_INSTR(0xCBB8, res_7_b, "RES 7, B", 8, 8);
-		DEF_INSTR(0xCBB9, res_7_c, "RES 7, C", 8, 8);
-		DEF_INSTR(0xCBBA, res_7_d, "RES 7, D", 8, 8);
-		DEF_INSTR(0xCBBB, res_7_e, "RES 7, E", 8, 8);
-		DEF_INSTR(0xCBBC, res_7_h, "RES 7, H", 8, 8);
-		DEF_INSTR(0xCBBD, res_7_l, "RES 7, L", 8, 8);
-		DEF_INSTR(0xCBBE, res_7__hl_, "RES 7, (HL)", 16, 16);
-		DEF_INSTR(0xCBBF, res_7_a, "RES 7, A", 8, 8);
-		DEF_INSTR(0xCBC0, set_0_b, "SET 0, B", 8, 8);
-		DEF_INSTR(0xCBC1, set_0_c, "SET 0, C", 8, 8);
-		DEF_INSTR(0xCBC2, set_0_d, "SET 0, D", 8, 8);
-		DEF_INSTR(0xCBC3, set_0_e, "SET 0, E", 8, 8);
-		DEF_INSTR(0xCBC4, set_0_h, "SET 0, H", 8, 8);
-		DEF_INSTR(0xCBC5, set_0_l, "SET 0, L", 8, 8);
-		DEF_INSTR(0xCBC6, set_0__hl_, "SET 0, (HL)", 16, 16);
-		DEF_INSTR(0xCBC7, set_0_a, "SET 0, A", 8, 8);
-		DEF_INSTR(0xCBC8, set_1_b, "SET 1, B", 8, 8);
-		DEF_INSTR(0xCBC9, set_1_c, "SET 1, C", 8, 8);
-		DEF_INSTR(0xCBCA, set_1_d, "SET 1, D", 8, 8);
-		DEF_INSTR(0xCBCB, set_1_e, "SET 1, E", 8, 8);
-		DEF_INSTR(0xCBCC, set_1_h, "SET 1, H", 8, 8);
-		DEF_INSTR(0xCBCD, set_1_l, "SET 1, L", 8, 8);
-		DEF_INSTR(0xCBCE, set_1__hl_, "SET 1, (HL)", 16, 16);
-		DEF_INSTR(0xCBCF, set_1_a, "SET 1, A", 8, 8);
-		DEF_INSTR(0xCBD0, set_2_b, "SET 2, B", 8, 8);
-		DEF_INSTR(0xCBD1, set_2_c, "SET 2, C", 8, 8);
-		DEF_INSTR(0xCBD2, set_2_d, "SET 2, D", 8, 8);
-		DEF_INSTR(0xCBD3, set_2_e, "SET 2, E", 8, 8);
-		DEF_INSTR(0xCBD4, set_2_h, "SET 2, H", 8, 8);
-		DEF_INSTR(0xCBD5, set_2_l, "SET 2, L", 8, 8);
-		DEF_INSTR(0xCBD6, set_2__hl_, "SET 2, (HL)", 16, 16);
-		DEF_INSTR(0xCBD7, set_2_a, "SET 2, A", 8, 8);
-		DEF_INSTR(0xCBD8, set_3_b, "SET 3, B", 8, 8);
-		DEF_INSTR(0xCBD9, set_3_c, "SET 3, C", 8, 8);
-		DEF_INSTR(0xCBDA, set_3_d, "SET 3, D", 8, 8);
-		DEF_INSTR(0xCBDB, set_3_e, "SET 3, E", 8, 8);
-		DEF_INSTR(0xCBDC, set_3_h, "SET 3, H", 8, 8);
-		DEF_INSTR(0xCBDD, set_3_l, "SET 3, L", 8, 8);
-		DEF_INSTR(0xCBDE, set_3__hl_, "SET 3, (HL)", 16, 16);
-		DEF_INSTR(0xCBDF, set_3_a, "SET 3, A", 8, 8);
-		DEF_INSTR(0xCBE0, set_4_b, "SET 4, B", 8, 8);
-		DEF_INSTR(0xCBE1, set_4_c, "SET 4, C", 8, 8);
-		DEF_INSTR(0xCBE2, set_4_d, "SET 4, D", 8, 8);
-		DEF_INSTR(0xCBE3, set_4_e, "SET 4, E", 8, 8);
-		DEF_INSTR(0xCBE4, set_4_h, "SET 4, H", 8, 8);
-		DEF_INSTR(0xCBE5, set_4_l, "SET 4, L", 8, 8);
-		DEF_INSTR(0xCBE6, set_4__hl_, "SET 4, (HL)", 16, 16);
-		DEF_INSTR(0xCBE7, set_4_a, "SET 4, A", 8, 8);
-		DEF_INSTR(0xCBE8, set_5_b, "SET 5, B", 8, 8);
-		DEF_INSTR(0xCBE9, set_5_c, "SET 5, C", 8, 8);
-		DEF_INSTR(0xCBEA, set_5_d, "SET 5, D", 8, 8);
-		DEF_INSTR(0xCBEB, set_5_e, "SET 5, E", 8, 8);
-		DEF_INSTR(0xCBEC, set_5_h, "SET 5, H", 8, 8);
-		DEF_INSTR(0xCBED, set_5_l, "SET 5, L", 8, 8);
-		DEF_INSTR(0xCBEE, set_5__hl_, "SET 5, (HL)", 16, 16);
-		DEF_INSTR(0xCBEF, set_5_a, "SET 5, A", 8, 8);
-		DEF_INSTR(0xCBF0, set_6_b, "SET 6, B", 8, 8);
-		DEF_INSTR(0xCBF1, set_6_c, "SET 6, C", 8, 8);
-		DEF_INSTR(0xCBF2, set_6_d, "SET 6, D", 8, 8);
-		DEF_INSTR(0xCBF3, set_6_e, "SET 6, E", 8, 8);
-		DEF_INSTR(0xCBF4, set_6_h, "SET 6, H", 8, 8);
-		DEF_INSTR(0xCBF5, set_6_l, "SET 6, L", 8, 8);
-		DEF_INSTR(0xCBF6, set_6__hl_, "SET 6, (HL)", 16, 16);
-		DEF_INSTR(0xCBF7, set_6_a, "SET 6, A", 8, 8);
-		DEF_INSTR(0xCBF8, set_7_b, "SET 7, B", 8, 8);
-		DEF_INSTR(0xCBF9, set_7_c, "SET 7, C", 8, 8);
-		DEF_INSTR(0xCBFA, set_7_d, "SET 7, D", 8, 8);
-		DEF_INSTR(0xCBFB, set_7_e, "SET 7, E", 8, 8);
-		DEF_INSTR(0xCBFC, set_7_h, "SET 7, H", 8, 8);
-		DEF_INSTR(0xCBFD, set_7_l, "SET 7, L", 8, 8);
-		DEF_INSTR(0xCBFE, set_7__hl_, "SET 7, (HL)", 16, 16);
-		DEF_INSTR(0xCBFF, set_7_a, "SET 7, A", 8, 8);
-	}
+	namespace ops {
+		void nop(cpu&);
+		void ld_bc_d16(cpu&);
+		void ld__bc__a(cpu&);
+		void inc_bc(cpu&);
+		void inc_b(cpu&);
+		void dec_b(cpu&);
+		void ld_b_d8(cpu&);
+		void rlca(cpu&);
+		void ld__a16__sp(cpu&);
+		void add_hl_bc(cpu&);
+		void ld_a__bc_(cpu&);
+		void dec_bc(cpu&);
+		void inc_c(cpu&);
+		void dec_c(cpu&);
+		void ld_c_d8(cpu&);
+		void rrca(cpu&);
+		void stop(cpu&);
+		void ld_de_d16(cpu&);
+		void ld__de__a(cpu&);
+		void inc_de(cpu&);
+		void inc_d(cpu&);
+		void dec_d(cpu&);
+		void ld_d_d8(cpu&);
+		void rla(cpu&);
+		void jr_s8(cpu&);
+		void add_hl_de(cpu&);
+		void ld_a__de_(cpu&);
+		void dec_de(cpu&);
+		void inc_e(cpu&);
+		void dec_e(cpu&);
+		void ld_e_d8(cpu&);
+		void rra(cpu&);
+		void jr_nz_s8(cpu&);
+		void ld_hl_d16(cpu&);
+		void ld__hlp__a(cpu&);
+		void inc_hl(cpu&);
+		void inc_h(cpu&);
+		void dec_h(cpu&);
+		void ld_h_d8(cpu&);
+		void daa(cpu&);
+		void jr_z_s8(cpu&);
+		void add_hl_hl(cpu&);
+		void ld_a__hlp_(cpu&);
+		void dec_hl(cpu&);
+		void inc_l(cpu&);
+		void dec_l(cpu&);
+		void ld_l_d8(cpu&);
+		void cpl(cpu&);
+		void jr_nc_s8(cpu&);
+		void ld_sp_d16(cpu&);
+		void ld__hlm__a(cpu&);
+		void inc_sp(cpu&);
+		void inc__hl_(cpu&);
+		void dec__hl_(cpu&);
+		void ld__hl__d8(cpu&);
+		void scf(cpu&);
+		void jr_c_s8(cpu&);
+		void add_hl_sp(cpu&);
+		void ld_a__hlm_(cpu&);
+		void dec_sp(cpu&);
+		void inc_a(cpu&);
+		void dec_a(cpu&);
+		void ld_a_d8(cpu&);
+		void ccf(cpu&);
+		void ld_b_b(cpu&);
+		void ld_b_c(cpu&);
+		void ld_b_d(cpu&);
+		void ld_b_e(cpu&);
+		void ld_b_h(cpu&);
+		void ld_b_l(cpu&);
+		void ld_b__hl_(cpu&);
+		void ld_b_a(cpu&);
+		void ld_c_b(cpu&);
+		void ld_c_c(cpu&);
+		void ld_c_d(cpu&);
+		void ld_c_e(cpu&);
+		void ld_c_h(cpu&);
+		void ld_c_l(cpu&);
+		void ld_c__hl_(cpu&);
+		void ld_c_a(cpu&);
+		void ld_d_b(cpu&);
+		void ld_d_c(cpu&);
+		void ld_d_d(cpu&);
+		void ld_d_e(cpu&);
+		void ld_d_h(cpu&);
+		void ld_d_l(cpu&);
+		void ld_d__hl_(cpu&);
+		void ld_d_a(cpu&);
+		void ld_e_b(cpu&);
+		void ld_e_c(cpu&);
+		void ld_e_d(cpu&);
+		void ld_e_e(cpu&);
+		void ld_e_h(cpu&);
+		void ld_e_l(cpu&);
+		void ld_e__hl_(cpu&);
+		void ld_e_a(cpu&);
+		void ld_h_b(cpu&);
+		void ld_h_c(cpu&);
+		void ld_h_d(cpu&);
+		void ld_h_e(cpu&);
+		void ld_h_h(cpu&);
+		void ld_h_l(cpu&);
+		void ld_h__hl_(cpu&);
+		void ld_h_a(cpu&);
+		void ld_l_b(cpu&);
+		void ld_l_c(cpu&);
+		void ld_l_d(cpu&);
+		void ld_l_e(cpu&);
+		void ld_l_h(cpu&);
+		void ld_l_l(cpu&);
+		void ld_l__hl_(cpu&);
+		void ld_l_a(cpu&);
+		void ld__hl__b(cpu&);
+		void ld__hl__c(cpu&);
+		void ld__hl__d(cpu&);
+		void ld__hl__e(cpu&);
+		void ld__hl__h(cpu&);
+		void ld__hl__l(cpu&);
+		void halt(cpu&);
+		void ld__hl__a(cpu&);
+		void ld_a_b(cpu&);
+		void ld_a_c(cpu&);
+		void ld_a_d(cpu&);
+		void ld_a_e(cpu&);
+		void ld_a_h(cpu&);
+		void ld_a_l(cpu&);
+		void ld_a__hl_(cpu&);
+		void ld_a_a(cpu&);
+		void add_a_b(cpu&);
+		void add_a_c(cpu&);
+		void add_a_d(cpu&);
+		void add_a_e(cpu&);
+		void add_a_h(cpu&);
+		void add_a_l(cpu&);
+		void add_a__hl_(cpu&);
+		void add_a_a(cpu&);
+		void adc_a_b(cpu&);
+		void adc_a_c(cpu&);
+		void adc_a_d(cpu&);
+		void adc_a_e(cpu&);
+		void adc_a_h(cpu&);
+		void adc_a_l(cpu&);
+		void adc_a__hl_(cpu&);
+		void adc_a_a(cpu&);
+		void sub_b(cpu&);
+		void sub_c(cpu&);
+		void sub_d(cpu&);
+		void sub_e(cpu&);
+		void sub_h(cpu&);
+		void sub_l(cpu&);
+		void sub__hl_(cpu&);
+		void sub_a(cpu&);
+		void sbc_a_b(cpu&);
+		void sbc_a_c(cpu&);
+		void sbc_a_d(cpu&);
+		void sbc_a_e(cpu&);
+		void sbc_a_h(cpu&);
+		void sbc_a_l(cpu&);
+		void sbc_a__hl_(cpu&);
+		void sbc_a_a(cpu&);
+		void and_b(cpu&);
+		void and_c(cpu&);
+		void and_d(cpu&);
+		void and_e(cpu&);
+		void and_h(cpu&);
+		void and_l(cpu&);
+		void and__hl_(cpu&);
+		void and_a(cpu&);
+		void xor_b(cpu&);
+		void xor_c(cpu&);
+		void xor_d(cpu&);
+		void xor_e(cpu&);
+		void xor_h(cpu&);
+		void xor_l(cpu&);
+		void xor__hl_(cpu&);
+		void xor_a(cpu&);
+		void or_b(cpu&);
+		void or_c(cpu&);
+		void or_d(cpu&);
+		void or_e(cpu&);
+		void or_h(cpu&);
+		void or_l(cpu&);
+		void or__hl_(cpu&);
+		void or_a(cpu&);
+		void cp_b(cpu&);
+		void cp_c(cpu&);
+		void cp_d(cpu&);
+		void cp_e(cpu&);
+		void cp_h(cpu&);
+		void cp_l(cpu&);
+		void cp__hl_(cpu&);
+		void cp_a(cpu&);
+		void ret_nz(cpu&);
+		void pop_bc(cpu&);
+		void jp_nz_a16(cpu&);
+		void jp_a16(cpu&);
+		void call_nz_a16(cpu&);
+		void push_bc(cpu&);
+		void add_a_d8(cpu&);
+		void rst_0(cpu&);
+		void ret_z(cpu&);
+		void ret(cpu&);
+		void jp_z_a16(cpu&);
+		void call_z_a16(cpu&);
+		void call_a16(cpu&);
+		void adc_a_d8(cpu&);
+		void rst_1(cpu&);
+		void ret_nc(cpu&);
+		void pop_de(cpu&);
+		void jp_nc_a16(cpu&);
+		void call_nc_a16(cpu&);
+		void push_de(cpu&);
+		void sub_d8(cpu&);
+		void rst_2(cpu&);
+		void ret_c(cpu&);
+		void reti(cpu&);
+		void jp_c_a16(cpu&);
+		void call_c_a16(cpu&);
+		void sbc_a_d8(cpu&);
+		void rst_3(cpu&);
+		void ld__a8__a(cpu&);
+		void pop_hl(cpu&);
+		void ld__c__a(cpu&);
+		void push_hl(cpu&);
+		void and_d8(cpu&);
+		void rst_4(cpu&);
+		void add_sp_s8(cpu&);
+		void jp_hl(cpu&);
+		void ld__a16__a(cpu&);
+		void xor_d8(cpu&);
+		void rst_5(cpu&);
+		void ld_a__a8_(cpu&);
+		void pop_af(cpu&);
+		void ld_a__c_(cpu&);
+		void di(cpu&);
+		void push_af(cpu&);
+		void or_d8(cpu&);
+		void rst_6(cpu&);
+		void ld_hl_spps8(cpu&);
+		void ld_sp_hl(cpu&);
+		void ld_a__a16_(cpu&);
+		void ei(cpu&);
+		void cp_d8(cpu&);
+		void rst_7(cpu&);
+		void rlc_b(cpu&);
+		void rlc_c(cpu&);
+		void rlc_d(cpu&);
+		void rlc_e(cpu&);
+		void rlc_h(cpu&);
+		void rlc_l(cpu&);
+		void rlc__hl_(cpu&);
+		void rlc_a(cpu&);
+		void rrc_b(cpu&);
+		void rrc_c(cpu&);
+		void rrc_d(cpu&);
+		void rrc_e(cpu&);
+		void rrc_h(cpu&);
+		void rrc_l(cpu&);
+		void rrc__hl_(cpu&);
+		void rrc_a(cpu&);
+		void rl_b(cpu&);
+		void rl_c(cpu&);
+		void rl_d(cpu&);
+		void rl_e(cpu&);
+		void rl_h(cpu&);
+		void rl_l(cpu&);
+		void rl__hl_(cpu&);
+		void rl_a(cpu&);
+		void rr_b(cpu&);
+		void rr_c(cpu&);
+		void rr_d(cpu&);
+		void rr_e(cpu&);
+		void rr_h(cpu&);
+		void rr_l(cpu&);
+		void rr__hl_(cpu&);
+		void rr_a(cpu&);
+		void sla_b(cpu&);
+		void sla_c(cpu&);
+		void sla_d(cpu&);
+		void sla_e(cpu&);
+		void sla_h(cpu&);
+		void sla_l(cpu&);
+		void sla__hl_(cpu&);
+		void sla_a(cpu&);
+		void sra_b(cpu&);
+		void sra_c(cpu&);
+		void sra_d(cpu&);
+		void sra_e(cpu&);
+		void sra_h(cpu&);
+		void sra_l(cpu&);
+		void sra__hl_(cpu&);
+		void sra_a(cpu&);
+		void swap_b(cpu&);
+		void swap_c(cpu&);
+		void swap_d(cpu&);
+		void swap_e(cpu&);
+		void swap_h(cpu&);
+		void swap_l(cpu&);
+		void swap__hl_(cpu&);
+		void swap_a(cpu&);
+		void srl_b(cpu&);
+		void srl_c(cpu&);
+		void srl_d(cpu&);
+		void srl_e(cpu&);
+		void srl_h(cpu&);
+		void srl_l(cpu&);
+		void srl__hl_(cpu&);
+		void srl_a(cpu&);
+		void bit_0_b(cpu&);
+		void bit_0_c(cpu&);
+		void bit_0_d(cpu&);
+		void bit_0_e(cpu&);
+		void bit_0_h(cpu&);
+		void bit_0_l(cpu&);
+		void bit_0__hl_(cpu&);
+		void bit_0_a(cpu&);
+		void bit_1_b(cpu&);
+		void bit_1_c(cpu&);
+		void bit_1_d(cpu&);
+		void bit_1_e(cpu&);
+		void bit_1_h(cpu&);
+		void bit_1_l(cpu&);
+		void bit_1__hl_(cpu&);
+		void bit_1_a(cpu&);
+		void bit_2_b(cpu&);
+		void bit_2_c(cpu&);
+		void bit_2_d(cpu&);
+		void bit_2_e(cpu&);
+		void bit_2_h(cpu&);
+		void bit_2_l(cpu&);
+		void bit_2__hl_(cpu&);
+		void bit_2_a(cpu&);
+		void bit_3_b(cpu&);
+		void bit_3_c(cpu&);
+		void bit_3_d(cpu&);
+		void bit_3_e(cpu&);
+		void bit_3_h(cpu&);
+		void bit_3_l(cpu&);
+		void bit_3__hl_(cpu&);
+		void bit_3_a(cpu&);
+		void bit_4_b(cpu&);
+		void bit_4_c(cpu&);
+		void bit_4_d(cpu&);
+		void bit_4_e(cpu&);
+		void bit_4_h(cpu&);
+		void bit_4_l(cpu&);
+		void bit_4__hl_(cpu&);
+		void bit_4_a(cpu&);
+		void bit_5_b(cpu&);
+		void bit_5_c(cpu&);
+		void bit_5_d(cpu&);
+		void bit_5_e(cpu&);
+		void bit_5_h(cpu&);
+		void bit_5_l(cpu&);
+		void bit_5__hl_(cpu&);
+		void bit_5_a(cpu&);
+		void bit_6_b(cpu&);
+		void bit_6_c(cpu&);
+		void bit_6_d(cpu&);
+		void bit_6_e(cpu&);
+		void bit_6_h(cpu&);
+		void bit_6_l(cpu&);
+		void bit_6__hl_(cpu&);
+		void bit_6_a(cpu&);
+		void bit_7_b(cpu&);
+		void bit_7_c(cpu&);
+		void bit_7_d(cpu&);
+		void bit_7_e(cpu&);
+		void bit_7_h(cpu&);
+		void bit_7_l(cpu&);
+		void bit_7__hl_(cpu&);
+		void bit_7_a(cpu&);
+		void res_0_b(cpu&);
+		void res_0_c(cpu&);
+		void res_0_d(cpu&);
+		void res_0_e(cpu&);
+		void res_0_h(cpu&);
+		void res_0_l(cpu&);
+		void res_0__hl_(cpu&);
+		void res_0_a(cpu&);
+		void res_1_b(cpu&);
+		void res_1_c(cpu&);
+		void res_1_d(cpu&);
+		void res_1_e(cpu&);
+		void res_1_h(cpu&);
+		void res_1_l(cpu&);
+		void res_1__hl_(cpu&);
+		void res_1_a(cpu&);
+		void res_2_b(cpu&);
+		void res_2_c(cpu&);
+		void res_2_d(cpu&);
+		void res_2_e(cpu&);
+		void res_2_h(cpu&);
+		void res_2_l(cpu&);
+		void res_2__hl_(cpu&);
+		void res_2_a(cpu&);
+		void res_3_b(cpu&);
+		void res_3_c(cpu&);
+		void res_3_d(cpu&);
+		void res_3_e(cpu&);
+		void res_3_h(cpu&);
+		void res_3_l(cpu&);
+		void res_3__hl_(cpu&);
+		void res_3_a(cpu&);
+		void res_4_b(cpu&);
+		void res_4_c(cpu&);
+		void res_4_d(cpu&);
+		void res_4_e(cpu&);
+		void res_4_h(cpu&);
+		void res_4_l(cpu&);
+		void res_4__hl_(cpu&);
+		void res_4_a(cpu&);
+		void res_5_b(cpu&);
+		void res_5_c(cpu&);
+		void res_5_d(cpu&);
+		void res_5_e(cpu&);
+		void res_5_h(cpu&);
+		void res_5_l(cpu&);
+		void res_5__hl_(cpu&);
+		void res_5_a(cpu&);
+		void res_6_b(cpu&);
+		void res_6_c(cpu&);
+		void res_6_d(cpu&);
+		void res_6_e(cpu&);
+		void res_6_h(cpu&);
+		void res_6_l(cpu&);
+		void res_6__hl_(cpu&);
+		void res_6_a(cpu&);
+		void res_7_b(cpu&);
+		void res_7_c(cpu&);
+		void res_7_d(cpu&);
+		void res_7_e(cpu&);
+		void res_7_h(cpu&);
+		void res_7_l(cpu&);
+		void res_7__hl_(cpu&);
+		void res_7_a(cpu&);
+		void set_0_b(cpu&);
+		void set_0_c(cpu&);
+		void set_0_d(cpu&);
+		void set_0_e(cpu&);
+		void set_0_h(cpu&);
+		void set_0_l(cpu&);
+		void set_0__hl_(cpu&);
+		void set_0_a(cpu&);
+		void set_1_b(cpu&);
+		void set_1_c(cpu&);
+		void set_1_d(cpu&);
+		void set_1_e(cpu&);
+		void set_1_h(cpu&);
+		void set_1_l(cpu&);
+		void set_1__hl_(cpu&);
+		void set_1_a(cpu&);
+		void set_2_b(cpu&);
+		void set_2_c(cpu&);
+		void set_2_d(cpu&);
+		void set_2_e(cpu&);
+		void set_2_h(cpu&);
+		void set_2_l(cpu&);
+		void set_2__hl_(cpu&);
+		void set_2_a(cpu&);
+		void set_3_b(cpu&);
+		void set_3_c(cpu&);
+		void set_3_d(cpu&);
+		void set_3_e(cpu&);
+		void set_3_h(cpu&);
+		void set_3_l(cpu&);
+		void set_3__hl_(cpu&);
+		void set_3_a(cpu&);
+		void set_4_b(cpu&);
+		void set_4_c(cpu&);
+		void set_4_d(cpu&);
+		void set_4_e(cpu&);
+		void set_4_h(cpu&);
+		void set_4_l(cpu&);
+		void set_4__hl_(cpu&);
+		void set_4_a(cpu&);
+		void set_5_b(cpu&);
+		void set_5_c(cpu&);
+		void set_5_d(cpu&);
+		void set_5_e(cpu&);
+		void set_5_h(cpu&);
+		void set_5_l(cpu&);
+		void set_5__hl_(cpu&);
+		void set_5_a(cpu&);
+		void set_6_b(cpu&);
+		void set_6_c(cpu&);
+		void set_6_d(cpu&);
+		void set_6_e(cpu&);
+		void set_6_h(cpu&);
+		void set_6_l(cpu&);
+		void set_6__hl_(cpu&);
+		void set_6_a(cpu&);
+		void set_7_b(cpu&);
+		void set_7_c(cpu&);
+		void set_7_d(cpu&);
+		void set_7_e(cpu&);
+		void set_7_h(cpu&);
+		void set_7_l(cpu&);
+		void set_7__hl_(cpu&);
+		void set_7_a(cpu&);
+	} // namespace ops
 
-	namespace instructions {
-		INST_INSTR(nop);
-		INST_INSTR(ld_bc_d16);
-		INST_INSTR(ld__bc__a);
-		INST_INSTR(inc_bc);
-		INST_INSTR(inc_b);
-		INST_INSTR(dec_b);
-		INST_INSTR(ld_b_d8);
-		INST_INSTR(rlca);
-		INST_INSTR(ld__a16__sp);
-		INST_INSTR(add_hl_bc);
-		INST_INSTR(ld_a__bc_);
-		INST_INSTR(dec_bc);
-		INST_INSTR(inc_c);
-		INST_INSTR(dec_c);
-		INST_INSTR(ld_c_d8);
-		INST_INSTR(rrca);
-		INST_INSTR(stop);
-		INST_INSTR(ld_de_d16);
-		INST_INSTR(ld__de__a);
-		INST_INSTR(inc_de);
-		INST_INSTR(inc_d);
-		INST_INSTR(dec_d);
-		INST_INSTR(ld_d_d8);
-		INST_INSTR(rla);
-		INST_INSTR(jr_s8);
-		INST_INSTR(add_hl_de);
-		INST_INSTR(ld_a__de_);
-		INST_INSTR(dec_de);
-		INST_INSTR(inc_e);
-		INST_INSTR(dec_e);
-		INST_INSTR(ld_e_d8);
-		INST_INSTR(rra);
-		INST_INSTR(jr_nz_s8);
-		INST_INSTR(ld_hl_d16);
-		INST_INSTR(ld__hlp__a);
-		INST_INSTR(inc_hl);
-		INST_INSTR(inc_h);
-		INST_INSTR(dec_h);
-		INST_INSTR(ld_h_d8);
-		INST_INSTR(daa);
-		INST_INSTR(jr_z_s8);
-		INST_INSTR(add_hl_hl);
-		INST_INSTR(ld_a__hlp_);
-		INST_INSTR(dec_hl);
-		INST_INSTR(inc_l);
-		INST_INSTR(dec_l);
-		INST_INSTR(ld_l_d8);
-		INST_INSTR(cpl);
-		INST_INSTR(jr_nc_s8);
-		INST_INSTR(ld_sp_d16);
-		INST_INSTR(ld__hlm__a);
-		INST_INSTR(inc_sp);
-		INST_INSTR(inc__hl_);
-		INST_INSTR(dec__hl_);
-		INST_INSTR(ld__hl__d8);
-		INST_INSTR(scf);
-		INST_INSTR(jr_c_s8);
-		INST_INSTR(add_hl_sp);
-		INST_INSTR(ld_a__hlm_);
-		INST_INSTR(dec_sp);
-		INST_INSTR(inc_a);
-		INST_INSTR(dec_a);
-		INST_INSTR(ld_a_d8);
-		INST_INSTR(ccf);
-		INST_INSTR(ld_b_b);
-		INST_INSTR(ld_b_c);
-		INST_INSTR(ld_b_d);
-		INST_INSTR(ld_b_e);
-		INST_INSTR(ld_b_h);
-		INST_INSTR(ld_b_l);
-		INST_INSTR(ld_b__hl_);
-		INST_INSTR(ld_b_a);
-		INST_INSTR(ld_c_b);
-		INST_INSTR(ld_c_c);
-		INST_INSTR(ld_c_d);
-		INST_INSTR(ld_c_e);
-		INST_INSTR(ld_c_h);
-		INST_INSTR(ld_c_l);
-		INST_INSTR(ld_c__hl_);
-		INST_INSTR(ld_c_a);
-		INST_INSTR(ld_d_b);
-		INST_INSTR(ld_d_c);
-		INST_INSTR(ld_d_d);
-		INST_INSTR(ld_d_e);
-		INST_INSTR(ld_d_h);
-		INST_INSTR(ld_d_l);
-		INST_INSTR(ld_d__hl_);
-		INST_INSTR(ld_d_a);
-		INST_INSTR(ld_e_b);
-		INST_INSTR(ld_e_c);
-		INST_INSTR(ld_e_d);
-		INST_INSTR(ld_e_e);
-		INST_INSTR(ld_e_h);
-		INST_INSTR(ld_e_l);
-		INST_INSTR(ld_e__hl_);
-		INST_INSTR(ld_e_a);
-		INST_INSTR(ld_h_b);
-		INST_INSTR(ld_h_c);
-		INST_INSTR(ld_h_d);
-		INST_INSTR(ld_h_e);
-		INST_INSTR(ld_h_h);
-		INST_INSTR(ld_h_l);
-		INST_INSTR(ld_h__hl_);
-		INST_INSTR(ld_h_a);
-		INST_INSTR(ld_l_b);
-		INST_INSTR(ld_l_c);
-		INST_INSTR(ld_l_d);
-		INST_INSTR(ld_l_e);
-		INST_INSTR(ld_l_h);
-		INST_INSTR(ld_l_l);
-		INST_INSTR(ld_l__hl_);
-		INST_INSTR(ld_l_a);
-		INST_INSTR(ld__hl__b);
-		INST_INSTR(ld__hl__c);
-		INST_INSTR(ld__hl__d);
-		INST_INSTR(ld__hl__e);
-		INST_INSTR(ld__hl__h);
-		INST_INSTR(ld__hl__l);
-		INST_INSTR(halt);
-		INST_INSTR(ld__hl__a);
-		INST_INSTR(ld_a_b);
-		INST_INSTR(ld_a_c);
-		INST_INSTR(ld_a_d);
-		INST_INSTR(ld_a_e);
-		INST_INSTR(ld_a_h);
-		INST_INSTR(ld_a_l);
-		INST_INSTR(ld_a__hl_);
-		INST_INSTR(ld_a_a);
-		INST_INSTR(add_a_b);
-		INST_INSTR(add_a_c);
-		INST_INSTR(add_a_d);
-		INST_INSTR(add_a_e);
-		INST_INSTR(add_a_h);
-		INST_INSTR(add_a_l);
-		INST_INSTR(add_a__hl_);
-		INST_INSTR(add_a_a);
-		INST_INSTR(adc_a_b);
-		INST_INSTR(adc_a_c);
-		INST_INSTR(adc_a_d);
-		INST_INSTR(adc_a_e);
-		INST_INSTR(adc_a_h);
-		INST_INSTR(adc_a_l);
-		INST_INSTR(adc_a__hl_);
-		INST_INSTR(adc_a_a);
-		INST_INSTR(sub_b);
-		INST_INSTR(sub_c);
-		INST_INSTR(sub_d);
-		INST_INSTR(sub_e);
-		INST_INSTR(sub_h);
-		INST_INSTR(sub_l);
-		INST_INSTR(sub__hl_);
-		INST_INSTR(sub_a);
-		INST_INSTR(sbc_a_b);
-		INST_INSTR(sbc_a_c);
-		INST_INSTR(sbc_a_d);
-		INST_INSTR(sbc_a_e);
-		INST_INSTR(sbc_a_h);
-		INST_INSTR(sbc_a_l);
-		INST_INSTR(sbc_a__hl_);
-		INST_INSTR(sbc_a_a);
-		INST_INSTR(and_b);
-		INST_INSTR(and_c);
-		INST_INSTR(and_d);
-		INST_INSTR(and_e);
-		INST_INSTR(and_h);
-		INST_INSTR(and_l);
-		INST_INSTR(and__hl_);
-		INST_INSTR(and_a);
-		INST_INSTR(xor_b);
-		INST_INSTR(xor_c);
-		INST_INSTR(xor_d);
-		INST_INSTR(xor_e);
-		INST_INSTR(xor_h);
-		INST_INSTR(xor_l);
-		INST_INSTR(xor__hl_);
-		INST_INSTR(xor_a);
-		INST_INSTR(or_b);
-		INST_INSTR(or_c);
-		INST_INSTR(or_d);
-		INST_INSTR(or_e);
-		INST_INSTR(or_h);
-		INST_INSTR(or_l);
-		INST_INSTR(or__hl_);
-		INST_INSTR(or_a);
-		INST_INSTR(cp_b);
-		INST_INSTR(cp_c);
-		INST_INSTR(cp_d);
-		INST_INSTR(cp_e);
-		INST_INSTR(cp_h);
-		INST_INSTR(cp_l);
-		INST_INSTR(cp__hl_);
-		INST_INSTR(cp_a);
-		INST_INSTR(ret_nz);
-		INST_INSTR(pop_bc);
-		INST_INSTR(jp_nz_a16);
-		INST_INSTR(jp_a16);
-		INST_INSTR(call_nz_a16);
-		INST_INSTR(push_bc);
-		INST_INSTR(add_a_d8);
-		INST_INSTR(rst_0);
-		INST_INSTR(ret_z);
-		INST_INSTR(ret);
-		INST_INSTR(jp_z_a16);
-		INST_INSTR(call_z_a16);
-		INST_INSTR(call_a16);
-		INST_INSTR(adc_a_d8);
-		INST_INSTR(rst_1);
-		INST_INSTR(ret_nc);
-		INST_INSTR(pop_de);
-		INST_INSTR(jp_nc_a16);
-		INST_INSTR(call_nc_a16);
-		INST_INSTR(push_de);
-		INST_INSTR(sub_d8);
-		INST_INSTR(rst_2);
-		INST_INSTR(ret_c);
-		INST_INSTR(reti);
-		INST_INSTR(jp_c_a16);
-		INST_INSTR(call_c_a16);
-		INST_INSTR(sbc_a_d8);
-		INST_INSTR(rst_3);
-		INST_INSTR(ld__a8__a);
-		INST_INSTR(pop_hl);
-		INST_INSTR(ld__c__a);
-		INST_INSTR(push_hl);
-		INST_INSTR(and_d8);
-		INST_INSTR(rst_4);
-		INST_INSTR(add_sp_s8);
-		INST_INSTR(jp_hl);
-		INST_INSTR(ld__a16__a);
-		INST_INSTR(xor_d8);
-		INST_INSTR(rst_5);
-		INST_INSTR(ld_a__a8_);
-		INST_INSTR(pop_af);
-		INST_INSTR(ld_a__c_);
-		INST_INSTR(di);
-		INST_INSTR(push_af);
-		INST_INSTR(or_d8);
-		INST_INSTR(rst_6);
-		INST_INSTR(ld_hl_spps8);
-		INST_INSTR(ld_sp_hl);
-		INST_INSTR(ld_a__a16_);
-		INST_INSTR(ei);
-		INST_INSTR(cp_d8);
-		INST_INSTR(rst_7);
-		INST_INSTR(rlc_b);
-		INST_INSTR(rlc_c);
-		INST_INSTR(rlc_d);
-		INST_INSTR(rlc_e);
-		INST_INSTR(rlc_h);
-		INST_INSTR(rlc_l);
-		INST_INSTR(rlc__hl_);
-		INST_INSTR(rlc_a);
-		INST_INSTR(rrc_b);
-		INST_INSTR(rrc_c);
-		INST_INSTR(rrc_d);
-		INST_INSTR(rrc_e);
-		INST_INSTR(rrc_h);
-		INST_INSTR(rrc_l);
-		INST_INSTR(rrc__hl_);
-		INST_INSTR(rrc_a);
-		INST_INSTR(rl_b);
-		INST_INSTR(rl_c);
-		INST_INSTR(rl_d);
-		INST_INSTR(rl_e);
-		INST_INSTR(rl_h);
-		INST_INSTR(rl_l);
-		INST_INSTR(rl__hl_);
-		INST_INSTR(rl_a);
-		INST_INSTR(rr_b);
-		INST_INSTR(rr_c);
-		INST_INSTR(rr_d);
-		INST_INSTR(rr_e);
-		INST_INSTR(rr_h);
-		INST_INSTR(rr_l);
-		INST_INSTR(rr__hl_);
-		INST_INSTR(rr_a);
-		INST_INSTR(sla_b);
-		INST_INSTR(sla_c);
-		INST_INSTR(sla_d);
-		INST_INSTR(sla_e);
-		INST_INSTR(sla_h);
-		INST_INSTR(sla_l);
-		INST_INSTR(sla__hl_);
-		INST_INSTR(sla_a);
-		INST_INSTR(sra_b);
-		INST_INSTR(sra_c);
-		INST_INSTR(sra_d);
-		INST_INSTR(sra_e);
-		INST_INSTR(sra_h);
-		INST_INSTR(sra_l);
-		INST_INSTR(sra__hl_);
-		INST_INSTR(sra_a);
-		INST_INSTR(swap_b);
-		INST_INSTR(swap_c);
-		INST_INSTR(swap_d);
-		INST_INSTR(swap_e);
-		INST_INSTR(swap_h);
-		INST_INSTR(swap_l);
-		INST_INSTR(swap__hl_);
-		INST_INSTR(swap_a);
-		INST_INSTR(srl_b);
-		INST_INSTR(srl_c);
-		INST_INSTR(srl_d);
-		INST_INSTR(srl_e);
-		INST_INSTR(srl_h);
-		INST_INSTR(srl_l);
-		INST_INSTR(srl__hl_);
-		INST_INSTR(srl_a);
-		INST_INSTR(bit_0_b);
-		INST_INSTR(bit_0_c);
-		INST_INSTR(bit_0_d);
-		INST_INSTR(bit_0_e);
-		INST_INSTR(bit_0_h);
-		INST_INSTR(bit_0_l);
-		INST_INSTR(bit_0__hl_);
-		INST_INSTR(bit_0_a);
-		INST_INSTR(bit_1_b);
-		INST_INSTR(bit_1_c);
-		INST_INSTR(bit_1_d);
-		INST_INSTR(bit_1_e);
-		INST_INSTR(bit_1_h);
-		INST_INSTR(bit_1_l);
-		INST_INSTR(bit_1__hl_);
-		INST_INSTR(bit_1_a);
-		INST_INSTR(bit_2_b);
-		INST_INSTR(bit_2_c);
-		INST_INSTR(bit_2_d);
-		INST_INSTR(bit_2_e);
-		INST_INSTR(bit_2_h);
-		INST_INSTR(bit_2_l);
-		INST_INSTR(bit_2__hl_);
-		INST_INSTR(bit_2_a);
-		INST_INSTR(bit_3_b);
-		INST_INSTR(bit_3_c);
-		INST_INSTR(bit_3_d);
-		INST_INSTR(bit_3_e);
-		INST_INSTR(bit_3_h);
-		INST_INSTR(bit_3_l);
-		INST_INSTR(bit_3__hl_);
-		INST_INSTR(bit_3_a);
-		INST_INSTR(bit_4_b);
-		INST_INSTR(bit_4_c);
-		INST_INSTR(bit_4_d);
-		INST_INSTR(bit_4_e);
-		INST_INSTR(bit_4_h);
-		INST_INSTR(bit_4_l);
-		INST_INSTR(bit_4__hl_);
-		INST_INSTR(bit_4_a);
-		INST_INSTR(bit_5_b);
-		INST_INSTR(bit_5_c);
-		INST_INSTR(bit_5_d);
-		INST_INSTR(bit_5_e);
-		INST_INSTR(bit_5_h);
-		INST_INSTR(bit_5_l);
-		INST_INSTR(bit_5__hl_);
-		INST_INSTR(bit_5_a);
-		INST_INSTR(bit_6_b);
-		INST_INSTR(bit_6_c);
-		INST_INSTR(bit_6_d);
-		INST_INSTR(bit_6_e);
-		INST_INSTR(bit_6_h);
-		INST_INSTR(bit_6_l);
-		INST_INSTR(bit_6__hl_);
-		INST_INSTR(bit_6_a);
-		INST_INSTR(bit_7_b);
-		INST_INSTR(bit_7_c);
-		INST_INSTR(bit_7_d);
-		INST_INSTR(bit_7_e);
-		INST_INSTR(bit_7_h);
-		INST_INSTR(bit_7_l);
-		INST_INSTR(bit_7__hl_);
-		INST_INSTR(bit_7_a);
-		INST_INSTR(res_0_b);
-		INST_INSTR(res_0_c);
-		INST_INSTR(res_0_d);
-		INST_INSTR(res_0_e);
-		INST_INSTR(res_0_h);
-		INST_INSTR(res_0_l);
-		INST_INSTR(res_0__hl_);
-		INST_INSTR(res_0_a);
-		INST_INSTR(res_1_b);
-		INST_INSTR(res_1_c);
-		INST_INSTR(res_1_d);
-		INST_INSTR(res_1_e);
-		INST_INSTR(res_1_h);
-		INST_INSTR(res_1_l);
-		INST_INSTR(res_1__hl_);
-		INST_INSTR(res_1_a);
-		INST_INSTR(res_2_b);
-		INST_INSTR(res_2_c);
-		INST_INSTR(res_2_d);
-		INST_INSTR(res_2_e);
-		INST_INSTR(res_2_h);
-		INST_INSTR(res_2_l);
-		INST_INSTR(res_2__hl_);
-		INST_INSTR(res_2_a);
-		INST_INSTR(res_3_b);
-		INST_INSTR(res_3_c);
-		INST_INSTR(res_3_d);
-		INST_INSTR(res_3_e);
-		INST_INSTR(res_3_h);
-		INST_INSTR(res_3_l);
-		INST_INSTR(res_3__hl_);
-		INST_INSTR(res_3_a);
-		INST_INSTR(res_4_b);
-		INST_INSTR(res_4_c);
-		INST_INSTR(res_4_d);
-		INST_INSTR(res_4_e);
-		INST_INSTR(res_4_h);
-		INST_INSTR(res_4_l);
-		INST_INSTR(res_4__hl_);
-		INST_INSTR(res_4_a);
-		INST_INSTR(res_5_b);
-		INST_INSTR(res_5_c);
-		INST_INSTR(res_5_d);
-		INST_INSTR(res_5_e);
-		INST_INSTR(res_5_h);
-		INST_INSTR(res_5_l);
-		INST_INSTR(res_5__hl_);
-		INST_INSTR(res_5_a);
-		INST_INSTR(res_6_b);
-		INST_INSTR(res_6_c);
-		INST_INSTR(res_6_d);
-		INST_INSTR(res_6_e);
-		INST_INSTR(res_6_h);
-		INST_INSTR(res_6_l);
-		INST_INSTR(res_6__hl_);
-		INST_INSTR(res_6_a);
-		INST_INSTR(res_7_b);
-		INST_INSTR(res_7_c);
-		INST_INSTR(res_7_d);
-		INST_INSTR(res_7_e);
-		INST_INSTR(res_7_h);
-		INST_INSTR(res_7_l);
-		INST_INSTR(res_7__hl_);
-		INST_INSTR(res_7_a);
-		INST_INSTR(set_0_b);
-		INST_INSTR(set_0_c);
-		INST_INSTR(set_0_d);
-		INST_INSTR(set_0_e);
-		INST_INSTR(set_0_h);
-		INST_INSTR(set_0_l);
-		INST_INSTR(set_0__hl_);
-		INST_INSTR(set_0_a);
-		INST_INSTR(set_1_b);
-		INST_INSTR(set_1_c);
-		INST_INSTR(set_1_d);
-		INST_INSTR(set_1_e);
-		INST_INSTR(set_1_h);
-		INST_INSTR(set_1_l);
-		INST_INSTR(set_1__hl_);
-		INST_INSTR(set_1_a);
-		INST_INSTR(set_2_b);
-		INST_INSTR(set_2_c);
-		INST_INSTR(set_2_d);
-		INST_INSTR(set_2_e);
-		INST_INSTR(set_2_h);
-		INST_INSTR(set_2_l);
-		INST_INSTR(set_2__hl_);
-		INST_INSTR(set_2_a);
-		INST_INSTR(set_3_b);
-		INST_INSTR(set_3_c);
-		INST_INSTR(set_3_d);
-		INST_INSTR(set_3_e);
-		INST_INSTR(set_3_h);
-		INST_INSTR(set_3_l);
-		INST_INSTR(set_3__hl_);
-		INST_INSTR(set_3_a);
-		INST_INSTR(set_4_b);
-		INST_INSTR(set_4_c);
-		INST_INSTR(set_4_d);
-		INST_INSTR(set_4_e);
-		INST_INSTR(set_4_h);
-		INST_INSTR(set_4_l);
-		INST_INSTR(set_4__hl_);
-		INST_INSTR(set_4_a);
-		INST_INSTR(set_5_b);
-		INST_INSTR(set_5_c);
-		INST_INSTR(set_5_d);
-		INST_INSTR(set_5_e);
-		INST_INSTR(set_5_h);
-		INST_INSTR(set_5_l);
-		INST_INSTR(set_5__hl_);
-		INST_INSTR(set_5_a);
-		INST_INSTR(set_6_b);
-		INST_INSTR(set_6_c);
-		INST_INSTR(set_6_d);
-		INST_INSTR(set_6_e);
-		INST_INSTR(set_6_h);
-		INST_INSTR(set_6_l);
-		INST_INSTR(set_6__hl_);
-		INST_INSTR(set_6_a);
-		INST_INSTR(set_7_b);
-		INST_INSTR(set_7_c);
-		INST_INSTR(set_7_d);
-		INST_INSTR(set_7_e);
-		INST_INSTR(set_7_h);
-		INST_INSTR(set_7_l);
-		INST_INSTR(set_7__hl_);
-		INST_INSTR(set_7_a);
-	}
-}
+	struct instr_entry {
+		void (*fn)(cpu&);
+		std::uint8_t cycles;
+		std::uint8_t cycles_taken;
+	};
+
+	inline constexpr std::array<instr_entry, 256> dispatch_main = {{
+		{ &ops::nop, 4, 4 },  // 0x00
+		{ &ops::ld_bc_d16, 12, 12 },  // 0x01
+		{ &ops::ld__bc__a, 8, 8 },  // 0x02
+		{ &ops::inc_bc, 8, 8 },  // 0x03
+		{ &ops::inc_b, 4, 4 },  // 0x04
+		{ &ops::dec_b, 4, 4 },  // 0x05
+		{ &ops::ld_b_d8, 8, 8 },  // 0x06
+		{ &ops::rlca, 4, 4 },  // 0x07
+		{ &ops::ld__a16__sp, 20, 20 },  // 0x08
+		{ &ops::add_hl_bc, 8, 8 },  // 0x09
+		{ &ops::ld_a__bc_, 8, 8 },  // 0x0A
+		{ &ops::dec_bc, 8, 8 },  // 0x0B
+		{ &ops::inc_c, 4, 4 },  // 0x0C
+		{ &ops::dec_c, 4, 4 },  // 0x0D
+		{ &ops::ld_c_d8, 8, 8 },  // 0x0E
+		{ &ops::rrca, 4, 4 },  // 0x0F
+		{ &ops::stop, 4, 4 },  // 0x10
+		{ &ops::ld_de_d16, 12, 12 },  // 0x11
+		{ &ops::ld__de__a, 8, 8 },  // 0x12
+		{ &ops::inc_de, 8, 8 },  // 0x13
+		{ &ops::inc_d, 4, 4 },  // 0x14
+		{ &ops::dec_d, 4, 4 },  // 0x15
+		{ &ops::ld_d_d8, 8, 8 },  // 0x16
+		{ &ops::rla, 4, 4 },  // 0x17
+		{ &ops::jr_s8, 12, 12 },  // 0x18
+		{ &ops::add_hl_de, 8, 8 },  // 0x19
+		{ &ops::ld_a__de_, 8, 8 },  // 0x1A
+		{ &ops::dec_de, 8, 8 },  // 0x1B
+		{ &ops::inc_e, 4, 4 },  // 0x1C
+		{ &ops::dec_e, 4, 4 },  // 0x1D
+		{ &ops::ld_e_d8, 8, 8 },  // 0x1E
+		{ &ops::rra, 4, 4 },  // 0x1F
+		{ &ops::jr_nz_s8, 8, 12 },  // 0x20
+		{ &ops::ld_hl_d16, 12, 12 },  // 0x21
+		{ &ops::ld__hlp__a, 8, 8 },  // 0x22
+		{ &ops::inc_hl, 8, 8 },  // 0x23
+		{ &ops::inc_h, 4, 4 },  // 0x24
+		{ &ops::dec_h, 4, 4 },  // 0x25
+		{ &ops::ld_h_d8, 8, 8 },  // 0x26
+		{ &ops::daa, 4, 4 },  // 0x27
+		{ &ops::jr_z_s8, 8, 12 },  // 0x28
+		{ &ops::add_hl_hl, 8, 8 },  // 0x29
+		{ &ops::ld_a__hlp_, 8, 8 },  // 0x2A
+		{ &ops::dec_hl, 8, 8 },  // 0x2B
+		{ &ops::inc_l, 4, 4 },  // 0x2C
+		{ &ops::dec_l, 4, 4 },  // 0x2D
+		{ &ops::ld_l_d8, 8, 8 },  // 0x2E
+		{ &ops::cpl, 4, 4 },  // 0x2F
+		{ &ops::jr_nc_s8, 8, 12 },  // 0x30
+		{ &ops::ld_sp_d16, 12, 12 },  // 0x31
+		{ &ops::ld__hlm__a, 8, 8 },  // 0x32
+		{ &ops::inc_sp, 8, 8 },  // 0x33
+		{ &ops::inc__hl_, 12, 12 },  // 0x34
+		{ &ops::dec__hl_, 12, 12 },  // 0x35
+		{ &ops::ld__hl__d8, 12, 12 },  // 0x36
+		{ &ops::scf, 4, 4 },  // 0x37
+		{ &ops::jr_c_s8, 8, 12 },  // 0x38
+		{ &ops::add_hl_sp, 8, 8 },  // 0x39
+		{ &ops::ld_a__hlm_, 8, 8 },  // 0x3A
+		{ &ops::dec_sp, 8, 8 },  // 0x3B
+		{ &ops::inc_a, 4, 4 },  // 0x3C
+		{ &ops::dec_a, 4, 4 },  // 0x3D
+		{ &ops::ld_a_d8, 8, 8 },  // 0x3E
+		{ &ops::ccf, 4, 4 },  // 0x3F
+		{ &ops::ld_b_b, 4, 4 },  // 0x40
+		{ &ops::ld_b_c, 4, 4 },  // 0x41
+		{ &ops::ld_b_d, 4, 4 },  // 0x42
+		{ &ops::ld_b_e, 4, 4 },  // 0x43
+		{ &ops::ld_b_h, 4, 4 },  // 0x44
+		{ &ops::ld_b_l, 4, 4 },  // 0x45
+		{ &ops::ld_b__hl_, 8, 8 },  // 0x46
+		{ &ops::ld_b_a, 4, 4 },  // 0x47
+		{ &ops::ld_c_b, 4, 4 },  // 0x48
+		{ &ops::ld_c_c, 4, 4 },  // 0x49
+		{ &ops::ld_c_d, 4, 4 },  // 0x4A
+		{ &ops::ld_c_e, 4, 4 },  // 0x4B
+		{ &ops::ld_c_h, 4, 4 },  // 0x4C
+		{ &ops::ld_c_l, 4, 4 },  // 0x4D
+		{ &ops::ld_c__hl_, 8, 8 },  // 0x4E
+		{ &ops::ld_c_a, 4, 4 },  // 0x4F
+		{ &ops::ld_d_b, 4, 4 },  // 0x50
+		{ &ops::ld_d_c, 4, 4 },  // 0x51
+		{ &ops::ld_d_d, 4, 4 },  // 0x52
+		{ &ops::ld_d_e, 4, 4 },  // 0x53
+		{ &ops::ld_d_h, 4, 4 },  // 0x54
+		{ &ops::ld_d_l, 4, 4 },  // 0x55
+		{ &ops::ld_d__hl_, 8, 8 },  // 0x56
+		{ &ops::ld_d_a, 4, 4 },  // 0x57
+		{ &ops::ld_e_b, 4, 4 },  // 0x58
+		{ &ops::ld_e_c, 4, 4 },  // 0x59
+		{ &ops::ld_e_d, 4, 4 },  // 0x5A
+		{ &ops::ld_e_e, 4, 4 },  // 0x5B
+		{ &ops::ld_e_h, 4, 4 },  // 0x5C
+		{ &ops::ld_e_l, 4, 4 },  // 0x5D
+		{ &ops::ld_e__hl_, 8, 8 },  // 0x5E
+		{ &ops::ld_e_a, 4, 4 },  // 0x5F
+		{ &ops::ld_h_b, 4, 4 },  // 0x60
+		{ &ops::ld_h_c, 4, 4 },  // 0x61
+		{ &ops::ld_h_d, 4, 4 },  // 0x62
+		{ &ops::ld_h_e, 4, 4 },  // 0x63
+		{ &ops::ld_h_h, 4, 4 },  // 0x64
+		{ &ops::ld_h_l, 4, 4 },  // 0x65
+		{ &ops::ld_h__hl_, 8, 8 },  // 0x66
+		{ &ops::ld_h_a, 4, 4 },  // 0x67
+		{ &ops::ld_l_b, 4, 4 },  // 0x68
+		{ &ops::ld_l_c, 4, 4 },  // 0x69
+		{ &ops::ld_l_d, 4, 4 },  // 0x6A
+		{ &ops::ld_l_e, 4, 4 },  // 0x6B
+		{ &ops::ld_l_h, 4, 4 },  // 0x6C
+		{ &ops::ld_l_l, 4, 4 },  // 0x6D
+		{ &ops::ld_l__hl_, 8, 8 },  // 0x6E
+		{ &ops::ld_l_a, 4, 4 },  // 0x6F
+		{ &ops::ld__hl__b, 8, 8 },  // 0x70
+		{ &ops::ld__hl__c, 8, 8 },  // 0x71
+		{ &ops::ld__hl__d, 8, 8 },  // 0x72
+		{ &ops::ld__hl__e, 8, 8 },  // 0x73
+		{ &ops::ld__hl__h, 8, 8 },  // 0x74
+		{ &ops::ld__hl__l, 8, 8 },  // 0x75
+		{ &ops::halt, 4, 4 },  // 0x76
+		{ &ops::ld__hl__a, 8, 8 },  // 0x77
+		{ &ops::ld_a_b, 4, 4 },  // 0x78
+		{ &ops::ld_a_c, 4, 4 },  // 0x79
+		{ &ops::ld_a_d, 4, 4 },  // 0x7A
+		{ &ops::ld_a_e, 4, 4 },  // 0x7B
+		{ &ops::ld_a_h, 4, 4 },  // 0x7C
+		{ &ops::ld_a_l, 4, 4 },  // 0x7D
+		{ &ops::ld_a__hl_, 8, 8 },  // 0x7E
+		{ &ops::ld_a_a, 4, 4 },  // 0x7F
+		{ &ops::add_a_b, 4, 4 },  // 0x80
+		{ &ops::add_a_c, 4, 4 },  // 0x81
+		{ &ops::add_a_d, 4, 4 },  // 0x82
+		{ &ops::add_a_e, 4, 4 },  // 0x83
+		{ &ops::add_a_h, 4, 4 },  // 0x84
+		{ &ops::add_a_l, 4, 4 },  // 0x85
+		{ &ops::add_a__hl_, 8, 8 },  // 0x86
+		{ &ops::add_a_a, 4, 4 },  // 0x87
+		{ &ops::adc_a_b, 4, 4 },  // 0x88
+		{ &ops::adc_a_c, 4, 4 },  // 0x89
+		{ &ops::adc_a_d, 4, 4 },  // 0x8A
+		{ &ops::adc_a_e, 4, 4 },  // 0x8B
+		{ &ops::adc_a_h, 4, 4 },  // 0x8C
+		{ &ops::adc_a_l, 4, 4 },  // 0x8D
+		{ &ops::adc_a__hl_, 8, 8 },  // 0x8E
+		{ &ops::adc_a_a, 4, 4 },  // 0x8F
+		{ &ops::sub_b, 4, 4 },  // 0x90
+		{ &ops::sub_c, 4, 4 },  // 0x91
+		{ &ops::sub_d, 4, 4 },  // 0x92
+		{ &ops::sub_e, 4, 4 },  // 0x93
+		{ &ops::sub_h, 4, 4 },  // 0x94
+		{ &ops::sub_l, 4, 4 },  // 0x95
+		{ &ops::sub__hl_, 8, 8 },  // 0x96
+		{ &ops::sub_a, 4, 4 },  // 0x97
+		{ &ops::sbc_a_b, 4, 4 },  // 0x98
+		{ &ops::sbc_a_c, 4, 4 },  // 0x99
+		{ &ops::sbc_a_d, 4, 4 },  // 0x9A
+		{ &ops::sbc_a_e, 4, 4 },  // 0x9B
+		{ &ops::sbc_a_h, 4, 4 },  // 0x9C
+		{ &ops::sbc_a_l, 4, 4 },  // 0x9D
+		{ &ops::sbc_a__hl_, 8, 8 },  // 0x9E
+		{ &ops::sbc_a_a, 4, 4 },  // 0x9F
+		{ &ops::and_b, 4, 4 },  // 0xA0
+		{ &ops::and_c, 4, 4 },  // 0xA1
+		{ &ops::and_d, 4, 4 },  // 0xA2
+		{ &ops::and_e, 4, 4 },  // 0xA3
+		{ &ops::and_h, 4, 4 },  // 0xA4
+		{ &ops::and_l, 4, 4 },  // 0xA5
+		{ &ops::and__hl_, 8, 8 },  // 0xA6
+		{ &ops::and_a, 4, 4 },  // 0xA7
+		{ &ops::xor_b, 4, 4 },  // 0xA8
+		{ &ops::xor_c, 4, 4 },  // 0xA9
+		{ &ops::xor_d, 4, 4 },  // 0xAA
+		{ &ops::xor_e, 4, 4 },  // 0xAB
+		{ &ops::xor_h, 4, 4 },  // 0xAC
+		{ &ops::xor_l, 4, 4 },  // 0xAD
+		{ &ops::xor__hl_, 8, 8 },  // 0xAE
+		{ &ops::xor_a, 4, 4 },  // 0xAF
+		{ &ops::or_b, 4, 4 },  // 0xB0
+		{ &ops::or_c, 4, 4 },  // 0xB1
+		{ &ops::or_d, 4, 4 },  // 0xB2
+		{ &ops::or_e, 4, 4 },  // 0xB3
+		{ &ops::or_h, 4, 4 },  // 0xB4
+		{ &ops::or_l, 4, 4 },  // 0xB5
+		{ &ops::or__hl_, 8, 8 },  // 0xB6
+		{ &ops::or_a, 4, 4 },  // 0xB7
+		{ &ops::cp_b, 4, 4 },  // 0xB8
+		{ &ops::cp_c, 4, 4 },  // 0xB9
+		{ &ops::cp_d, 4, 4 },  // 0xBA
+		{ &ops::cp_e, 4, 4 },  // 0xBB
+		{ &ops::cp_h, 4, 4 },  // 0xBC
+		{ &ops::cp_l, 4, 4 },  // 0xBD
+		{ &ops::cp__hl_, 8, 8 },  // 0xBE
+		{ &ops::cp_a, 4, 4 },  // 0xBF
+		{ &ops::ret_nz, 8, 20 },  // 0xC0
+		{ &ops::pop_bc, 12, 12 },  // 0xC1
+		{ &ops::jp_nz_a16, 12, 16 },  // 0xC2
+		{ &ops::jp_a16, 16, 16 },  // 0xC3
+		{ &ops::call_nz_a16, 12, 24 },  // 0xC4
+		{ &ops::push_bc, 16, 16 },  // 0xC5
+		{ &ops::add_a_d8, 8, 8 },  // 0xC6
+		{ &ops::rst_0, 16, 16 },  // 0xC7
+		{ &ops::ret_z, 8, 20 },  // 0xC8
+		{ &ops::ret, 16, 16 },  // 0xC9
+		{ &ops::jp_z_a16, 12, 16 },  // 0xCA
+		{ nullptr, 0, 0 },  // 0xCB
+		{ &ops::call_z_a16, 12, 24 },  // 0xCC
+		{ &ops::call_a16, 24, 24 },  // 0xCD
+		{ &ops::adc_a_d8, 8, 8 },  // 0xCE
+		{ &ops::rst_1, 16, 16 },  // 0xCF
+		{ &ops::ret_nc, 8, 20 },  // 0xD0
+		{ &ops::pop_de, 12, 12 },  // 0xD1
+		{ &ops::jp_nc_a16, 12, 16 },  // 0xD2
+		{ nullptr, 0, 0 },  // 0xD3
+		{ &ops::call_nc_a16, 12, 24 },  // 0xD4
+		{ &ops::push_de, 16, 16 },  // 0xD5
+		{ &ops::sub_d8, 8, 8 },  // 0xD6
+		{ &ops::rst_2, 16, 16 },  // 0xD7
+		{ &ops::ret_c, 8, 20 },  // 0xD8
+		{ &ops::reti, 16, 16 },  // 0xD9
+		{ &ops::jp_c_a16, 12, 16 },  // 0xDA
+		{ nullptr, 0, 0 },  // 0xDB
+		{ &ops::call_c_a16, 12, 24 },  // 0xDC
+		{ nullptr, 0, 0 },  // 0xDD
+		{ &ops::sbc_a_d8, 8, 8 },  // 0xDE
+		{ &ops::rst_3, 16, 16 },  // 0xDF
+		{ &ops::ld__a8__a, 12, 12 },  // 0xE0
+		{ &ops::pop_hl, 12, 12 },  // 0xE1
+		{ &ops::ld__c__a, 8, 8 },  // 0xE2
+		{ nullptr, 0, 0 },  // 0xE3
+		{ nullptr, 0, 0 },  // 0xE4
+		{ &ops::push_hl, 16, 16 },  // 0xE5
+		{ &ops::and_d8, 8, 8 },  // 0xE6
+		{ &ops::rst_4, 16, 16 },  // 0xE7
+		{ &ops::add_sp_s8, 16, 16 },  // 0xE8
+		{ &ops::jp_hl, 4, 4 },  // 0xE9
+		{ &ops::ld__a16__a, 16, 16 },  // 0xEA
+		{ nullptr, 0, 0 },  // 0xEB
+		{ nullptr, 0, 0 },  // 0xEC
+		{ nullptr, 0, 0 },  // 0xED
+		{ &ops::xor_d8, 8, 8 },  // 0xEE
+		{ &ops::rst_5, 16, 16 },  // 0xEF
+		{ &ops::ld_a__a8_, 12, 12 },  // 0xF0
+		{ &ops::pop_af, 12, 12 },  // 0xF1
+		{ &ops::ld_a__c_, 8, 8 },  // 0xF2
+		{ &ops::di, 4, 4 },  // 0xF3
+		{ nullptr, 0, 0 },  // 0xF4
+		{ &ops::push_af, 16, 16 },  // 0xF5
+		{ &ops::or_d8, 8, 8 },  // 0xF6
+		{ &ops::rst_6, 16, 16 },  // 0xF7
+		{ &ops::ld_hl_spps8, 12, 12 },  // 0xF8
+		{ &ops::ld_sp_hl, 8, 8 },  // 0xF9
+		{ &ops::ld_a__a16_, 16, 16 },  // 0xFA
+		{ &ops::ei, 4, 4 },  // 0xFB
+		{ nullptr, 0, 0 },  // 0xFC
+		{ nullptr, 0, 0 },  // 0xFD
+		{ &ops::cp_d8, 8, 8 },  // 0xFE
+		{ &ops::rst_7, 16, 16 },  // 0xFF
+	}};
+
+	inline constexpr std::array<instr_entry, 256> dispatch_cb = {{
+		{ &ops::rlc_b, 8, 8 },  // 0x00
+		{ &ops::rlc_c, 8, 8 },  // 0x01
+		{ &ops::rlc_d, 8, 8 },  // 0x02
+		{ &ops::rlc_e, 8, 8 },  // 0x03
+		{ &ops::rlc_h, 8, 8 },  // 0x04
+		{ &ops::rlc_l, 8, 8 },  // 0x05
+		{ &ops::rlc__hl_, 16, 16 },  // 0x06
+		{ &ops::rlc_a, 8, 8 },  // 0x07
+		{ &ops::rrc_b, 8, 8 },  // 0x08
+		{ &ops::rrc_c, 8, 8 },  // 0x09
+		{ &ops::rrc_d, 8, 8 },  // 0x0A
+		{ &ops::rrc_e, 8, 8 },  // 0x0B
+		{ &ops::rrc_h, 8, 8 },  // 0x0C
+		{ &ops::rrc_l, 8, 8 },  // 0x0D
+		{ &ops::rrc__hl_, 16, 16 },  // 0x0E
+		{ &ops::rrc_a, 8, 8 },  // 0x0F
+		{ &ops::rl_b, 8, 8 },  // 0x10
+		{ &ops::rl_c, 8, 8 },  // 0x11
+		{ &ops::rl_d, 8, 8 },  // 0x12
+		{ &ops::rl_e, 8, 8 },  // 0x13
+		{ &ops::rl_h, 8, 8 },  // 0x14
+		{ &ops::rl_l, 8, 8 },  // 0x15
+		{ &ops::rl__hl_, 16, 16 },  // 0x16
+		{ &ops::rl_a, 8, 8 },  // 0x17
+		{ &ops::rr_b, 8, 8 },  // 0x18
+		{ &ops::rr_c, 8, 8 },  // 0x19
+		{ &ops::rr_d, 8, 8 },  // 0x1A
+		{ &ops::rr_e, 8, 8 },  // 0x1B
+		{ &ops::rr_h, 8, 8 },  // 0x1C
+		{ &ops::rr_l, 8, 8 },  // 0x1D
+		{ &ops::rr__hl_, 16, 16 },  // 0x1E
+		{ &ops::rr_a, 8, 8 },  // 0x1F
+		{ &ops::sla_b, 8, 8 },  // 0x20
+		{ &ops::sla_c, 8, 8 },  // 0x21
+		{ &ops::sla_d, 8, 8 },  // 0x22
+		{ &ops::sla_e, 8, 8 },  // 0x23
+		{ &ops::sla_h, 8, 8 },  // 0x24
+		{ &ops::sla_l, 8, 8 },  // 0x25
+		{ &ops::sla__hl_, 16, 16 },  // 0x26
+		{ &ops::sla_a, 8, 8 },  // 0x27
+		{ &ops::sra_b, 8, 8 },  // 0x28
+		{ &ops::sra_c, 8, 8 },  // 0x29
+		{ &ops::sra_d, 8, 8 },  // 0x2A
+		{ &ops::sra_e, 8, 8 },  // 0x2B
+		{ &ops::sra_h, 8, 8 },  // 0x2C
+		{ &ops::sra_l, 8, 8 },  // 0x2D
+		{ &ops::sra__hl_, 16, 16 },  // 0x2E
+		{ &ops::sra_a, 8, 8 },  // 0x2F
+		{ &ops::swap_b, 8, 8 },  // 0x30
+		{ &ops::swap_c, 8, 8 },  // 0x31
+		{ &ops::swap_d, 8, 8 },  // 0x32
+		{ &ops::swap_e, 8, 8 },  // 0x33
+		{ &ops::swap_h, 8, 8 },  // 0x34
+		{ &ops::swap_l, 8, 8 },  // 0x35
+		{ &ops::swap__hl_, 16, 16 },  // 0x36
+		{ &ops::swap_a, 8, 8 },  // 0x37
+		{ &ops::srl_b, 8, 8 },  // 0x38
+		{ &ops::srl_c, 8, 8 },  // 0x39
+		{ &ops::srl_d, 8, 8 },  // 0x3A
+		{ &ops::srl_e, 8, 8 },  // 0x3B
+		{ &ops::srl_h, 8, 8 },  // 0x3C
+		{ &ops::srl_l, 8, 8 },  // 0x3D
+		{ &ops::srl__hl_, 16, 16 },  // 0x3E
+		{ &ops::srl_a, 8, 8 },  // 0x3F
+		{ &ops::bit_0_b, 8, 8 },  // 0x40
+		{ &ops::bit_0_c, 8, 8 },  // 0x41
+		{ &ops::bit_0_d, 8, 8 },  // 0x42
+		{ &ops::bit_0_e, 8, 8 },  // 0x43
+		{ &ops::bit_0_h, 8, 8 },  // 0x44
+		{ &ops::bit_0_l, 8, 8 },  // 0x45
+		{ &ops::bit_0__hl_, 12, 12 },  // 0x46
+		{ &ops::bit_0_a, 8, 8 },  // 0x47
+		{ &ops::bit_1_b, 8, 8 },  // 0x48
+		{ &ops::bit_1_c, 8, 8 },  // 0x49
+		{ &ops::bit_1_d, 8, 8 },  // 0x4A
+		{ &ops::bit_1_e, 8, 8 },  // 0x4B
+		{ &ops::bit_1_h, 8, 8 },  // 0x4C
+		{ &ops::bit_1_l, 8, 8 },  // 0x4D
+		{ &ops::bit_1__hl_, 12, 12 },  // 0x4E
+		{ &ops::bit_1_a, 8, 8 },  // 0x4F
+		{ &ops::bit_2_b, 8, 8 },  // 0x50
+		{ &ops::bit_2_c, 8, 8 },  // 0x51
+		{ &ops::bit_2_d, 8, 8 },  // 0x52
+		{ &ops::bit_2_e, 8, 8 },  // 0x53
+		{ &ops::bit_2_h, 8, 8 },  // 0x54
+		{ &ops::bit_2_l, 8, 8 },  // 0x55
+		{ &ops::bit_2__hl_, 12, 12 },  // 0x56
+		{ &ops::bit_2_a, 8, 8 },  // 0x57
+		{ &ops::bit_3_b, 8, 8 },  // 0x58
+		{ &ops::bit_3_c, 8, 8 },  // 0x59
+		{ &ops::bit_3_d, 8, 8 },  // 0x5A
+		{ &ops::bit_3_e, 8, 8 },  // 0x5B
+		{ &ops::bit_3_h, 8, 8 },  // 0x5C
+		{ &ops::bit_3_l, 8, 8 },  // 0x5D
+		{ &ops::bit_3__hl_, 12, 12 },  // 0x5E
+		{ &ops::bit_3_a, 8, 8 },  // 0x5F
+		{ &ops::bit_4_b, 8, 8 },  // 0x60
+		{ &ops::bit_4_c, 8, 8 },  // 0x61
+		{ &ops::bit_4_d, 8, 8 },  // 0x62
+		{ &ops::bit_4_e, 8, 8 },  // 0x63
+		{ &ops::bit_4_h, 8, 8 },  // 0x64
+		{ &ops::bit_4_l, 8, 8 },  // 0x65
+		{ &ops::bit_4__hl_, 12, 12 },  // 0x66
+		{ &ops::bit_4_a, 8, 8 },  // 0x67
+		{ &ops::bit_5_b, 8, 8 },  // 0x68
+		{ &ops::bit_5_c, 8, 8 },  // 0x69
+		{ &ops::bit_5_d, 8, 8 },  // 0x6A
+		{ &ops::bit_5_e, 8, 8 },  // 0x6B
+		{ &ops::bit_5_h, 8, 8 },  // 0x6C
+		{ &ops::bit_5_l, 8, 8 },  // 0x6D
+		{ &ops::bit_5__hl_, 12, 12 },  // 0x6E
+		{ &ops::bit_5_a, 8, 8 },  // 0x6F
+		{ &ops::bit_6_b, 8, 8 },  // 0x70
+		{ &ops::bit_6_c, 8, 8 },  // 0x71
+		{ &ops::bit_6_d, 8, 8 },  // 0x72
+		{ &ops::bit_6_e, 8, 8 },  // 0x73
+		{ &ops::bit_6_h, 8, 8 },  // 0x74
+		{ &ops::bit_6_l, 8, 8 },  // 0x75
+		{ &ops::bit_6__hl_, 12, 12 },  // 0x76
+		{ &ops::bit_6_a, 8, 8 },  // 0x77
+		{ &ops::bit_7_b, 8, 8 },  // 0x78
+		{ &ops::bit_7_c, 8, 8 },  // 0x79
+		{ &ops::bit_7_d, 8, 8 },  // 0x7A
+		{ &ops::bit_7_e, 8, 8 },  // 0x7B
+		{ &ops::bit_7_h, 8, 8 },  // 0x7C
+		{ &ops::bit_7_l, 8, 8 },  // 0x7D
+		{ &ops::bit_7__hl_, 12, 12 },  // 0x7E
+		{ &ops::bit_7_a, 8, 8 },  // 0x7F
+		{ &ops::res_0_b, 8, 8 },  // 0x80
+		{ &ops::res_0_c, 8, 8 },  // 0x81
+		{ &ops::res_0_d, 8, 8 },  // 0x82
+		{ &ops::res_0_e, 8, 8 },  // 0x83
+		{ &ops::res_0_h, 8, 8 },  // 0x84
+		{ &ops::res_0_l, 8, 8 },  // 0x85
+		{ &ops::res_0__hl_, 16, 16 },  // 0x86
+		{ &ops::res_0_a, 8, 8 },  // 0x87
+		{ &ops::res_1_b, 8, 8 },  // 0x88
+		{ &ops::res_1_c, 8, 8 },  // 0x89
+		{ &ops::res_1_d, 8, 8 },  // 0x8A
+		{ &ops::res_1_e, 8, 8 },  // 0x8B
+		{ &ops::res_1_h, 8, 8 },  // 0x8C
+		{ &ops::res_1_l, 8, 8 },  // 0x8D
+		{ &ops::res_1__hl_, 16, 16 },  // 0x8E
+		{ &ops::res_1_a, 8, 8 },  // 0x8F
+		{ &ops::res_2_b, 8, 8 },  // 0x90
+		{ &ops::res_2_c, 8, 8 },  // 0x91
+		{ &ops::res_2_d, 8, 8 },  // 0x92
+		{ &ops::res_2_e, 8, 8 },  // 0x93
+		{ &ops::res_2_h, 8, 8 },  // 0x94
+		{ &ops::res_2_l, 8, 8 },  // 0x95
+		{ &ops::res_2__hl_, 16, 16 },  // 0x96
+		{ &ops::res_2_a, 8, 8 },  // 0x97
+		{ &ops::res_3_b, 8, 8 },  // 0x98
+		{ &ops::res_3_c, 8, 8 },  // 0x99
+		{ &ops::res_3_d, 8, 8 },  // 0x9A
+		{ &ops::res_3_e, 8, 8 },  // 0x9B
+		{ &ops::res_3_h, 8, 8 },  // 0x9C
+		{ &ops::res_3_l, 8, 8 },  // 0x9D
+		{ &ops::res_3__hl_, 16, 16 },  // 0x9E
+		{ &ops::res_3_a, 8, 8 },  // 0x9F
+		{ &ops::res_4_b, 8, 8 },  // 0xA0
+		{ &ops::res_4_c, 8, 8 },  // 0xA1
+		{ &ops::res_4_d, 8, 8 },  // 0xA2
+		{ &ops::res_4_e, 8, 8 },  // 0xA3
+		{ &ops::res_4_h, 8, 8 },  // 0xA4
+		{ &ops::res_4_l, 8, 8 },  // 0xA5
+		{ &ops::res_4__hl_, 16, 16 },  // 0xA6
+		{ &ops::res_4_a, 8, 8 },  // 0xA7
+		{ &ops::res_5_b, 8, 8 },  // 0xA8
+		{ &ops::res_5_c, 8, 8 },  // 0xA9
+		{ &ops::res_5_d, 8, 8 },  // 0xAA
+		{ &ops::res_5_e, 8, 8 },  // 0xAB
+		{ &ops::res_5_h, 8, 8 },  // 0xAC
+		{ &ops::res_5_l, 8, 8 },  // 0xAD
+		{ &ops::res_5__hl_, 16, 16 },  // 0xAE
+		{ &ops::res_5_a, 8, 8 },  // 0xAF
+		{ &ops::res_6_b, 8, 8 },  // 0xB0
+		{ &ops::res_6_c, 8, 8 },  // 0xB1
+		{ &ops::res_6_d, 8, 8 },  // 0xB2
+		{ &ops::res_6_e, 8, 8 },  // 0xB3
+		{ &ops::res_6_h, 8, 8 },  // 0xB4
+		{ &ops::res_6_l, 8, 8 },  // 0xB5
+		{ &ops::res_6__hl_, 16, 16 },  // 0xB6
+		{ &ops::res_6_a, 8, 8 },  // 0xB7
+		{ &ops::res_7_b, 8, 8 },  // 0xB8
+		{ &ops::res_7_c, 8, 8 },  // 0xB9
+		{ &ops::res_7_d, 8, 8 },  // 0xBA
+		{ &ops::res_7_e, 8, 8 },  // 0xBB
+		{ &ops::res_7_h, 8, 8 },  // 0xBC
+		{ &ops::res_7_l, 8, 8 },  // 0xBD
+		{ &ops::res_7__hl_, 16, 16 },  // 0xBE
+		{ &ops::res_7_a, 8, 8 },  // 0xBF
+		{ &ops::set_0_b, 8, 8 },  // 0xC0
+		{ &ops::set_0_c, 8, 8 },  // 0xC1
+		{ &ops::set_0_d, 8, 8 },  // 0xC2
+		{ &ops::set_0_e, 8, 8 },  // 0xC3
+		{ &ops::set_0_h, 8, 8 },  // 0xC4
+		{ &ops::set_0_l, 8, 8 },  // 0xC5
+		{ &ops::set_0__hl_, 16, 16 },  // 0xC6
+		{ &ops::set_0_a, 8, 8 },  // 0xC7
+		{ &ops::set_1_b, 8, 8 },  // 0xC8
+		{ &ops::set_1_c, 8, 8 },  // 0xC9
+		{ &ops::set_1_d, 8, 8 },  // 0xCA
+		{ &ops::set_1_e, 8, 8 },  // 0xCB
+		{ &ops::set_1_h, 8, 8 },  // 0xCC
+		{ &ops::set_1_l, 8, 8 },  // 0xCD
+		{ &ops::set_1__hl_, 16, 16 },  // 0xCE
+		{ &ops::set_1_a, 8, 8 },  // 0xCF
+		{ &ops::set_2_b, 8, 8 },  // 0xD0
+		{ &ops::set_2_c, 8, 8 },  // 0xD1
+		{ &ops::set_2_d, 8, 8 },  // 0xD2
+		{ &ops::set_2_e, 8, 8 },  // 0xD3
+		{ &ops::set_2_h, 8, 8 },  // 0xD4
+		{ &ops::set_2_l, 8, 8 },  // 0xD5
+		{ &ops::set_2__hl_, 16, 16 },  // 0xD6
+		{ &ops::set_2_a, 8, 8 },  // 0xD7
+		{ &ops::set_3_b, 8, 8 },  // 0xD8
+		{ &ops::set_3_c, 8, 8 },  // 0xD9
+		{ &ops::set_3_d, 8, 8 },  // 0xDA
+		{ &ops::set_3_e, 8, 8 },  // 0xDB
+		{ &ops::set_3_h, 8, 8 },  // 0xDC
+		{ &ops::set_3_l, 8, 8 },  // 0xDD
+		{ &ops::set_3__hl_, 16, 16 },  // 0xDE
+		{ &ops::set_3_a, 8, 8 },  // 0xDF
+		{ &ops::set_4_b, 8, 8 },  // 0xE0
+		{ &ops::set_4_c, 8, 8 },  // 0xE1
+		{ &ops::set_4_d, 8, 8 },  // 0xE2
+		{ &ops::set_4_e, 8, 8 },  // 0xE3
+		{ &ops::set_4_h, 8, 8 },  // 0xE4
+		{ &ops::set_4_l, 8, 8 },  // 0xE5
+		{ &ops::set_4__hl_, 16, 16 },  // 0xE6
+		{ &ops::set_4_a, 8, 8 },  // 0xE7
+		{ &ops::set_5_b, 8, 8 },  // 0xE8
+		{ &ops::set_5_c, 8, 8 },  // 0xE9
+		{ &ops::set_5_d, 8, 8 },  // 0xEA
+		{ &ops::set_5_e, 8, 8 },  // 0xEB
+		{ &ops::set_5_h, 8, 8 },  // 0xEC
+		{ &ops::set_5_l, 8, 8 },  // 0xED
+		{ &ops::set_5__hl_, 16, 16 },  // 0xEE
+		{ &ops::set_5_a, 8, 8 },  // 0xEF
+		{ &ops::set_6_b, 8, 8 },  // 0xF0
+		{ &ops::set_6_c, 8, 8 },  // 0xF1
+		{ &ops::set_6_d, 8, 8 },  // 0xF2
+		{ &ops::set_6_e, 8, 8 },  // 0xF3
+		{ &ops::set_6_h, 8, 8 },  // 0xF4
+		{ &ops::set_6_l, 8, 8 },  // 0xF5
+		{ &ops::set_6__hl_, 16, 16 },  // 0xF6
+		{ &ops::set_6_a, 8, 8 },  // 0xF7
+		{ &ops::set_7_b, 8, 8 },  // 0xF8
+		{ &ops::set_7_c, 8, 8 },  // 0xF9
+		{ &ops::set_7_d, 8, 8 },  // 0xFA
+		{ &ops::set_7_e, 8, 8 },  // 0xFB
+		{ &ops::set_7_h, 8, 8 },  // 0xFC
+		{ &ops::set_7_l, 8, 8 },  // 0xFD
+		{ &ops::set_7__hl_, 16, 16 },  // 0xFE
+		{ &ops::set_7_a, 8, 8 },  // 0xFF
+	}};
+} // namespace gbemu
 
 #endif /* _H_OPCODES_H_ */

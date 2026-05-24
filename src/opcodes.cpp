@@ -1,18 +1,14 @@
 // Originally seeded from scripts/opcodes.json via scripts/gen_ops.py; bodies
-// are now hand-maintained.  The header table (inc/opcodes.hpp) is still
+// are now hand-maintained.  The header (inc/opcodes.hpp) is still
 // machine-generated and must NOT be edited.
 
+#include <cpu.h>
 #include <exc.hpp>
 #include <gb_layout.h>
 #include <log.h>
 #include <opcodes.hpp>
 
-#define IMPL_INSTR(x)                                        \
-    gbemu::instruction_types::x gbemu::instructions::x##_{}; \
-    void gbemu::instruction_types::x::execute(cpu& cpu)
-
-std::array<gbemu::instruction*, 256> gbemu::instruction_set{};
-std::array<gbemu::instruction*, 256> gbemu::instruction_set_cb{};
+#define IMPL_INSTR(x) void gbemu::ops::x(cpu& cpu)
 
 // 7F LD A, A
 /* Load the contents of register A into register A. */
@@ -304,145 +300,145 @@ IMPL_INSTR(ld_l_l) { /* nop */
 // 3E LD A, d8
 /* Load the 8-bit immediate operand d8 into register A. */
 IMPL_INSTR(ld_a_d8) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.af.hi = cpu.bus_read(cpu.regs.pc++);
 }
 
 // 06 LD B, d8
 /* Load the 8-bit immediate operand d8 into register B. */
 IMPL_INSTR(ld_b_d8) {
-    cpu.regs.bc.hi = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.bc.hi = cpu.bus_read(cpu.regs.pc++);
 }
 
 // 0E LD C, d8
 /* Load the 8-bit immediate operand d8 into register C. */
 IMPL_INSTR(ld_c_d8) {
-    cpu.regs.bc.lo = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.bc.lo = cpu.bus_read(cpu.regs.pc++);
 }
 
 // 16 LD D, d8
 /* Load the 8-bit immediate operand d8 into register D. */
 IMPL_INSTR(ld_d_d8) {
-    cpu.regs.de.hi = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.de.hi = cpu.bus_read(cpu.regs.pc++);
 }
 
 // 1E LD E, d8
 /* Load the 8-bit immediate operand d8 into register E. */
 IMPL_INSTR(ld_e_d8) {
-    cpu.regs.de.lo = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.de.lo = cpu.bus_read(cpu.regs.pc++);
 }
 
 // 26 LD H, d8
 /* Load the 8-bit immediate operand d8 into register H. */
 IMPL_INSTR(ld_h_d8) {
-    cpu.regs.hl.hi = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.hl.hi = cpu.bus_read(cpu.regs.pc++);
 }
 
 // 2E LD L, d8
 /* Load the 8-bit immediate operand d8 into register L. */
 IMPL_INSTR(ld_l_d8) {
-    cpu.regs.hl.lo = cpu.mmu.read_u8(cpu.regs.pc++);
+    cpu.regs.hl.lo = cpu.bus_read(cpu.regs.pc++);
 }
 
 // 7E LD A, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register A. */
 IMPL_INSTR(ld_a__hl_) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.af.hi = cpu.bus_read(cpu.regs.hl.u16);
 }
 
 // 46 LD B, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register B. */
 IMPL_INSTR(ld_b__hl_) {
-    cpu.regs.bc.hi = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.bc.hi = cpu.bus_read(cpu.regs.hl.u16);
 }
 
 // 4E LD C, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register C. */
 IMPL_INSTR(ld_c__hl_) {
-    cpu.regs.bc.lo = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.bc.lo = cpu.bus_read(cpu.regs.hl.u16);
 }
 
 // 56 LD D, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register D. */
 IMPL_INSTR(ld_d__hl_) {
-    cpu.regs.de.hi = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.de.hi = cpu.bus_read(cpu.regs.hl.u16);
 }
 
 // 5E LD E, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register E. */
 IMPL_INSTR(ld_e__hl_) {
-    cpu.regs.de.lo = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.de.lo = cpu.bus_read(cpu.regs.hl.u16);
 }
 
 // 66 LD H, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register H. */
 IMPL_INSTR(ld_h__hl_) {
-    cpu.regs.hl.hi = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.hl.hi = cpu.bus_read(cpu.regs.hl.u16);
 }
 
 // 6E LD L, (HL)
 /* Load the 8-bit contents of memory specified by register pair HL into register L. */
 IMPL_INSTR(ld_l__hl_) {
-    cpu.regs.hl.lo = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    cpu.regs.hl.lo = cpu.bus_read(cpu.regs.hl.u16);
 }
 
 // 77 LD (HL), A
 /* Store the contents of register A in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__a) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.regs.af.hi);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.regs.af.hi);
 }
 
 // 70 LD (HL), B
 /* Store the contents of register B in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__b) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.regs.bc.hi);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.regs.bc.hi);
 }
 
 // 71 LD (HL), C
 /* Store the contents of register C in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__c) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.regs.bc.lo);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.regs.bc.lo);
 }
 
 // 72 LD (HL), D
 /* Store the contents of register D in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__d) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.regs.de.hi);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.regs.de.hi);
 }
 
 // 73 LD (HL), E
 /* Store the contents of register E in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__e) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.regs.de.lo);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.regs.de.lo);
 }
 
 // 74 LD (HL), H
 /* Store the contents of register H in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__h) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.regs.hl.hi);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.regs.hl.hi);
 }
 
 // 75 LD (HL), L
 /* Store the contents of register L in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__l) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.regs.hl.lo);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.regs.hl.lo);
 }
 
 // 36 LD (HL), d8
 /* Store the contents of 8-bit immediate operand d8 in the memory location specified by register pair HL. */
 IMPL_INSTR(ld__hl__d8) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.mmu.read_u8(cpu.regs.pc++));
+    cpu.bus_write(cpu.regs.hl.u16, cpu.bus_read(cpu.regs.pc++));
 }
 
 // 0A LD A, (BC)
 /* Load the 8-bit contents of memory specified by register pair BC into register A. */
 IMPL_INSTR(ld_a__bc_) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.bc.u16);
+    cpu.regs.af.hi = cpu.bus_read(cpu.regs.bc.u16);
 }
 
 // 1A LD A, (DE)
 /* Load the 8-bit contents of memory specified by register pair DE into register A. */
 IMPL_INSTR(ld_a__de_) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.de.u16);
+    cpu.regs.af.hi = cpu.bus_read(cpu.regs.de.u16);
 }
 
 // F2 LD A, (C)
@@ -451,7 +447,7 @@ IMPL_INSTR(ld_a__de_) {
 0xFF80-0xFFFE: Working & Stack RAM (127 bytes)
 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld_a__c_) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(gb::io::BASE + cpu.regs.bc.lo);
+    cpu.regs.af.hi = cpu.bus_read(gb::io::BASE + cpu.regs.bc.lo);
 }
 
 // E2 LD (C), A
@@ -460,7 +456,7 @@ IMPL_INSTR(ld_a__c_) {
 0xFF80-0xFFFE: Working & Stack RAM (127 bytes)
 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld__c__a) {
-    cpu.mmu.write_u8(gb::io::BASE + cpu.regs.bc.lo, cpu.regs.af.hi);
+    cpu.bus_write(gb::io::BASE + cpu.regs.bc.lo, cpu.regs.af.hi);
 }
 
 // F0 LD A, (a8)
@@ -469,8 +465,8 @@ IMPL_INSTR(ld__c__a) {
 for a8, although the immediate operand only has the lower-order 8 bits. 0xFF00-0xFF7F: Port/Mode registers, control
 register, sound register 0xFF80-0xFFFE: Working & Stack RAM (127 bytes) 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld_a__a8_) {
-    auto addr = cpu.mmu.read_u8(cpu.regs.pc++) | gb::io::BASE;
-    cpu.regs.af.hi = cpu.mmu.read_u8(addr);
+    auto addr = cpu.bus_read(cpu.regs.pc++) | gb::io::BASE;
+    cpu.regs.af.hi = cpu.bus_read(addr);
 }
 
 // E0 LD (a8), A
@@ -479,23 +475,23 @@ IMPL_INSTR(ld_a__a8_) {
 for a8, although the immediate operand only has the lower-order 8 bits. 0xFF00-0xFF7F: Port/Mode registers, control
 register, sound register 0xFF80-0xFFFE: Working & Stack RAM (127 bytes) 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld__a8__a) {
-    std::uint16_t addr = cpu.mmu.read_u8(cpu.regs.pc++) | gb::io::BASE;
-    cpu.mmu.write_u8(addr, cpu.regs.af.hi);
+    std::uint16_t addr = cpu.bus_read(cpu.regs.pc++) | gb::io::BASE;
+    cpu.bus_write(addr, cpu.regs.af.hi);
 }
 
 // FA LD A, (a16)
 /* Load into register A the contents of the internal RAM or register specified by the 16-bit immediate operand a16. */
 IMPL_INSTR(ld_a__a16_) {
-    auto addr = cpu.mmu.read_u16(cpu.regs.pc);
-    cpu.regs.af.hi = cpu.mmu.read_u8(addr);
+    auto addr = cpu.bus_read_u16(cpu.regs.pc);
+    cpu.regs.af.hi = cpu.bus_read(addr);
     cpu.regs.pc += 2;
 }
 
 // EA LD (a16), A
 /* Store the contents of register A in the internal RAM or register specified by the 16-bit immediate operand a16. */
 IMPL_INSTR(ld__a16__a) {
-    auto addr = cpu.mmu.read_u16(cpu.regs.pc);
-    cpu.mmu.write_u8(addr, cpu.regs.af.hi);
+    auto addr = cpu.bus_read_u16(cpu.regs.pc);
+    cpu.bus_write(addr, cpu.regs.af.hi);
     cpu.regs.pc += 2;
 }
 
@@ -503,40 +499,40 @@ IMPL_INSTR(ld__a16__a) {
 /* Load the contents of memory specified by register pair HL into register A, and simultaneously increment the contents
  * of HL. */
 IMPL_INSTR(ld_a__hlp_) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.hl.u16++);
+    cpu.regs.af.hi = cpu.bus_read(cpu.regs.hl.u16++);
 }
 
 // 3A LD A, (HL-)
 /* Load the contents of memory specified by register pair HL into register A, and simultaneously decrement the contents
  * of HL. */
 IMPL_INSTR(ld_a__hlm_) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(cpu.regs.hl.u16--);
+    cpu.regs.af.hi = cpu.bus_read(cpu.regs.hl.u16--);
 }
 
 // 02 LD (BC), A
 /* Store the contents of register A in the memory location specified by register pair BC. */
 IMPL_INSTR(ld__bc__a) {
-    cpu.mmu.write_u8(cpu.regs.bc.u16, cpu.regs.af.hi);
+    cpu.bus_write(cpu.regs.bc.u16, cpu.regs.af.hi);
 }
 
 // 12 LD (DE), A
 /* Store the contents of register A in the memory location specified by register pair DE. */
 IMPL_INSTR(ld__de__a) {
-    cpu.mmu.write_u8(cpu.regs.de.u16, cpu.regs.af.hi);
+    cpu.bus_write(cpu.regs.de.u16, cpu.regs.af.hi);
 }
 
 // 22 LD (HL+), A
 /* Store the contents of register A into the memory location specified by register pair HL, and simultaneously increment
  * the contents of HL. */
 IMPL_INSTR(ld__hlp__a) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16++, cpu.regs.af.hi);
+    cpu.bus_write(cpu.regs.hl.u16++, cpu.regs.af.hi);
 }
 
 // 32 LD (HL-), A
 /* Store the contents of register A into the memory location specified by register pair HL, and simultaneously decrement
  * the contents of HL. */
 IMPL_INSTR(ld__hlm__a) {
-    cpu.mmu.write_u8(cpu.regs.hl.u16--, cpu.regs.af.hi);
+    cpu.bus_write(cpu.regs.hl.u16--, cpu.regs.af.hi);
 }
 
 // 01 LD BC, d16
@@ -544,7 +540,7 @@ IMPL_INSTR(ld__hlm__a) {
  The first byte of immediate data is the lower byte (i.e., bits 0-7), and the second byte of immediate data is the
  higher byte (i.e., bits 8-15). */
 IMPL_INSTR(ld_bc_d16) {
-    cpu.regs.bc.u16 = cpu.mmu.read_u16(cpu.regs.pc);
+    cpu.regs.bc.u16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
 }
 
@@ -553,7 +549,7 @@ IMPL_INSTR(ld_bc_d16) {
  The first byte of immediate data is the lower byte (i.e., bits 0-7), and the second byte of immediate data is the
  higher byte (i.e., bits 8-15). */
 IMPL_INSTR(ld_de_d16) {
-    cpu.regs.de.u16 = cpu.mmu.read_u16(cpu.regs.pc);
+    cpu.regs.de.u16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
 }
 
@@ -562,7 +558,7 @@ IMPL_INSTR(ld_de_d16) {
  The first byte of immediate data is the lower byte (i.e., bits 0-7), and the second byte of immediate data is the
  higher byte (i.e., bits 8-15). */
 IMPL_INSTR(ld_hl_d16) {
-    cpu.regs.hl.u16 = cpu.mmu.read_u16(cpu.regs.pc);
+    cpu.regs.hl.u16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
 }
 
@@ -571,7 +567,7 @@ IMPL_INSTR(ld_hl_d16) {
  The first byte of immediate data is the lower byte (i.e., bits 0-7), and the second byte of immediate data is the
  higher byte (i.e., bits 8-15). */
 IMPL_INSTR(ld_sp_d16) {
-    auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    auto nn = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.sp = nn;
     cpu.regs.pc += 2;
 }
@@ -666,9 +662,9 @@ IMPL_INSTR(ld_hl_spps8) {
 /* Store the lower byte of stack pointer SP at the address specified by the 16-bit immediate operand a16, and store the
  * upper byte of SP at address a16 + 1. */
 IMPL_INSTR(ld__a16__sp) {
-    auto a16 = cpu.mmu.read_u16(cpu.regs.pc);
+    auto a16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
-    cpu.mmu.write_u16(a16, cpu.regs.sp);
+    cpu.bus_write_u16(a16, cpu.regs.sp);
 }
 
 // 87 ADD A, A
@@ -717,7 +713,7 @@ IMPL_INSTR(add_a_l) {
 /* Add the contents of the 8-bit immediate operand d8 to the contents of register A, and store the results in register
  * A. */
 IMPL_INSTR(add_a_d8) {
-    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto d8 = cpu.bus_read(cpu.regs.pc++);
     cpu.regs.af.hi = cpu.alu.add(cpu.regs.af.hi, d8);
 }
 
@@ -725,7 +721,7 @@ IMPL_INSTR(add_a_d8) {
 /* Add the contents of memory specified by register pair HL to the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(add_a__hl_) {
-    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto value = cpu.bus_read(cpu.regs.hl.u16);
     cpu.regs.af.hi = cpu.alu.add(cpu.regs.af.hi, value);
 }
 
@@ -775,7 +771,7 @@ IMPL_INSTR(adc_a_l) {
 /* Add the contents of the 8-bit immediate operand d8 and the CY flag to the contents of register A, and store the
  * results in register A. */
 IMPL_INSTR(adc_a_d8) {
-    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto d8 = cpu.bus_read(cpu.regs.pc++);
     cpu.regs.af.hi = cpu.alu.adc(cpu.regs.af.hi, d8);
 }
 
@@ -783,7 +779,7 @@ IMPL_INSTR(adc_a_d8) {
 /* Add the contents of memory specified by register pair HL and the CY flag to the contents of register A, and store the
  * results in register A. */
 IMPL_INSTR(adc_a__hl_) {
-    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto value = cpu.bus_read(cpu.regs.hl.u16);
     cpu.regs.af.hi = cpu.alu.adc(cpu.regs.af.hi, value);
 }
 
@@ -833,7 +829,7 @@ IMPL_INSTR(sub_l) {
 /* Subtract the contents of the 8-bit immediate operand d8 from the contents of register A, and store the results in
  * register A. */
 IMPL_INSTR(sub_d8) {
-    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto d8 = cpu.bus_read(cpu.regs.pc++);
     cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, d8);
 }
 
@@ -841,7 +837,7 @@ IMPL_INSTR(sub_d8) {
 /* Subtract the contents of memory specified by register pair HL from the contents of register A, and store the results
  * in register A. */
 IMPL_INSTR(sub__hl_) {
-    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto value = cpu.bus_read(cpu.regs.hl.u16);
     cpu.regs.af.hi = cpu.alu.sub(cpu.regs.af.hi, value);
 }
 
@@ -898,7 +894,7 @@ IMPL_INSTR(sbc_a_l) {
 /* Subtract the contents of the 8-bit immediate operand d8 and the carry flag CY from the contents of register A, and
  * store the results in register A. */
 IMPL_INSTR(sbc_a_d8) {
-    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto d8 = cpu.bus_read(cpu.regs.pc++);
     cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, d8);
 }
 
@@ -906,7 +902,7 @@ IMPL_INSTR(sbc_a_d8) {
 /* Subtract the contents of memory specified by register pair HL and the carry flag CY from the contents of register A,
  * and store the results in register A. */
 IMPL_INSTR(sbc_a__hl_) {
-    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto value = cpu.bus_read(cpu.regs.hl.u16);
     cpu.regs.af.hi = cpu.alu.sbc(cpu.regs.af.hi, value);
 }
 
@@ -963,7 +959,7 @@ IMPL_INSTR(and_l) {
 /* Take the logical AND for each bit of the contents of 8-bit immediate operand d8 and the contents of register A, and
  * store the results in register A. */
 IMPL_INSTR(and_d8) {
-    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto d8 = cpu.bus_read(cpu.regs.pc++);
     cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, d8);
 }
 
@@ -971,7 +967,7 @@ IMPL_INSTR(and_d8) {
 /* Take the logical AND for each bit of the contents of memory specified by register pair HL and the contents of
  * register A, and store the results in register A. */
 IMPL_INSTR(and__hl_) {
-    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto value = cpu.bus_read(cpu.regs.hl.u16);
     cpu.regs.af.hi = cpu.alu.and_(cpu.regs.af.hi, value);
 }
 
@@ -1028,7 +1024,7 @@ IMPL_INSTR(or_l) {
 /* Take the logical OR for each bit of the contents of the 8-bit immediate operand d8 and the contents of register A,
  * and store the results in register A. */
 IMPL_INSTR(or_d8) {
-    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto d8 = cpu.bus_read(cpu.regs.pc++);
     cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, d8);
 }
 
@@ -1036,7 +1032,7 @@ IMPL_INSTR(or_d8) {
 /* Take the logical OR for each bit of the contents of memory specified by register pair HL and the contents of register
  * A, and store the results in register A. */
 IMPL_INSTR(or__hl_) {
-    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto value = cpu.bus_read(cpu.regs.hl.u16);
     cpu.regs.af.hi = cpu.alu.or_(cpu.regs.af.hi, value);
 }
 
@@ -1121,7 +1117,7 @@ IMPL_INSTR(xor_l) {
 /* Take the logical exclusive-OR for each bit of the contents of the 8-bit immediate operand d8 and the contents of
  * register A, and store the results in register A. */
 IMPL_INSTR(xor_d8) {
-    auto d8 = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto d8 = cpu.bus_read(cpu.regs.pc++);
     cpu.regs.af.hi = cpu.alu.xor_(cpu.regs.af.hi, d8);
 }
 
@@ -1129,7 +1125,7 @@ IMPL_INSTR(xor_d8) {
 /* Take the logical exclusive-OR for each bit of the contents of memory specified by register pair HL and the contents
  * of register A, and store the results in register A. */
 IMPL_INSTR(xor__hl_) {
-    auto value = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto value = cpu.bus_read(cpu.regs.hl.u16);
     cpu.regs.af.hi = cpu.alu.xor_(cpu.regs.af.hi, value);
 }
 
@@ -1186,7 +1182,7 @@ IMPL_INSTR(cp_l) {
 /* Compare the contents of register A and the contents of the 8-bit immediate operand d8 by calculating A - d8, and set
 the Z flag if they are equal. The execution of this instruction does not affect the contents of register A. */
 IMPL_INSTR(cp_d8) {
-    auto nn = cpu.mmu.read_u8(cpu.regs.pc++);
+    auto nn = cpu.bus_read(cpu.regs.pc++);
     cpu.alu.sub(cpu.regs.af.hi, nn); // setta Z/N/H/C, butta il risultato
 }
 
@@ -1194,7 +1190,7 @@ IMPL_INSTR(cp_d8) {
 /* Compare the contents of memory specified by register pair HL and the contents of register A by calculating A - (HL),
 and set the Z flag if they are equal. The execution of this instruction does not affect the contents of register A. */
 IMPL_INSTR(cp__hl_) {
-    auto nn = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto nn = cpu.bus_read(cpu.regs.hl.u16);
     cpu.alu.sub(cpu.regs.af.hi, nn); // setta Z/N/H/C, butta il risultato
 }
 
@@ -1243,9 +1239,9 @@ IMPL_INSTR(inc_l) {
 // 34 INC (HL)
 /* Increment the contents of memory specified by register pair HL by 1. */
 IMPL_INSTR(inc__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
     v = cpu.alu.inc(v);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, v);
+    cpu.bus_write(cpu.regs.hl.u16, v);
 }
 
 // 3D DEC A
@@ -1293,9 +1289,9 @@ IMPL_INSTR(dec_l) {
 // 35 DEC (HL)
 /* Decrement the contents of memory specified by register pair HL by 1. */
 IMPL_INSTR(dec__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
     v = cpu.alu.dec(v);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, v);
+    cpu.bus_write(cpu.regs.hl.u16, v);
 }
 
 // 09 ADD HL, BC
@@ -1476,8 +1472,8 @@ IMPL_INSTR(rlc_l) {
  * repeated in sequence for the rest of the memory location. The contents of bit 7 are placed in both the CY flag and
  * bit 0 of (HL). */
 IMPL_INSTR(rlc__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.rlc(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.rlc(v));
 }
 
 // CB17 RL A
@@ -1542,8 +1538,8 @@ IMPL_INSTR(rl_l) {
  * bit 2. The same operation is repeated in sequence for the rest of the memory location. The previous contents of the
  * CY flag are copied into bit 0 of (HL). */
 IMPL_INSTR(rl__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.rl(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.rl(v));
 }
 
 // CB0F RRC A
@@ -1608,8 +1604,8 @@ IMPL_INSTR(rrc_l) {
  * repeated in sequence for the rest of the memory location. The contents of bit 0 are placed in both the CY flag and
  * bit 7 of (HL). */
 IMPL_INSTR(rrc__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.rrc(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.rrc(v));
 }
 
 // CB1F RR A
@@ -1674,8 +1670,8 @@ IMPL_INSTR(rr_l) {
  * bit 5. The same operation is repeated in sequence for the rest of the memory location. The previous contents of the
  * CY flag are copied into bit 7 of (HL). */
 IMPL_INSTR(rr__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.rr(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.rr(v));
 }
 
 // CB27 SLA A
@@ -1740,8 +1736,8 @@ IMPL_INSTR(sla_l) {
  * repeated in sequence for the rest of the memory location. The contents of bit 7 are copied to the CY flag, and bit 0
  * of (HL) is reset to 0. */
 IMPL_INSTR(sla__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.sla(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.sla(v));
 }
 
 // CB2F SRA A
@@ -1806,8 +1802,8 @@ IMPL_INSTR(sra_l) {
  * repeated in sequence for the rest of the memory location. The contents of bit 0 are copied to the CY flag, and bit 7
  * of (HL) is unchanged. */
 IMPL_INSTR(sra__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.sra(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.sra(v));
 }
 
 // CB3F SRL A
@@ -1872,8 +1868,8 @@ IMPL_INSTR(srl_l) {
  * repeated in sequence for the rest of the memory location. The contents of bit 0 are copied to the CY flag, and bit 7
  * of (HL) is reset to 0. */
 IMPL_INSTR(srl__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.srl(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.srl(v));
 }
 
 // CB37 SWAP A
@@ -1930,8 +1926,8 @@ IMPL_INSTR(swap_l) {
  * higher-order four bits (4-7) of that memory location, and shift the contents of the higher-order four bits to the
  * lower-order four bits. */
 IMPL_INSTR(swap__hl_) {
-    auto v = cpu.mmu.read_u8(cpu.regs.hl.u16);
-    cpu.mmu.write_u8(cpu.regs.hl.u16, cpu.alu.swap(v));
+    auto v = cpu.bus_read(cpu.regs.hl.u16);
+    cpu.bus_write(cpu.regs.hl.u16, cpu.alu.swap(v));
 }
 
 // CB47 BIT 0, A
@@ -2274,56 +2270,56 @@ IMPL_INSTR(bit_7_l) {
 /* Copy the complement of the contents of bit 0 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_0__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 0);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 0);
 }
 
 // CB4E BIT 1, (HL)
 /* Copy the complement of the contents of bit 1 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_1__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 1);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 1);
 }
 
 // CB56 BIT 2, (HL)
 /* Copy the complement of the contents of bit 2 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_2__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 2);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 2);
 }
 
 // CB5E BIT 3, (HL)
 /* Copy the complement of the contents of bit 3 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_3__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 3);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 3);
 }
 
 // CB66 BIT 4, (HL)
 /* Copy the complement of the contents of bit 4 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_4__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 4);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 4);
 }
 
 // CB6E BIT 5, (HL)
 /* Copy the complement of the contents of bit 5 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_5__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 5);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 5);
 }
 
 // CB76 BIT 6, (HL)
 /* Copy the complement of the contents of bit 6 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_6__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 6);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 6);
 }
 
 // CB7E BIT 7, (HL)
 /* Copy the complement of the contents of bit 7 in the memory location specified by register pair HL to the Z flag of
  * the program status word (PSW). */
 IMPL_INSTR(bit_7__hl_) {
-    cpu.alu.bit(cpu.mmu.read_u8(cpu.regs.hl.u16), 7);
+    cpu.alu.bit(cpu.bus_read(cpu.regs.hl.u16), 7);
 }
 
 // CBC7 SET 0, A
@@ -2666,56 +2662,56 @@ IMPL_INSTR(set_7_l) {
 /* Set bit 0 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_0__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 0));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 0));
 }
 
 // CBCE SET 1, (HL)
 /* Set bit 1 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_1__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 1));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 1));
 }
 
 // CBD6 SET 2, (HL)
 /* Set bit 2 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_2__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 2));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 2));
 }
 
 // CBDE SET 3, (HL)
 /* Set bit 3 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_3__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 3));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 3));
 }
 
 // CBE6 SET 4, (HL)
 /* Set bit 4 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_4__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 4));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 4));
 }
 
 // CBEE SET 5, (HL)
 /* Set bit 5 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_5__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 5));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 5));
 }
 
 // CBF6 SET 6, (HL)
 /* Set bit 6 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_6__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 6));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 6));
 }
 
 // CBFE SET 7, (HL)
 /* Set bit 7 in the memory location specified by register pair HL to 1. */
 IMPL_INSTR(set_7__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.set(cpu.mmu.read_u8(addr), 7));
+    cpu.bus_write(addr, cpu.alu.set(cpu.bus_read(addr), 7));
 }
 
 // CB87 RES 0, A
@@ -3058,56 +3054,56 @@ IMPL_INSTR(res_7_l) {
 /* Reset bit 0 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_0__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 0));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 0));
 }
 
 // CB8E RES 1, (HL)
 /* Reset bit 1 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_1__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 1));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 1));
 }
 
 // CB96 RES 2, (HL)
 /* Reset bit 2 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_2__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 2));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 2));
 }
 
 // CB9E RES 3, (HL)
 /* Reset bit 3 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_3__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 3));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 3));
 }
 
 // CBA6 RES 4, (HL)
 /* Reset bit 4 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_4__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 4));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 4));
 }
 
 // CBAE RES 5, (HL)
 /* Reset bit 5 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_5__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 5));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 5));
 }
 
 // CBB6 RES 6, (HL)
 /* Reset bit 6 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_6__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 6));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 6));
 }
 
 // CBBE RES 7, (HL)
 /* Reset bit 7 in the memory location specified by register pair HL to 0. */
 IMPL_INSTR(res_7__hl_) {
     const auto addr = cpu.regs.hl.u16;
-    cpu.mmu.write_u8(addr, cpu.alu.res(cpu.mmu.read_u8(addr), 7));
+    cpu.bus_write(addr, cpu.alu.res(cpu.bus_read(addr), 7));
 }
 
 // C3 JP a16
@@ -3116,7 +3112,7 @@ executed instruction. The second byte of the object code (immediately following 
 lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to the higher-order byte (bits
 8-15). */
 IMPL_INSTR(jp_a16) {
-    auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    auto nn = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc = nn;
 }
 
@@ -3127,11 +3123,11 @@ following the current JP instruction is executed (as usual). The second byte of 
 the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_nz_a16) {
-    auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    auto nn = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (!cpu.regs.z_flag()) {
         cpu.regs.pc = nn;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3142,11 +3138,11 @@ following the current JP instruction is executed (as usual). The second byte of 
 the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_z_a16) {
-    auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    auto nn = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (cpu.regs.z_flag()) {
         cpu.regs.pc = nn;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3157,11 +3153,11 @@ following the current JP instruction is executed (as usual). The second byte of 
 the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_nc_a16) {
-    auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    auto nn = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (!cpu.regs.c_flag()) {
         cpu.regs.pc = nn;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3172,11 +3168,11 @@ following the current JP instruction is executed (as usual). The second byte of 
 the opcode) corresponds to the lower-order byte of a16 (bits 0-7), and the third byte of the object code corresponds to
 the higher-order byte (bits 8-15). */
 IMPL_INSTR(jp_c_a16) {
-    auto nn = cpu.mmu.read_u16(cpu.regs.pc);
+    auto nn = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (cpu.regs.c_flag()) {
         cpu.regs.pc = nn;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3194,7 +3190,7 @@ IMPL_INSTR(jr_nz_s8) {
     auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
     if (!cpu.regs.z_flag()) {
         cpu.regs.pc += s8;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3205,7 +3201,7 @@ IMPL_INSTR(jr_z_s8) {
     auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
     if (cpu.regs.z_flag()) {
         cpu.regs.pc += s8;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3216,7 +3212,7 @@ IMPL_INSTR(jr_nc_s8) {
     auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
     if (!cpu.regs.c_flag()) {
         cpu.regs.pc += s8;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3227,7 +3223,7 @@ IMPL_INSTR(jr_c_s8) {
     auto s8 = cpu.mmu.read_i8(cpu.regs.pc++);
     if (cpu.regs.c_flag()) {
         cpu.regs.pc += s8;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 4;
     }
 }
 
@@ -3248,7 +3244,7 @@ higher-order byte of PC is loaded in the memory address specified by the new SP 
 decremented by 1 again, and the lower-order byte of PC is loaded in the memory address specified by that value of SP.
 The lower-order byte of a16 is placed in byte 2 of the object code, and the higher-order byte is placed in byte 3. */
 IMPL_INSTR(call_a16) {
-    auto a16 = cpu.mmu.read_u16(cpu.regs.pc);
+    auto a16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     cpu.push(cpu.regs.pc);
     cpu.regs.pc = a16;
@@ -3260,12 +3256,12 @@ the CALL instruction is pushed to the 2 bytes following the memory byte specifie
 immediate operand a16 is then loaded into PC. The lower-order byte of a16 is placed in byte 2 of the object code, and
 the higher-order byte is placed in byte 3. */
 IMPL_INSTR(call_nz_a16) {
-    auto a16 = cpu.mmu.read_u16(cpu.regs.pc);
+    auto a16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (!cpu.regs.z_flag()) {
         cpu.push(cpu.regs.pc);
         cpu.regs.pc = a16;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3275,12 +3271,12 @@ the CALL instruction is pushed to the 2 bytes following the memory byte specifie
 immediate operand a16 is then loaded into PC. The lower-order byte of a16 is placed in byte 2 of the object code, and
 the higher-order byte is placed in byte 3. */
 IMPL_INSTR(call_z_a16) {
-    auto a16 = cpu.mmu.read_u16(cpu.regs.pc);
+    auto a16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (cpu.regs.z_flag()) {
         cpu.push(cpu.regs.pc);
         cpu.regs.pc = a16;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3290,12 +3286,12 @@ the CALL instruction is pushed to the 2 bytes following the memory byte specifie
 immediate operand a16 is then loaded into PC. The lower-order byte of a16 is placed in byte 2 of the object code, and
 the higher-order byte is placed in byte 3. */
 IMPL_INSTR(call_nc_a16) {
-    auto a16 = cpu.mmu.read_u16(cpu.regs.pc);
+    auto a16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (!cpu.regs.c_flag()) {
         cpu.push(cpu.regs.pc);
         cpu.regs.pc = a16;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3305,12 +3301,12 @@ the CALL instruction is pushed to the 2 bytes following the memory byte specifie
 immediate operand a16 is then loaded into PC. The lower-order byte of a16 is placed in byte 2 of the object code, and
 the higher-order byte is placed in byte 3. */
 IMPL_INSTR(call_c_a16) {
-    auto a16 = cpu.mmu.read_u16(cpu.regs.pc);
+    auto a16 = cpu.bus_read_u16(cpu.regs.pc);
     cpu.regs.pc += 2;
     if (cpu.regs.c_flag()) {
         cpu.push(cpu.regs.pc);
         cpu.regs.pc = a16;
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3347,7 +3343,7 @@ from the address specified by the content of PC (as usual). */
 IMPL_INSTR(ret_nz) {
     if (!cpu.regs.z_flag()) {
         cpu.regs.pc = cpu.pop_u16();
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3361,7 +3357,7 @@ from the address specified by the content of PC (as usual). */
 IMPL_INSTR(ret_z) {
     if (cpu.regs.z_flag()) {
         cpu.regs.pc = cpu.pop_u16();
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3375,7 +3371,7 @@ from the address specified by the content of PC (as usual). */
 IMPL_INSTR(ret_nc) {
     if (!cpu.regs.c_flag()) {
         cpu.regs.pc = cpu.pop_u16();
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3389,7 +3385,7 @@ from the address specified by the content of PC (as usual). */
 IMPL_INSTR(ret_c) {
     if (cpu.regs.c_flag()) {
         cpu.regs.pc = cpu.pop_u16();
-        cpu.extra_cycles = this->cycles_taken - this->cycles;
+        cpu.extra_cycles = 12;
     }
 }
 
@@ -3594,8 +3590,8 @@ IMPL_INSTR(stop) {
     LOG_DEBUG(gbemu::log::root(),
               "STOP @ {:04x}  next={:02x}  A={:02x} BC={:04x} DE={:04x} HL={:04x} SP={:04x}  gb_id=[D800]={:02x}  "
               "KEY1=[FF4D]={:02x}",
-              stop_pc, cpu.mmu.read_u8(cpu.regs.pc), cpu.regs.af.hi, cpu.regs.bc.u16, cpu.regs.de.u16, cpu.regs.hl.u16,
-              cpu.regs.sp, cpu.mmu.read_u8(0xD800), cpu.mmu.read_u8(gb::io::KEY1));
+              stop_pc, cpu.bus_read(cpu.regs.pc), cpu.regs.af.hi, cpu.regs.bc.u16, cpu.regs.de.u16, cpu.regs.hl.u16,
+              cpu.regs.sp, cpu.bus_read(0xD800), cpu.bus_read(gb::io::KEY1));
     cpu.regs.pc++; // skip the padding byte
     cpu.stopped = true;
 }

@@ -26,13 +26,6 @@ std::uint16_t cpu::fetch() {
     return op;
 }
 
-instruction& cpu::decode(std::uint16_t op) {
-    auto* p = ((op & 0xFF00) == 0xCB00) ? instruction_set_cb[op & 0xFF] : instruction_set[op & 0xFF];
-    if (!p)
-        throw gbemu_exception{"Instruction not handled!"};
-    return *p;
-}
-
 uint8_t cpu::step() {
     if (halted || stopped) {
         auto pending = mmu.hwr_if() & mmu.hwr_ie() & 0x1F;
@@ -52,10 +45,12 @@ uint8_t cpu::step() {
     extra_cycles = 0;
 
     auto op = fetch();
-    auto& instr = decode(op);
-    instr(*this);
+    auto& e = ((op & 0xFF00) == 0xCB00) ? dispatch_cb[op & 0xFF] : dispatch_main[op & 0xFF];
+    if (!e.fn)
+        throw gbemu_exception{"Instruction not handled!"};
+    e.fn(*this);
 
-    return instr.cycles + extra_cycles;
+    return e.cycles + extra_cycles;
 }
 
 void cpu::push(std::uint16_t u16) {

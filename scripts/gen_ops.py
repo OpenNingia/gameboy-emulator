@@ -33,10 +33,14 @@ Pass --gbdev-names to disable all of the above and emit the gbdev names
 verbatim. Existing C++ stubs in src/opcodes.cpp will then need to be
 renamed (or regenerated).
 
-The emitted DEF_INSTR macro carries T-cycle metadata (cycles_not_taken,
-cycles_taken). Conditional opcodes (JR cc / JP cc / CALL cc / RET cc)
-encode their cycle count as a (not_taken, taken) pair; everything else
-has both fields equal.
+The emitted header declares one free function `gbemu::ops::<name>(cpu&)`
+per opcode, plus two `inline constexpr std::array<instr_entry, 256>`
+dispatch tables (main + CB-prefixed) carrying T-cycle metadata
+(cycles_not_taken, cycles_taken). Conditional opcodes (JR cc / JP cc /
+CALL cc / RET cc) encode their cycle count as a (not_taken, taken) pair;
+everything else has both fields equal. Holes (illegal opcodes, the CB
+prefix entry) are emitted as `{ nullptr, 0, 0 }` so each table stays a
+dense 256-slot array indexed by `op & 0xFF`.
 
 Usage:
     python gen_ops.py                         # writes ./opcodes.hpp from ./opcodes.json
@@ -180,46 +184,31 @@ HEADER_PREAMBLE = """// Generated from scripts/opcodes.json (https://gbdev.io/gb
 
 #include <array>
 #include <cstdint>
-#include <cpu.h>
-
-// DEF_INSTR(opcode, struct_name, mnemonic, cycles_not_taken, cycles_taken)
-//
-// For unconditional opcodes cycles_not_taken == cycles_taken. For
-// conditional branches (JR cc / JP cc / CALL cc / RET cc) the two values
-// differ; the instruction body is expected to bump cpu.extra_cycles when
-// the branch is taken (see src/opcodes.cpp).
-//
-// The cycle counts are passed to the instruction base ctor; the user is
-// responsible for keeping inc/cpu.h's `instruction` constructor signature
-// in sync: instruction(std::string mnemonic, std::uint8_t cycles,
-//                      std::uint8_t cycles_taken).
-#define DEF_INSTR( o, x, y, c, ct ) \\
-\tstruct x: instruction { \\
-\t\tx() : instruction(y, c, ct) { \\
-\t\t\tif constexpr (((o) & 0xFF00) == 0xCB00) \\
-\t\t\t\tinstruction_set_cb[(o) & 0xFF] = this; \\
-\t\t\telse \\
-\t\t\t\tinstruction_set[(o) & 0xFF] = this; \\
-\t\t} \\
-\t\tvoid execute(cpu& cpu) override; \\
-\t};
-
-#define INST_INSTR(x) extern gbemu::instruction_types::x x##_;
 
 namespace gbemu {
-\textern std::array<instruction*, 256> instruction_set;
-\textern std::array<instruction*, 256> instruction_set_cb;
+\tstruct cpu;
 
-\tnamespace instruction_types {
+\tnamespace ops {
 """
 
-HEADER_MID = """\t}
+HEADER_AFTER_DECLS = """\t} // namespace ops
 
-\tnamespace instructions {
+\tstruct instr_entry {
+\t\tvoid (*fn)(cpu&);
+\t\tstd::uint8_t cycles;
+\t\tstd::uint8_t cycles_taken;
+\t};
+
+\tinline constexpr std::array<instr_entry, 256> dispatch_main = {{
 """
 
-HEADER_EPILOGUE = """\t}
-}
+HEADER_BETWEEN_TABLES = """\t}};
+
+\tinline constexpr std::array<instr_entry, 256> dispatch_cb = {{
+"""
+
+HEADER_EPILOGUE = """\t}};
+} // namespace gbemu
 
 #endif /* _H_OPCODES_H_ */
 """
@@ -286,11 +275,29 @@ def collect(db: dict, *, legacy: bool, include_illegal: bool):
 
 def emit_header(rows, out) -> None:
     out.write(HEADER_PREAMBLE)
-    for opcode, cn, mnemonic, nt, t in rows:
-        out.write(f'\t\tDEF_INSTR(0x{opcode:04X}, {cn}, "{mnemonic}", {nt}, {t});\n')
-    out.write(HEADER_MID)
-    for _opcode, cn, *_ in rows:
-        out.write(f'\t\tINST_INSTR({cn});\n')
+    # Forward declarations for every opcode body (ordered as collect() yields them).
+    for _opcode, cn, _mnemonic, _nt, _t in rows:
+        out.write(f'\t\tvoid {cn}(cpu&);\n')
+    out.write(HEADER_AFTER_DECLS)
+    # Dense 256-entry dispatch tables. Holes (illegal / CB-prefix gateway)
+    # carry a nullptr fn so cpu::step() can throw on misuse.
+    main_rows = {op & 0xFF: (cn, nt, t)
+                 for (op, cn, _m, nt, t) in rows if (op & 0xFF00) == 0x0000}
+    cb_rows = {op & 0xFF: (cn, nt, t)
+               for (op, cn, _m, nt, t) in rows if (op & 0xFF00) == 0xCB00}
+    for i in range(256):
+        if i in main_rows:
+            cn, nt, t = main_rows[i]
+            out.write(f'\t\t{{ &ops::{cn}, {nt}, {t} }},  // 0x{i:02X}\n')
+        else:
+            out.write(f'\t\t{{ nullptr, 0, 0 }},  // 0x{i:02X}\n')
+    out.write(HEADER_BETWEEN_TABLES)
+    for i in range(256):
+        if i in cb_rows:
+            cn, nt, t = cb_rows[i]
+            out.write(f'\t\t{{ &ops::{cn}, {nt}, {t} }},  // 0x{i:02X}\n')
+        else:
+            out.write(f'\t\t{{ nullptr, 0, 0 }},  // 0x{i:02X}\n')
     out.write(HEADER_EPILOGUE)
 
 

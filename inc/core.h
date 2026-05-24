@@ -11,7 +11,6 @@
 #    include <card.h>
 #    include <cpu.h>
 #    include <dma.h>
-#    include <instruction.h>
 #    include <irq.h>
 #    include <joypad.h>
 #    include <mmu.h>
