@@ -93,6 +93,7 @@ namespace gbemu {
         // so the per-step check is one load + one bit test.
         void breakpoint_set(std::uint16_t addr);
         void breakpoint_clear(std::uint16_t addr);
+        void breakpoint_toggle(std::uint16_t addr);
         bool breakpoint_has(std::uint16_t addr) const;
         std::vector<std::uint16_t> breakpoint_list() const;
 

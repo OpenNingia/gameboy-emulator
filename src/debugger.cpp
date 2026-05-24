@@ -120,6 +120,10 @@ void debugger::breakpoint_clear(std::uint16_t addr) {
     bp_bitmap_[addr >> 3] &= static_cast<std::uint8_t>(~(1u << (addr & 7)));
 }
 
+void debugger::breakpoint_toggle(std::uint16_t addr) {
+    bp_bitmap_[addr >> 3] ^= static_cast<std::uint8_t>(1u << (addr & 7));
+}
+
 bool debugger::breakpoint_has(std::uint16_t addr) const {
     return (bp_bitmap_[addr >> 3] & (1u << (addr & 7))) != 0;
 }

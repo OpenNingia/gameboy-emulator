@@ -1,5 +1,4 @@
 #pragma once
-#include <cstdint>
 #include <string>
 
 namespace gbemu {
@@ -14,10 +13,5 @@ namespace gbemu {
         struct bioscfg {
             std::string path;
         } bios;
-
-        struct wincfg {
-            std::size_t width;
-            std::size_t height;
-        } win;
     };
 } // namespace gbemu

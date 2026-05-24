@@ -15,10 +15,4 @@ config::config(std::string const& file_path) {
 
     app_rom.lookupValue("path", rom.path);
     app_bios.lookupValue("path", bios.path);
-
-    auto& valw = root.lookup("application.window.size.w");
-    auto& valh = root.lookup("application.window.size.h");
-
-    win.width = valw.isNumber() ? static_cast<int>(valw) : 640;
-    win.height = valh.isNumber() ? static_cast<int>(valh) : 480;
 }
