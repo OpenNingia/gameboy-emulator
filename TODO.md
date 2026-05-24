@@ -328,6 +328,170 @@ Tutto da fare; vanno fatti in quest'ordine perché ognuno dipende dal precedente
 
 ---
 
+## 11. Menù bar funzionale
+
+Oggi `src/ui.cpp` (`draw_main_dockspace`, ~riga 167) ha una sola voce **View**
+che toggla i pannelli ImGui + Reset layout. Mancano tutte le entry "da
+emulatore": caricamento ROM, controllo emulazione, slot di salvataggio, info.
+
+**Struttura proposta** (in ordine, da sinistra a destra):
+
+- **File**
+  - `Load ROM…` — apre file dialog nativo (Windows: `GetOpenFileNameW`;
+    portabile: `nfd` / `tinyfiledialogs` da aggiungere a `vcpkg.json`).
+    Filtro `*.gb;*.gbc`. Selezione → ricostruzione del `core` con la nuova
+    ROM (oggi il path è fisso in `cfg/gbemu.conf`, va spezzato il vincolo:
+    `core` deve poter essere ri-inizializzato a runtime — interagisce con
+    il `Reset` button della sezione 1).
+  - `Recent ROMs ▸` — submenu con gli ultimi N (8?) ROM caricati. Persistenza
+    in un file accanto a `imgui.ini` (es. `gbemu_recent.txt`, una riga per
+    path); aggiornato dopo ogni `Load ROM`. Voce `Clear list` in fondo.
+  - `Exit` — `SDL_PushEvent(SDL_QUIT)`. Hotkey `Alt+F4` resta nativo.
+
+- **Emulation**
+  - `Start` / `Pause` — toggle che riusa `debugger::pause()` /
+    `debugger::resume()` (oggi guidati dai pulsanti del pannello CPU).
+    Hotkey `F5` o `Space` (configurabile).
+  - `Reset` — re-init `core` + clear RAM/VRAM. Stessa azione del Reset
+    button (sezione 1) — le due UI devono chiamare la *stessa* funzione,
+    non duplicarla. Hotkey `Ctrl+R`.
+  - `Speed ▸` — sub-menu con radio entries `0.25x` / `0.5x` / `1.0x` /
+    `1.5x` / `2.0x` / `4.0x`. Indicatore corrente in titlebar. Dipende
+    dalla sezione 3 (moltiplicatore di velocità).
+  - `Save State ▸` / `Load State ▸` — sub-menu con slot `0..9`.
+    Dipende dalla sezione 2 (save & load state). Hotkey `F5` (save) /
+    `F9` (load) sullo slot corrente; `Shift+0..9` per cambiare slot.
+    Le voci del menu mostrano timestamp / "empty" per ogni slot.
+  - `Toggle Fullscreen` — `SDL_SetWindowFullscreen` con
+    `SDL_WINDOW_FULLSCREEN_DESKTOP`. Hotkey `F11`.
+
+- **About**
+  - `About GbEmu…` — popup modale con nome, versione (dalla sezione 10),
+    repo URL, build date, copyright. Pulsante `OK` + `Copy version info`
+    che mette in clipboard una stringa diagnostica
+    (`gbemu vX.Y.Z, SDL2 a.b.c, ImGui d.e.f, ...`) utile per le bug
+    report.
+
+**Considerazioni implementative:**
+
+- Le hotkey vivono nello stesso punto in cui oggi è gestito F12 (interactive
+  toggle): `Application::run` event loop. ImGui captura i tasti quando un
+  text field ha focus — la branch va dopo `process_event` returning false.
+- `Recent ROMs` e `Save State` slot list vanno costruiti dinamicamente in
+  `BeginMenu` con `ImGui::MenuItem(label.c_str(), shortcut, false, enabled)`
+  — il flag `enabled = false` per slot vuoti rende il menu auto-esplicativo.
+- File dialog **non** può girare in fase di render ImGui se il dialog è
+  modale-bloccante (rischia di starvare il loop e la GPU). Pattern:
+  settare un flag (`c.load_rom_requested = true`), aprire il dialog
+  fuori dal blocco `NewFrame / Render`, all'inizio del frame successivo.
+- Tutte le voci che dipendono da feature non ancora implementate (Speed,
+  Save State) vanno mostrate `disabled` finché la rispettiva sezione è
+  chiusa — meglio che farle sparire (l'utente non capisce dove sono).
+
+**Dipendenze**: sezione 1 (Reset), sezione 2 (save state), sezione 3
+(speed). Lo scaffolding del menu si può fare prima — voci stub disabled
++ Load ROM + Exit + About — e popolare il resto man mano che le feature
+sottostanti atterrano.
+
+---
+
+## 12. Player UI (default) + `--debug` per la UI debugger
+
+Oggi `src/ui.cpp` è l'unica UI: dock-space ImGui con 9 pannelli (Display,
+CPU, Disassembly, Memory, Breakpoints, PPU, MBC, Serial, PC ring). È una
+UI da *sviluppatore di emulatori*, non da giocatore. Va affiancata da una
+**Player UI** che diventerà l'esperienza di default, mentre la UI attuale
+verrà nascosta dietro `--debug`.
+
+**CLI** (`src/gbemu.cpp`):
+
+- Aggiungere `cli.add_flag("--debug", debug_ui, "Launch with the debugger UI (panels, breakpoints, disasm)")`.
+- Default (`--debug` non passato): Player UI.
+- `--headless` è ortogonale e prevale su entrambe (no SDL window).
+
+**Player UI — caratteristiche:**
+
+- **Solo schermo di gioco + cornice Game Boy**. La cornice (chassis DMG
+  grigio, logo "Nintendo GAME BOY", griglia speaker, croce direzionale +
+  A/B + Start/Select disegnati ma decorativi) è renderizzata come immagine
+  statica di sfondo; lo schermo 160×144 è il `gfx::presenter` esistente
+  (già usato dalla Display panel) piazzato esattamente nel rettangolo
+  della "finestra LCD" sulla cornice. Asset: PNG ad alta risoluzione
+  (es. 1200×1800), caricato via `stb_image` (già disponibile o da
+  aggiungere a `vcpkg.json`).
+- **Nessun pannello, nessun docking, nessuna disasm/memory/breakpoint/PC-ring**.
+  Tutta la superficie della finestra ospita la cornice + schermo. La
+  Player UI usa ImGui *solo* per la menu bar e i popup (About, file dialog
+  via flag come da sezione 11), non per pannelli dockabili.
+- **Menu bar** = quella della sezione 11, ma con la voce **View** rimossa
+  (non ci sono pannelli da togglare). Restano File / Emulation / About.
+  Le hotkey funzionano tutte (Load ROM, Pause, Reset, Speed, Save State,
+  Fullscreen).
+- **Scaling**: lo schermo 160×144 viene scalato preservando l'aspect ratio
+  in modo da entrare esattamente nella finestra LCD della cornice. La
+  cornice stessa viene scalata uniformemente per riempire la window SDL,
+  centrata (letterbox/pillarbox se l'aspect ratio della window differisce).
+- **Fullscreen**: in fullscreen la cornice resta visibile (centrata su
+  sfondo nero) — è parte dell'estetica. Hotkey alternativa "screen-only"
+  (`F10`?) che nasconde la cornice e ingrandisce lo schermo al massimo
+  per chi preferisce gameplay puro.
+
+**Debugger UI (`--debug`)** — è la UI attuale (`src/ui.cpp`), nessun
+cambio funzionale. Mantiene tutti i pannelli e la menu bar completa
+(File / Emulation / View / About).
+
+**Implementazione:**
+
+- Estrarre un'interfaccia minima `gbemu::ui::frontend` con i tre punti
+  di contatto attuali — `init(...)`, `process_event(SDL_Event const&) -> bool`,
+  `render_frame(...)`, `shutdown()` — e fornire due implementazioni:
+  `player_frontend` e `debugger_frontend` (rinomina cosmetica dell'attuale
+  `src/ui.cpp`). `Application::run` istanzia l'una o l'altra in base al
+  flag CLI.
+- I due frontend condividono **codice comune** (menu bar + handler delle
+  hotkey + flag pattern per file dialog) tramite header dedicato
+  (`inc/ui_common.h`?). La menu bar della Player UI è quella della Debugger
+  UI meno la voce View — meglio una funzione `draw_menu_bar(context&,
+  bool show_view_menu)` riusata da entrambi.
+- La cornice è uno `static` cached al primo render (path es.
+  `assets/dmg_frame.png`, copiato in `build/assets/` come si fa per
+  `cfg/gbemu.conf`). Caricamento via `stb_image_load` → upload in una
+  texture SDL → `ImGui::GetBackgroundDrawList()->AddImage(...)` per
+  renderizzarla dietro lo schermo del GB.
+- **Save state / Load ROM / Speed / Pause** restano disponibili da menu
+  e hotkey: la Player UI non *implementa* il debugger ma usa lo stesso
+  `core` + `debugger` sotto. Il `debugger` (con breakpoint/watchpoint
+  vuoti) gira lo stesso — l'utente non se ne accorge ma il backend è
+  uno.
+
+**Considerazioni:**
+
+- F12 (interactive toggle) oggi è solo nella debugger UI. In Player UI
+  non ha senso — va rimosso da quel frontend.
+- Le dimensioni iniziali della window (`gbemu_window.state` accanto a
+  `imgui.ini`) vanno separate fra Player e Debugger UI: hanno aspect
+  ratio molto diversi (cornice GB ≈ 2:3 vs dock-space orizzontale).
+  Suggerito: due file (`gbemu_window_player.state`,
+  `gbemu_window_debugger.state`) caricati in base al flag.
+- L'assetto `imgui.ini` della Debugger UI non interferisce con la
+  Player UI (la Player UI non usa docking, quindi non scrive nulla di
+  utile in `imgui.ini`). Va comunque tenuto un file separato per
+  evitare che il dock layout debugger sovrascriva eventuali stati
+  Player futuri — `imgui_player.ini` / `imgui_debug.ini`.
+
+**Dipendenze**: nessuna bloccante. La sezione 11 (menu bar) è il
+prerequisito naturale — meglio chiuderla prima così entrambi i frontend
+partono con la stessa menu bar. Estrazione `frontend` interface può
+avvenire in parallelo.
+
+**Asset cornice**: serve un disegno/foto del DMG su sfondo trasparente.
+Opzioni: (a) commissionare/disegnare in-house; (b) usare asset CC0 da
+OpenGameArt o simili (verificare licenza); (c) generare a partire da una
+foto del DMG fisico con background removal. Decisione da prendere prima
+di iniziare l'implementazione UI vera e propria.
+
+---
+
 ## Note tecniche permanenti
 
 - `cfg/gbemu.conf` shipped ha path **assoluti** Windows per ROM e BIOS — va

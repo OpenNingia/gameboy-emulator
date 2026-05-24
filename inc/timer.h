@@ -18,6 +18,12 @@ namespace gbemu {
         // triggers
         void div_trigger(std::uint8_t val);
 
+        // Clear internal dividers so a Reset starts from a known state.
+        void reset() {
+            div_cnt = 0;
+            tima_cnt = 0;
+        }
+
     private:
         mmu& mmu_;
         irq& irq_;

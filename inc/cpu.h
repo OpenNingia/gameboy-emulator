@@ -52,6 +52,20 @@ namespace gbemu {
                 tick_fn(tick_ctx, t_cycles);
         }
 
+        // Clear CPU runtime flags to the post-power-on defaults.  Keeps the
+        // tick callback registration (tick_fn / tick_ctx) intact so the next
+        // step still drives PPU / APU / timer via core's installed lambda.
+        void reset() {
+            interrupt_enabled = false;
+            stopped = false;
+            halted = false;
+            ime_pending = false;
+            ei_just_executed = false;
+            halt_bug = false;
+            extra_cycles = 0;
+            step_cycles = 0;
+        }
+
         // execute an instruction and returns total cycles
         std::uint8_t step();
         // push u16 on the stack

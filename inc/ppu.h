@@ -24,6 +24,11 @@ namespace gbemu {
         void step(std::uint32_t t_cycles);
         const std::uint32_t* framebuffer() const { return fb.data(); }
         bool consume_frame_ready(); // edge-trigger SDL present
+        // Park the state machine at OAM_SCAN/line 0 and blank the framebuffer.
+        // Mirrors the LCD-off branch of step() but is callable from core::reset
+        // before the next step has run.
+        void reset();
+
     private:
         mmu& mmu_;
         irq& irq_;

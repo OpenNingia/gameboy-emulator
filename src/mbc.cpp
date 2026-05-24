@@ -165,6 +165,13 @@ namespace gbemu {
                 return mbc_debug_state{type_, bank, upper_bits_, ram_enabled_, mode_};
             }
 
+            void reset() override {
+                lower_bits_ = 1;
+                upper_bits_ = 0;
+                mode_ = 0;
+                ram_enabled_ = false;
+            }
+
         private:
             std::uint8_t rom_byte(std::size_t offset) const {
                 return offset < rom_.size() ? rom_[offset] : std::uint8_t{0xFF};

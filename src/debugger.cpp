@@ -33,6 +33,49 @@ step_result debugger::step() {
     return r;
 }
 
+run_result debugger::step_over() {
+    // CALL is $CD (unconditional) plus the cc variants $C4/$CC/$D4/$DC; RST
+    // is the eight $C7..$FF / step-8 single-byte vector jumps. Anything else
+    // (including HALT, JR, JP, RET) reduces to a plain step — the return-
+    // address heuristic doesn't apply.
+    const auto pc = core_.regs.pc;
+    const auto op = core_.mmu.read_u8(pc);
+    const bool is_call = op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC;
+    const bool is_rst = (op & 0xC7) == 0xC7; // $C7,$CF,$D7,$DF,$E7,$EF,$F7,$FF
+
+    if (!is_call && !is_rst) {
+        const auto sr = step();
+        run_result r{};
+        r.cycles_consumed = sr.cycles;
+        r.instructions = 1;
+        if (sr.watchpoint_hit) {
+            r.outcome = run_outcome::watchpoint;
+            r.hit_addr = sr.watchpoint_addr;
+        } else if (breakpoint_has(core_.regs.pc)) {
+            r.outcome = run_outcome::breakpoint;
+            r.hit_addr = core_.regs.pc;
+        } else {
+            r.outcome = run_outcome::condition;
+            r.hit_addr = core_.regs.pc;
+        }
+        return r;
+    }
+
+    const auto len = disasm_one(pc, core_.mmu).length;
+    const auto target = static_cast<std::uint16_t>(pc + (len ? len : 1));
+
+    // 1M T-cycles ≈ 4 GB frames: enough room for any realistic subroutine,
+    // small enough that a never-returning callee doesn't lock the UI for
+    // long.  If the cap fires we land mid-routine; the user can step from
+    // there or set a breakpoint and Run.
+    stop_condition cond{stop_kind::pc_eq, target, {}};
+    return run_until(cond, 1'000'000);
+}
+
+void debugger::reset() {
+    core_.reset();
+}
+
 run_result debugger::run_until(const stop_condition& cond, std::uint64_t max_cycles) {
     run_result r{};
     std::size_t serial_scan_pos = 0;

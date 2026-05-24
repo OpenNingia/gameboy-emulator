@@ -88,6 +88,12 @@ namespace gbemu {
         void load(bios_file const& c);
         // init registers
         void init();
+        // Hard reset: forwards to every subsystem's reset(), wipes
+        // registers / pc_ring / total_cycles, and re-runs init() so PC and
+        // the post-BIOS register snapshot land in their power-on values.
+        // The MBC and BIOS image survive; debugger-side state
+        // (breakpoints / watchpoints / serial scrollback) is untouched.
+        void reset();
         // execute an emulation step
         std::uint32_t step();
     };

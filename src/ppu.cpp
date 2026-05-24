@@ -326,3 +326,14 @@ bool ppu::consume_frame_ready() {
     frame_ready = false;
     return was_ready;
 }
+
+void ppu::reset() {
+    mode = mode_e::OAM_SCAN;
+    dots_in_mode = 0;
+    frame_ready = false;
+    lcd_was_off = true;
+    window_triggered = false;
+    window_line = 0;
+    fb.fill(0);
+    bg_color_line.fill(0);
+}

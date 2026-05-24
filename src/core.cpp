@@ -1,3 +1,4 @@
+#include <cstring>
 #include <span>
 
 #include <core.h>
@@ -46,6 +47,19 @@ void core::init() {
         regs.sp = 0xFFFE;
         regs.pc = 0x100;
     }
+}
+
+void core::reset() {
+    cpu.reset();
+    std::memset(&regs, 0, sizeof(regs));
+    mmu.reset();
+    ppu.reset();
+    timer.reset();
+    apu.reset();
+    pc_ring.fill(0);
+    pc_idx = 0;
+    total_cycles = 0;
+    init();
 }
 
 std::uint32_t core::step() {

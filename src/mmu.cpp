@@ -205,6 +205,22 @@ void gbemu::mmu::load_bios(std::span<const std::uint8_t> data) {
     const auto n = std::min(data.size(), bios_.size());
     std::memcpy(bios_.data(), data.data(), n);
     bios_accessible_ = true;
+    bios_loaded_ = true;
+}
+
+void gbemu::mmu::reset() {
+    vram_.fill(0);
+    wram_.fill(0);
+    oam_.fill(0);
+    mmio_.fill(0);
+    hram_.fill(0);
+    // Repaint the KEY1 open-bus byte the ctor wrote — without this Blargg
+    // cpu_fast's probe at PC=0x0150 would see 0x00 after a Reset and try a
+    // STOP that locks up the test.
+    mmio_[gb::io_offset(gb::io::KEY1)] = gb::OPEN_BUS;
+    bios_accessible_ = bios_loaded_;
+    if (cart_)
+        cart_->reset();
 }
 
 void gbemu::mmu::initialize_registers() {

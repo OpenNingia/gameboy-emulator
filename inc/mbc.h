@@ -68,6 +68,13 @@ namespace gbemu {
         // (`dump mbc`) and by the ImGui MBC panel.  Pure introspection;
         // implementations must not mutate state here.
         virtual mbc_debug_state debug_state() const = 0;
+
+        // Restore banking state to power-on defaults.  Cartridge ROM bytes
+        // are preserved (they're the immutable game data); RAM contents are
+        // implementation-defined — for now no implementation clears RAM, so
+        // a future battery-save layer can read it back after a reset.
+        // Default is a no-op for cartridges with no banking state (no_mbc).
+        virtual void reset() {}
     };
 
     // Build the appropriate MBC for a freshly-loaded ROM image, looking at

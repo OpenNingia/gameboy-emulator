@@ -34,6 +34,14 @@ namespace gbemu {
         // deadlock on the first full buffer.
         void enable_output(bool on) { output_enabled_ = on; }
 
+        // Default-construct every channel and clear the sample / frame
+        // sequencer accumulators.  The audio ring buffer is left alone — the
+        // SDL audio thread drains it from the other side and clearing it
+        // would race; the next emit_sample() pushes silence anyway.  MMIO
+        // write handlers (registered in the ctor) survive a reset because
+        // they live in the MMU, not the APU.
+        void reset();
+
     private:
         // Square wave with length counter + volume envelope. Used directly
         // by CH2; CH1 pairs an instance of this with a sweep_unit that

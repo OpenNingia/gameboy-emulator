@@ -240,17 +240,12 @@ namespace gbemu::ui {
             if (ImGui::Button("Step"))
                 (void)dbg.step();
             ImGui::SameLine();
-            if (ImGui::Button("Step Over")) {
-                // Stub: identical to Step.  Proper step-over (run to the
-                // instruction after a CALL/RST) needs disassembler-length
-                // awareness — landing in a follow-up.
-                (void)dbg.step();
-            }
+            if (ImGui::Button("Step Over"))
+                (void)dbg.step_over();
             ImGui::EndDisabled();
             ImGui::SameLine();
-            ImGui::BeginDisabled(true);
-            ImGui::Button("Reset"); // PR5: re-init core + clear RAM/VRAM
-            ImGui::EndDisabled();
+            if (ImGui::Button("Reset"))
+                dbg.reset();
 
             ImGui::Separator();
 

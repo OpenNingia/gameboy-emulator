@@ -132,8 +132,20 @@ namespace gbemu {
         // boot sequence
         void initialize_registers();
 
+        // Wipe all RAM regions (VRAM, WRAM, OAM, MMIO, HRAM) back to zero and
+        // re-arm the BIOS overlay if a BIOS image was previously loaded.  The
+        // cartridge is preserved (its `reset()` is invoked to clear banking
+        // state) and so is the table of registered MMIO write handlers — they
+        // live in the MMU but are owned by subsystem constructors, so wiping
+        // them here would silently break IRQ routing, joypad latch, etc.
+        void reset();
+
     private:
         bool bios_accessible_{false};
+        // True once a BIOS image has been load_bios()'d. Reset uses it to
+        // decide whether to re-arm the overlay (a Reset that re-runs BIOS is
+        // closer to a real power cycle than one that skips it).
+        bool bios_loaded_{false};
 
         // bios code 0x0000 -> 0x00FF
         ram_t<0x0100> bios_{};

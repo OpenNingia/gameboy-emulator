@@ -77,6 +77,22 @@ namespace gbemu {
         // bytes are sampled and compared after the step.
         step_result step();
 
+        // Step Over: when PC is on a CALL or RST, runs until PC reaches the
+        // instruction after it (i.e. the return address) and returns the
+        // run_result.  On any other instruction it behaves like step().  The
+        // pc_eq cap is intentionally small (~1M T-cycles, ~4 frames) so a
+        // never-returning subroutine doesn't lock the UI; in that case the
+        // user lands wherever the cap fired, same as if they'd been Running.
+        run_result step_over();
+
+        // Hard reset of the emulated machine: zeroes registers, RAM, VRAM,
+        // OAM, MMIO and HRAM; resets every subsystem's internal state;
+        // preserves the loaded BIOS image (so BIOS re-runs if it was active)
+        // and the attached cartridge (banking state is reset, ROM bytes are
+        // not).  Breakpoints, watchpoints and the serial scrollback are
+        // debugger-side state and persist across reset.
+        void reset();
+
         // Loop step() until the condition is satisfied, a breakpoint or
         // watchpoint fires, or `max_cycles` T-cycles have been consumed.
         // Default cap (200M cycles, ~50s emu time) keeps malformed scripts

@@ -661,6 +661,18 @@ void apu::apply_read_mask(std::uint16_t addr, std::uint8_t v) {
     mmu_.io_store(addr, v | READ_MASKS[addr - gb::io::NR10]);
 }
 
+void apu::reset() {
+    ch1_sq_ = square_channel{};
+    ch1_sweep_ = sweep_unit{};
+    ch2_ = square_channel{};
+    ch3_ = wave_channel{};
+    ch4_ = noise_channel{};
+    sample_acc_ = 0;
+    frame_seq_acc_ = 0;
+    frame_seq_step_ = 0;
+    powered_ = true;
+}
+
 void apu::refresh_nr52_status() {
     // Preserve the written master-power bit, force unused bits to 1, and
     // OR in the live channel-enabled status (bits 0-3).
