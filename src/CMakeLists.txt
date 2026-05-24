@@ -18,7 +18,6 @@ target_link_libraries(GbEmu
 )
 
 target_include_directories(GbEmu PRIVATE ${CMAKE_SOURCE_DIR}/inc)
-target_compile_definitions(GbEmu PRIVATE ENTT_STANDARD_CPP)
 
 configure_file(
     ${CMAKE_SOURCE_DIR}/cfg/gbemu.conf
