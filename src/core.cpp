@@ -1,3 +1,5 @@
+#include <span>
+
 #include <core.h>
 #include <exc.hpp>
 #include <log.h>
@@ -16,18 +18,17 @@ void core::load(rom_file& c) {
 }
 
 void core::load(bios_file const& c) {
-    // load first two banks
-    memcpy(mmu.bios.data(), c.data.data(), mmu.bios.size());
+    // Hand the BIOS image to the MMU, which both copies the bytes and arms
+    // the $0000-$00FF overlay so the next reads see BIOS rather than the
+    // cartridge's first bank.
+    mmu.load_bios(std::span<const std::uint8_t>{c.data.data(), c.data.size()});
 
     // reset registers
     memset(&regs, 0, sizeof(regs));
-
-    // skip bios
-    mmu.bios_accessible = true;
 }
 
 void core::init() {
-    if (mmu.bios_accessible) {
+    if (mmu.bios_active()) {
         regs.af.u16 = 0x0000;
         regs.bc.u16 = 0x0000;
         regs.de.u16 = 0x0000;

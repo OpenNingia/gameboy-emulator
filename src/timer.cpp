@@ -9,9 +9,9 @@ timer::timer(mmu& m) : mmu_(m) {
 
 void timer::div_trigger(std::uint8_t /*val*/) {
     // Writing any value to DIV resets it to 0 (hardware behavior).
-    // We poke mmio[] directly to avoid re-entering write_u8 and recursing
+    // io_store bypasses write_u8's handler fan-out so we don't recurse
     // back into this handler.
-    mmu_.mmio[gb::io_offset(gb::io::DIV)] = 0;
+    mmu_.io_store(gb::io::DIV, 0);
     div_cnt = 0;
 }
 
@@ -19,11 +19,11 @@ void timer::step(std::uint32_t cycles) {
     div_cnt += cycles;
     while (div_cnt >= gb::DIV_TICK_CYCLES) {
         div_cnt -= gb::DIV_TICK_CYCLES;
-        // Direct mmio update — bypasses write_u8 so our own DIV handler
-        // (which models "ROM writes DIV -> reset to 0") doesn't see every
-        // internal increment as a ROM-driven write. Before this, the handler
-        // zeroed mmio[DIV] on every increment and DIV never actually counted.
-        mmu_.mmio[gb::io_offset(gb::io::DIV)]++;
+        // io_store bypasses write_u8 so our own DIV handler (which models
+        // "ROM writes DIV -> reset to 0") doesn't see every internal
+        // increment as a ROM-driven write. Before this, the handler zeroed
+        // DIV on every increment and the counter never actually advanced.
+        mmu_.io_store(gb::io::DIV, static_cast<std::uint8_t>(mmu_.io_read(gb::io::DIV) + 1));
     }
 
     const auto tac = mmu_.hwr_tac();

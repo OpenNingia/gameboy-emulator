@@ -289,8 +289,8 @@ void debugger::dump_mbc(std::ostream& os) const {
     const auto ram_size = core_.mmu.read_u8(0x0149);
 
     char buf[160];
-    if (core_.mmu.cart) {
-        const auto st = core_.mmu.cart->debug_state();
+    if (const auto* cart = core_.mmu.cart()) {
+        const auto st = cart->debug_state();
         std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X\n", st.type, rom_size, ram_size);
         os << buf;
         std::snprintf(buf, sizeof(buf), "rom_bank=%u ram_bank=%u ram_enabled=%d mode=%u\n",

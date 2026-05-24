@@ -36,21 +36,20 @@ void joypad::set_button(button b, bool pressed) {
     // fresh press of a button that lives in a column the game is currently
     // polling — releases never raise it.
     if (pressed && !was_pressed) {
-        const auto sel = static_cast<std::uint8_t>(mmu_.mmio[gb::io_offset(gb::io::P1)] & gb::p1::col_select_mask);
+        const auto sel = static_cast<std::uint8_t>(mmu_.io_read(gb::io::P1) & gb::p1::col_select_mask);
         const bool col_selected =
             is_dpad ? ((sel & gb::p1::dpad_select_n) == 0) : ((sel & gb::p1::button_select_n) == 0);
         if (col_selected)
-            mmu_.mmio[gb::io_offset(gb::io::IF)] =
-                static_cast<std::uint8_t>(mmu_.mmio[gb::io_offset(gb::io::IF)] | gb::irq_bit::joypad);
+            mmu_.io_store(gb::io::IF, static_cast<std::uint8_t>(mmu_.io_read(gb::io::IF) | gb::irq_bit::joypad));
     }
 }
 
 void joypad::refresh_p1() {
-    const auto sel = static_cast<std::uint8_t>(mmu_.mmio[gb::io_offset(gb::io::P1)] & gb::p1::col_select_mask);
+    const auto sel = static_cast<std::uint8_t>(mmu_.io_read(gb::io::P1) & gb::p1::col_select_mask);
     std::uint8_t low = gb::p1::input_mask; // active-low: 1 = released
     if ((sel & gb::p1::dpad_select_n) == 0)
         low = static_cast<std::uint8_t>(low & ~dpad_);
     if ((sel & gb::p1::button_select_n) == 0)
         low = static_cast<std::uint8_t>(low & ~btns_);
-    mmu_.mmio[gb::io_offset(gb::io::P1)] = static_cast<std::uint8_t>(gb::p1::high_bits_set | sel | low);
+    mmu_.io_store(gb::io::P1, static_cast<std::uint8_t>(gb::p1::high_bits_set | sel | low));
 }

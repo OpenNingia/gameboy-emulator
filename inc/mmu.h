@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 
 #include <absl/container/inlined_vector.h>
 #include <exc.hpp>
@@ -35,29 +36,17 @@ namespace gbemu {
 
         using mmio_write_fn = std::function<void(std::uint8_t)>;
 
-        bool bios_accessible{false};
-
-        // bios code 0x0000 -> 0x00FF
-        ram_t<0x0100> bios{};
-        // cartridge (ROM + external RAM); owns its own bytes and handles
-        // banking.  Installed by core::load(rom_file&) via attach_cartridge.
-        std::unique_ptr<mbc> cart{};
-        // gpu vram 0x8000 -> 0x9FFF
-        ram_t<0x2000> vram{};
-        // working ram 0xC000 -> 0xDFFF
-        ram_t<0x2000> wram{};
-        // echo ram (addressed by code) 0xE000 -> 0xFDFF
-        // sprite ram
-        ram_t<0x00A0> sram{};
-        // mmio
-        ram_t<0x0080> mmio{};
-        // zero-page ram
-        ram_t<0x0080> zram{};
-
         // Install the cartridge.  Called once after the ROM has been read
         // off disk and the appropriate mbc subclass has been instantiated.
-        void attach_cartridge(std::unique_ptr<mbc> c) { cart = std::move(c); }
+        void attach_cartridge(std::unique_ptr<mbc> c) { cart_ = std::move(c); }
+        // Returns the attached cartridge or nullptr if none.  The MMU is the
+        // sole owner; callers must not retain the pointer across an
+        // attach_cartridge call.
+        const mbc* cart() const { return cart_.get(); }
 
+        // Bus-side access — walks the full memory map dispatch and fires any
+        // registered MMIO write handlers.  This is the path the CPU and
+        // debug observers use.
         std::uint8_t read_u8(std::uint16_t addr) const;
         std::int8_t read_i8(std::uint16_t addr) const;
         void write_u8(std::uint16_t addr, std::uint8_t val);
@@ -75,6 +64,45 @@ namespace gbemu {
             write_u8(addr + 1, (val & 0xFF00) >> 8);
             write_u8(addr, val & 0x00FF);
         }
+
+        // ------------------------------------------------------------------
+        // Subsystem-internal accessors.
+        //
+        // These bypass the bus: no MMIO write handler fans out, no BIOS
+        // overlay is consulted, no IF read-mask is applied.  Chips use them
+        // to poke their own backing storage without recursing back into
+        // write_u8 (and therefore back into their own handlers).
+        //
+        // The `bank` parameter on the VRAM accessors is reserved for the
+        // CGB VBK ($FF4F) bank select; on DMG it must remain 0.
+        // ------------------------------------------------------------------
+
+        // VRAM ($8000-$9FFF).  `off` is the offset from VRAM_BASE.
+        std::uint8_t vram_read(std::uint16_t off, std::uint8_t bank = 0) const;
+        void vram_write(std::uint16_t off, std::uint8_t val, std::uint8_t bank = 0);
+        std::span<const std::uint8_t> vram_bank(std::uint8_t bank = 0) const;
+
+        // OAM (sprite RAM, $FE00-$FE9F).  `off` in [0, OAM_TOTAL_BYTES).
+        std::uint8_t oam_read(std::uint8_t off) const;
+        void oam_write(std::uint8_t off, std::uint8_t val);
+
+        // Direct I/O region access ($FF00-$FF7F) for chip-internal updates
+        // that must not re-enter write_u8 — e.g. the timer's per-cycle DIV
+        // increment, the joypad's P1/IF latch refresh, the APU's read-mask
+        // application.
+        std::uint8_t io_read(std::uint16_t addr) const;
+        void io_store(std::uint16_t addr, std::uint8_t val);
+
+        // Wave RAM ($FF30-$FF3F) view for the APU's CH3 sample pump.
+        std::span<const std::uint8_t> wave_ram() const;
+
+        // BIOS overlay.  load_bios copies the ROM image into the internal
+        // buffer and arms the overlay so $0000-$00FF subsequently returns
+        // BIOS bytes instead of cartridge bank 0; on a nonzero write to
+        // $FF50 the MMU disarms the overlay (one-shot until reset on DMG).
+        void load_bios(std::span<const std::uint8_t> data);
+        bool bios_active() const { return bios_accessible_; }
+        std::size_t bios_size() const { return bios_.size(); }
 
         // hardware registers
         DEF_HWREG(p1, 0xFF00);
@@ -105,12 +133,27 @@ namespace gbemu {
         void initialize_registers();
 
     private:
-        unsigned ppu_stub_counter{0};
-        static constexpr unsigned ppu_stub_step{32};
+        bool bios_accessible_{false};
+
+        // bios code 0x0000 -> 0x00FF
+        ram_t<0x0100> bios_{};
+        // cartridge (ROM + external RAM); owns its own bytes and handles
+        // banking.  Installed by core::load(rom_file&) via attach_cartridge.
+        std::unique_ptr<mbc> cart_{};
+        // gpu vram 0x8000 -> 0x9FFF
+        ram_t<0x2000> vram_{};
+        // working ram 0xC000 -> 0xDFFF (mirrored at 0xE000 -> 0xFDFF)
+        ram_t<0x2000> wram_{};
+        // sprite ram (OAM) 0xFE00 -> 0xFE9F
+        ram_t<0x00A0> oam_{};
+        // memory-mapped I/O region 0xFF00 -> 0xFF7F
+        ram_t<0x0080> mmio_{};
+        // high RAM / zero-page 0xFF80 -> 0xFFFE (+ IE at 0xFFFF)
+        ram_t<0x0080> hram_{};
 
         // Inline N=2 covers the typical occupancy (hardware emulation
         // handler + at most one or two debug observers); rarer 3+ cases
         // spill to heap.
-        std::array<absl::InlinedVector<mmio_write_fn, 2>, 0x80> mmio_write_handlers{};
+        std::array<absl::InlinedVector<mmio_write_fn, 2>, 0x80> mmio_write_handlers_{};
     };
 } // namespace gbemu

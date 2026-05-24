@@ -13,6 +13,6 @@ void dma::trigger(std::uint8_t val) {
     // The high byte of the source address is `val`; the low byte sweeps 00..9F.
     const std::uint16_t src = static_cast<std::uint16_t>(val) << 8;
     for (std::size_t i = 0; i < gb::OAM_TOTAL_BYTES; ++i) {
-        mmu_.sram[i] = mmu_.read_u8(static_cast<std::uint16_t>(src + i));
+        mmu_.oam_write(static_cast<std::uint8_t>(i), mmu_.read_u8(static_cast<std::uint16_t>(src + i)));
     }
 }

@@ -5,18 +5,18 @@
 
 using namespace gbemu;
 
-ppu::ppu(mmu& m) : m(m) {}
+ppu::ppu(mmu& m) : mmu_(m) {}
 
 void ppu::step(std::uint32_t t_cycles) {
-    const auto lcdc = m.hwr_lcdc();
+    const auto lcdc = mmu_.hwr_lcdc();
     if (!(lcdc & gb::lcdc::lcd_enable)) {
         // LCD off: reset to known state. STAT mode bits read as 0 while the LCD
         // is off; internally we park at OAM_SCAN/line 0 so re-enable resumes
         // cleanly via the lcd_was_off branch below.
         dots_in_mode = 0;
         mode = mode_e::OAM_SCAN;
-        m.hwr_ly(0);
-        m.hwr_stat(m.hwr_stat() & ~gb::stat::mode_mask);
+        mmu_.hwr_ly(0);
+        mmu_.hwr_stat(mmu_.hwr_stat() & ~gb::stat::mode_mask);
         lcd_was_off = true;
         window_triggered = false;
         window_line = 0;
@@ -75,7 +75,7 @@ std::uint32_t ppu::dots_for(mode_e mode) const {
 
 void ppu::enter_oam_scan() {
     set_stat_mode(mode_e::OAM_SCAN);
-    if (m.hwr_stat() & gb::stat::mode2_irq_enable)
+    if (mmu_.hwr_stat() & gb::stat::mode2_irq_enable)
         request_irq(gb::irq_bit::lcd_stat);
 }
 
@@ -86,26 +86,26 @@ void ppu::enter_drawing() {
 
 void ppu::enter_hblank() {
     // Drawing just finished — push the line to the framebuffer.
-    const auto ly = m.hwr_ly();
+    const auto ly = mmu_.hwr_ly();
     render_bg_scanline(ly);
     render_window_scanline(ly); // overlays BG and updates bg_color_line for sprite priority
     render_sprites_scanline(ly);
     set_stat_mode(mode_e::HBLANK);
-    if (m.hwr_stat() & gb::stat::mode0_irq_enable)
+    if (mmu_.hwr_stat() & gb::stat::mode0_irq_enable)
         request_irq(gb::irq_bit::lcd_stat);
 }
 
 void ppu::enter_vblank() {
     set_stat_mode(mode_e::VBLANK);
     request_irq(gb::irq_bit::vblank);
-    if (m.hwr_stat() & gb::stat::mode1_irq_enable)
+    if (mmu_.hwr_stat() & gb::stat::mode1_irq_enable)
         request_irq(gb::irq_bit::lcd_stat);
     frame_ready = true;
 }
 
 void ppu::next_line() {
-    const std::uint8_t ly = (m.hwr_ly() + 1) % gb::ppu_timing::TOTAL_LINES;
-    m.hwr_ly(ly);
+    const std::uint8_t ly = (mmu_.hwr_ly() + 1) % gb::ppu_timing::TOTAL_LINES;
+    mmu_.hwr_ly(ly);
     update_lyc_coincidence();
 
     if (ly == 0) {
@@ -124,7 +124,7 @@ void ppu::next_line() {
 
 void ppu::set_stat_mode(mode_e new_mode) {
     mode = new_mode;
-    m.hwr_stat((m.hwr_stat() & ~gb::stat::mode_mask) | static_cast<std::uint8_t>(new_mode));
+    mmu_.hwr_stat((mmu_.hwr_stat() & ~gb::stat::mode_mask) | static_cast<std::uint8_t>(new_mode));
 }
 
 namespace {
@@ -151,10 +151,10 @@ namespace {
 } // namespace
 
 void ppu::render_bg_scanline(std::uint8_t ly) {
-    const auto lcdc = m.hwr_lcdc();
-    const auto scy = m.hwr_scy();
-    const auto scx = m.hwr_scx();
-    const auto bgp = m.hwr_bgp();
+    const auto lcdc = mmu_.hwr_lcdc();
+    const auto scy = mmu_.hwr_scy();
+    const auto scx = mmu_.hwr_scx();
+    const auto bgp = mmu_.hwr_bgp();
 
     // LCDC.0 = BG enable. If off, fill scanline with shade 0 of BGP and treat
     // BG as transparent (color 0) for sprite priority so OBJs always show through.
@@ -179,11 +179,12 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
         const std::uint8_t tile_x = x >> 3;
         const std::uint8_t col = 7 - (x & 7);
 
-        const std::uint8_t idx = m.vram[map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x];
+        const std::uint8_t idx = mmu_.vram_read(
+            static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x));
 
         const std::uint16_t data_addr = bg_tile_row_addr(idx, row, data_8000);
-        const std::uint8_t lo = m.vram[data_addr - gb::VRAM_BASE];
-        const std::uint8_t hi = m.vram[data_addr - gb::VRAM_BASE + 1];
+        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE));
+        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
 
         const std::uint8_t ci = tile_color_index(lo, hi, col);
         const std::uint8_t shade = shade_from_palette(bgp, ci);
@@ -196,24 +197,24 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
 void ppu::render_window_scanline(std::uint8_t ly) {
     // The WY==LY latch is unconditional — it arms even if LCDC.5 is off at that
     // moment, so the window can pop in mid-frame when the game flips LCDC.5 on.
-    if (ly == m.hwr_wy())
+    if (ly == mmu_.hwr_wy())
         window_triggered = true;
 
-    const auto lcdc = m.hwr_lcdc();
+    const auto lcdc = mmu_.hwr_lcdc();
     // DMG: LCDC.0 gates BG *and* window. LCDC.5 enables the window itself.
     if (!(lcdc & gb::lcdc::bg_enable) || !(lcdc & gb::lcdc::window_enable))
         return;
     if (!window_triggered)
         return;
 
-    const auto wx = m.hwr_wx();
+    const auto wx = mmu_.hwr_wx();
     const int xstart = static_cast<int>(wx) - 7; // screen X where the window's column 0 lands
     if (xstart >= gb::LCD_WIDTH)
         return; // entirely off-screen to the right — internal counter does NOT advance
 
     const std::uint16_t map_base = (lcdc & gb::lcdc::window_map_9c00) ? gb::BG_MAP_1 : gb::BG_MAP_0;
     const bool data_8000 = (lcdc & gb::lcdc::tile_data_8000) != 0;
-    const auto bgp = m.hwr_bgp();
+    const auto bgp = mmu_.hwr_bgp();
 
     const std::uint8_t y = window_line;
     const std::uint8_t tile_y = y >> 3;
@@ -225,11 +226,12 @@ void ppu::render_window_scanline(std::uint8_t ly) {
         const std::uint8_t tile_x = static_cast<std::uint8_t>(win_x >> 3);
         const std::uint8_t col = 7 - (win_x & 7);
 
-        const std::uint8_t idx = m.vram[map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x];
+        const std::uint8_t idx = mmu_.vram_read(
+            static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x));
 
         const std::uint16_t data_addr = bg_tile_row_addr(idx, row, data_8000);
-        const std::uint8_t lo = m.vram[data_addr - gb::VRAM_BASE];
-        const std::uint8_t hi = m.vram[data_addr - gb::VRAM_BASE + 1];
+        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE));
+        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
 
         const std::uint8_t ci = tile_color_index(lo, hi, col);
         const std::uint8_t shade = shade_from_palette(bgp, ci);
@@ -243,7 +245,7 @@ void ppu::render_window_scanline(std::uint8_t ly) {
 }
 
 void ppu::render_sprites_scanline(std::uint8_t ly) {
-    const auto lcdc = m.hwr_lcdc();
+    const auto lcdc = mmu_.hwr_lcdc();
     if (!(lcdc & gb::lcdc::obj_enable))
         return;
 
@@ -258,12 +260,12 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
     std::size_t n_visible = 0;
 
     for (std::uint8_t i = 0; i < gb::OAM_ENTRIES && n_visible < gb::SPRITES_PER_LINE; ++i) {
-        const std::uint8_t y = m.sram[i * gb::OAM_BYTES_PER_ENTRY + 0];
-        const std::uint8_t x = m.sram[i * gb::OAM_BYTES_PER_ENTRY + 1];
+        const std::uint8_t y = mmu_.oam_read(i * gb::OAM_BYTES_PER_ENTRY + 0);
+        const std::uint8_t x = mmu_.oam_read(i * gb::OAM_BYTES_PER_ENTRY + 1);
         const int sprite_top = static_cast<int>(y) - 16;
         if (static_cast<int>(ly) >= sprite_top && static_cast<int>(ly) < sprite_top + height) {
-            visible[n_visible++] = {y, x, m.sram[i * gb::OAM_BYTES_PER_ENTRY + 2],
-                                    m.sram[i * gb::OAM_BYTES_PER_ENTRY + 3], i};
+            visible[n_visible++] = {y, x, mmu_.oam_read(i * gb::OAM_BYTES_PER_ENTRY + 2),
+                                    mmu_.oam_read(i * gb::OAM_BYTES_PER_ENTRY + 3), i};
         }
     }
 
@@ -285,7 +287,7 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
         const bool y_flip = (sp.attr & gb::oam_attr::y_flip) != 0;
         const bool x_flip = (sp.attr & gb::oam_attr::x_flip) != 0;
         const bool bg_priority = (sp.attr & gb::oam_attr::bg_priority) != 0;
-        const std::uint8_t pal = (sp.attr & gb::oam_attr::dmg_palette_obp1) ? m.hwr_obp1() : m.hwr_obp0();
+        const std::uint8_t pal = (sp.attr & gb::oam_attr::dmg_palette_obp1) ? mmu_.hwr_obp1() : mmu_.hwr_obp0();
 
         int row = static_cast<int>(ly) - sprite_top;
         if (y_flip)
@@ -301,8 +303,8 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
         // Sprites always use $8000-unsigned addressing regardless of LCDC.4.
         const std::uint16_t data_addr =
             static_cast<std::uint16_t>(gb::TILE_DATA_UNSIGNED_BASE + tile_index * gb::TILE_BYTES + row * 2);
-        const std::uint8_t lo = m.vram[data_addr - gb::VRAM_BASE];
-        const std::uint8_t hi = m.vram[data_addr - gb::VRAM_BASE + 1];
+        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE));
+        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
 
         for (int px = 0; px < gb::TILE_PIXELS; ++px) {
             const int screen_x = sprite_left + px;
@@ -327,14 +329,14 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
 }
 
 void ppu::update_lyc_coincidence() {
-    const bool coinc = (m.hwr_ly() == m.hwr_lyc());
-    m.hwr_stat((m.hwr_stat() & ~gb::stat::lyc_coincidence) | (coinc ? gb::stat::lyc_coincidence : 0));
-    if (coinc && (m.hwr_stat() & gb::stat::lyc_irq_enable))
+    const bool coinc = (mmu_.hwr_ly() == mmu_.hwr_lyc());
+    mmu_.hwr_stat((mmu_.hwr_stat() & ~gb::stat::lyc_coincidence) | (coinc ? gb::stat::lyc_coincidence : 0));
+    if (coinc && (mmu_.hwr_stat() & gb::stat::lyc_irq_enable))
         request_irq(gb::irq_bit::lcd_stat);
 }
 
 void ppu::request_irq(std::uint8_t mask) {
-    m.hwr_if(m.hwr_if() | mask);
+    mmu_.hwr_if(mmu_.hwr_if() | mask);
 }
 
 bool ppu::consume_frame_ready() {

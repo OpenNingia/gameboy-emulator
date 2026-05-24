@@ -22,7 +22,7 @@ namespace gbemu {
         const std::uint32_t* framebuffer() const { return fb.data(); }
         bool consume_frame_ready(); // edge-trigger SDL present
     private:
-        mmu& m;
+        mmu& mmu_;
         mode_e mode{mode_e::OAM_SCAN};
         std::uint32_t dots_in_mode{0};
         bool frame_ready{false};

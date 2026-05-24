@@ -99,8 +99,9 @@ namespace gbemu {
             void load_nr33(std::uint8_t v);
             bool load_nr34(std::uint8_t v, bool next_step_clocks_length);
 
-            // Wave RAM is passed in by the apu (it lives in mmu.mmio at
-            // $FF30-$FF3F). Keeping it external avoids a back-pointer.
+            // Wave RAM is passed in by the apu (the MMU exposes a span over
+            // its $FF30-$FF3F backing store via mmu::wave_ram). Keeping it
+            // external avoids a back-pointer.
             void tick_frequency(std::uint32_t cycles, const std::uint8_t* wave_ram);
             void tick_length();
             void trigger(bool next_step_clocks_length);

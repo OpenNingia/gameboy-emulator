@@ -542,7 +542,7 @@ namespace gbemu::ui {
             }
             std::array<std::uint32_t, 128 * 192> pixels{};
             const std::uint8_t bgp = c.core->mmu.hwr_bgp();
-            const std::uint8_t* vram = c.core->mmu.vram.data();
+            const std::uint8_t* vram = c.core->mmu.vram_bank().data();
             // The viewer covers $8000-$97FF: 384 tiles laid out 16 wide × 24 tall.
             constexpr std::uint32_t tiles_per_row = 16;
             constexpr std::uint32_t total_tiles = 384;
@@ -570,7 +570,7 @@ namespace gbemu::ui {
             const std::uint8_t bgp = c.core->mmu.hwr_bgp();
             const bool data_8000 = (lcdc & gb::lcdc::tile_data_8000) != 0;
             const std::uint16_t map_base = c.ppu_bgmap_idx ? gb::BG_MAP_1 : gb::BG_MAP_0;
-            const std::uint8_t* vram = c.core->mmu.vram.data();
+            const std::uint8_t* vram = c.core->mmu.vram_bank().data();
             // Signed-mode tile data window is centred at $9000 — offset
             // gb::TILE_DATA_SIGNED_BASE - gb::VRAM_BASE = $1000 inside the VRAM array.
             constexpr std::uint32_t signed_window_off = gb::TILE_DATA_SIGNED_BASE - gb::VRAM_BASE;
@@ -671,13 +671,14 @@ namespace gbemu::ui {
                 return;
             }
 
-            if (!c.core->mmu.cart) {
+            const auto* cart = c.core->mmu.cart();
+            if (!cart) {
                 ImGui::TextUnformatted("(no cartridge attached)");
                 ImGui::End();
                 return;
             }
 
-            const auto st = c.core->mmu.cart->debug_state();
+            const auto st = cart->debug_state();
             ImGui::Text("Type        $%02X", st.type);
             ImGui::Text("ROM bank    %u", static_cast<unsigned>(st.rom_bank));
             ImGui::Text("RAM bank    %u", static_cast<unsigned>(st.ram_bank));

@@ -15,10 +15,6 @@ namespace {
         0b01111110, // 75%
     };
 
-    constexpr std::uint16_t NR50_OFF = gb::io_offset(gb::io::NR50);
-    constexpr std::uint16_t NR51_OFF = gb::io_offset(gb::io::NR51);
-    constexpr std::uint16_t NR52_OFF = gb::io_offset(gb::io::NR52);
-
     // Bits forced to 1 on reads of $FF10-$FF25. Write-only fields and
     // unused address slots read back as all-1s on real hardware.
     constexpr std::uint8_t READ_MASKS[] = {
@@ -66,17 +62,17 @@ apu::apu(mmu& mmu) : mmu_(mmu) {
     constexpr std::uint16_t unused_tail_begin = 0xFF27;
     constexpr std::uint16_t unused_tail_end = 0xFF2F; // inclusive
     for (std::uint16_t a = unused_tail_begin; a <= unused_tail_end; ++a) {
-        mmu_.add_mmio_write_handler(a, [this, a](std::uint8_t) { mmu_.mmio[gb::io_offset(a)] = gb::OPEN_BUS; });
+        mmu_.add_mmio_write_handler(a, [this, a](std::uint8_t) { mmu_.io_store(a, gb::OPEN_BUS); });
     }
     // Pre-stamp the read-mask bits across the entire NR10..NR51 range so
     // reads issued before any ROM-driven write return the canonical
     // "mostly 1s" byte for each register (matches DMG power-on state for
     // the unused / write-only bit positions).
     for (std::uint16_t a = gb::io::NR10; a <= gb::io::NR51; ++a) {
-        mmu_.mmio[gb::io_offset(a)] = READ_MASKS[a - gb::io::NR10];
+        mmu_.io_store(a, READ_MASKS[a - gb::io::NR10]);
     }
     for (std::uint16_t a = unused_tail_begin; a <= unused_tail_end; ++a) {
-        mmu_.mmio[gb::io_offset(a)] = gb::OPEN_BUS;
+        mmu_.io_store(a, gb::OPEN_BUS);
     }
     // Master mixer — NR50 (master volume / VIN), NR51 (channel pan).
     mmu_.add_mmio_write_handler(gb::io::NR50, [this](std::uint8_t v) { on_nr50(v); });
@@ -652,7 +648,7 @@ void apu::power_off() {
     // so reads after power-off still return the canonical "mostly 1s" byte
     // for each address. Wave RAM is preserved.
     for (std::uint16_t a = gb::io::NR10; a <= gb::io::NR51; ++a) {
-        mmu_.mmio[gb::io_offset(a)] = READ_MASKS[a - gb::io::NR10];
+        mmu_.io_store(a, READ_MASKS[a - gb::io::NR10]);
     }
     // Hold the frame sequencer in reset while powered off. Resumes from
     // step 0 on the next power-on.
@@ -662,13 +658,13 @@ void apu::power_off() {
 }
 
 void apu::apply_read_mask(std::uint16_t addr, std::uint8_t v) {
-    mmu_.mmio[gb::io_offset(addr)] = v | READ_MASKS[addr - gb::io::NR10];
+    mmu_.io_store(addr, v | READ_MASKS[addr - gb::io::NR10]);
 }
 
 void apu::refresh_nr52_status() {
     // Preserve the written master-power bit, force unused bits to 1, and
     // OR in the live channel-enabled status (bits 0-3).
-    std::uint8_t v = (mmu_.mmio[NR52_OFF] & 0x80) | 0x70;
+    std::uint8_t v = (mmu_.io_read(gb::io::NR52) & 0x80) | 0x70;
     if (ch1_sq_.channel_enabled)
         v |= 0x01;
     if (ch2_.channel_enabled)
@@ -677,7 +673,7 @@ void apu::refresh_nr52_status() {
         v |= 0x04;
     if (ch4_.channel_enabled)
         v |= 0x08;
-    mmu_.mmio[NR52_OFF] = v;
+    mmu_.io_store(gb::io::NR52, v);
 }
 
 // --- frame sequencer + step + emit_sample -----------------------------------
@@ -726,7 +722,7 @@ void apu::step(std::uint32_t cycles) {
     ch1_sq_.tick_frequency(cycles);
     ch2_.tick_frequency(cycles);
     // CH3 reads its waveform directly from MMU-backed wave RAM.
-    ch3_.tick_frequency(cycles, &mmu_.mmio[gb::io_offset(gb::io::WAVE_RAM_BASE)]);
+    ch3_.tick_frequency(cycles, mmu_.wave_ram().data());
     ch4_.tick_frequency(cycles);
 
     // Keep NR52's read-back channel-enabled bits in sync so ROMs polling
@@ -744,7 +740,7 @@ void apu::emit_sample() {
     if (!output_enabled_)
         return;
 
-    const std::uint8_t nr52 = mmu_.mmio[NR52_OFF];
+    const std::uint8_t nr52 = mmu_.io_read(gb::io::NR52);
     if ((nr52 & 0x80) == 0) {
         ring_.push(0.0f, 0.0f);
         return;
@@ -755,7 +751,7 @@ void apu::emit_sample() {
     const float ch3 = ch3_.sample();
     const float ch4 = ch4_.sample();
 
-    const std::uint8_t nr51 = mmu_.mmio[NR51_OFF];
+    const std::uint8_t nr51 = mmu_.io_read(gb::io::NR51);
     float l = 0.0f, r = 0.0f;
     if (nr51 & 0x10)
         l += ch1; // bit 4: CH1 left
@@ -774,7 +770,7 @@ void apu::emit_sample() {
     if (nr51 & 0x08)
         r += ch4; // bit 3: CH4 right
 
-    const std::uint8_t nr50 = mmu_.mmio[NR50_OFF];
+    const std::uint8_t nr50 = mmu_.io_read(gb::io::NR50);
     const float vol_l = static_cast<float>(((nr50 >> 4) & 0x07) + 1) / 8.0f;
     const float vol_r = static_cast<float>((nr50 & 0x07) + 1) / 8.0f;
 
