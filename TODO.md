@@ -102,17 +102,35 @@ del canale alpha attraverso i pass 1-3, Y-flip delle texcoord).
 
 ---
 
-## 5. MBC2 / MBC3 / MBC5
+## 5. MBC2 / MBC3 / MBC5 — **fatto (RTC stubbed)**
 
-Oggi `src/mbc.cpp` implementa solo `no_mbc` (56) e `mbc1` (116). Test ROM oltre
-`cpu_instrs.gb` (es. Pokémon Red/Blue → MBC3, Pokémon Crystal → MBC3+RTC,
-giochi tardi → MBC5) richiedono questi banchi.
+`src/mbc.cpp` ora implementa `no_mbc`, `mbc1`, `mbc2`, `mbc3`, `mbc5`. Tutti i
+cartridge type 0x00-0x1E mappati nel factory `make_mbc`. Pokémon Red/Blue
+(type 0x13, MBC3+RAM+BATTERY) parte; il salvataggio in-gioco funziona ma resta
+solo in RAM finché il processo è vivo (battery save → sezione 6).
 
-Priorità:
-1. **MBC3** — copre la maggior parte dei giochi più importanti. RTC opzionale
-   alla prima iterazione (la maggior parte dei test funziona senza).
-2. **MBC5** — banco lineare fino a 8 MB, semplice.
-3. **MBC2** — meno comune, RAM integrata 512×4 bit.
+**MBC2** (0x05, 0x06): 4-bit ROM bank, RAM built-in 512 nibbles mirrored, bit 8
+dell'addr distingue RAM-enable vs ROM-select.
+
+**MBC3** (0x0F-0x13): 7-bit ROM bank con 0→1 remap, RAM/RTC select a
+$4000-$5FFF (banks 0-3 oppure RTC reg 0x08-0x0C), latch a $6000-$7FFF.
+**RTC = stub**: read ritorna 0, write ignorate, no time-keeping. Gold/Crystal
+girano con day/night cycle congelato — accettabile per la v1. RTC vero
+richiede `time(NULL)` baseline + emulazione del DIV interno → addendum
+opzionale che vive insieme alla battery-save (`.rtc` file).
+
+**MBC5** (0x19-0x1E): 9-bit ROM bank (low8 a $2000-$2FFF, bit9 a $3000-$3FFF,
+bank 0 valido, no remap), 4-bit RAM bank a $4000-$5FFF. Bit di rumble
+ignorato (no haptics).
+
+`mbc_debug_state::rom_bank` allargato a `uint16_t` perché MBC5 può
+selezionare fino a bank 511. UI / debugger `dump mbc` già castano a
+`unsigned` quindi nessun consumer rotto.
+
+**Cosa resta:**
+- Battery save persistente → sezione 6 (essenziale per giocare seriamente a
+  Pokémon).
+- RTC reale per MBC3 timer carts → addendum di sezione 6.
 
 ---
 

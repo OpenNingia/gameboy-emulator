@@ -40,11 +40,11 @@ namespace gbemu {
 
     // Snapshot of the MBC's banking state, surfaced to the debugger / MBC panel.
     struct mbc_debug_state {
-        std::uint8_t type;     // cartridge type byte (header $0147)
-        std::uint8_t rom_bank; // currently mapped bank at $4000-$7FFF
-        std::uint8_t ram_bank; // currently mapped RAM bank at $A000-$BFFF
-        bool ram_enabled;      // RAM gate (always true for carts wired with RAM and no enable line)
-        std::uint8_t mode;     // MBC1 advanced-banking mode bit (0 = ROM banking, 1 = RAM/upper-bits)
+        std::uint8_t type;      // cartridge type byte (header $0147)
+        std::uint16_t rom_bank; // currently mapped bank at $4000-$7FFF (MBC5 goes up to 511)
+        std::uint8_t ram_bank;  // currently mapped RAM bank at $A000-$BFFF
+        bool ram_enabled;       // RAM gate (always true for carts wired with RAM and no enable line)
+        std::uint8_t mode;      // MBC1 advanced-banking mode bit (0 = ROM banking, 1 = RAM/upper-bits)
     };
 
     // Memory Bank Controller interface.
