@@ -6,7 +6,7 @@ constexpr std::uint16_t DIV_ADDR = 0xFF04;
 constexpr std::uint16_t TIMA_ADDR = 0xFF05;
 
 timer::timer(mmu& m) : mmu_(m) {
-    m.set_mmio_write_handler(DIV_ADDR, [this](std::uint8_t v) { div_trigger(v); });
+    m.add_mmio_write_handler(DIV_ADDR, [this](std::uint8_t v) { div_trigger(v); });
 }
 
 void timer::div_trigger(std::uint8_t val) {

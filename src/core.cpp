@@ -88,6 +88,9 @@ std::uint32_t core::step() {
 
         ppu.step(total);
         timer.step(total);
+
+        total_cycles += total;
+
         return total;
     } catch (const gbemu_exception& e) {
         LOG_ERROR(gbemu::log::root(), "@PC={:04x} AF={:04x} BC={:04x} DE={:04x} HL={:04x} SP={:04x} : {}", saved_pc,

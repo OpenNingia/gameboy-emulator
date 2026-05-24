@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include <exc.hpp>
 #include <mbc.h>
@@ -62,9 +63,11 @@ namespace gbemu {
         void write_u8(std::uint16_t addr, std::uint8_t val);
 
         // Register a write-side hook for a single MMIO byte (0xFF00-0xFF7F).
-        // Subsystems (serial, dma, timer, apu, ...) register here in their
-        // constructor; mmu invokes the hook after storing the byte in mmio[].
-        void set_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn);
+        // Multiple handlers may be registered for the same address; they are
+        // invoked in registration order after the byte has been stored in
+        // mmio[].  Used by hardware subsystems (serial, dma, timer, apu, ...)
+        // and by debug observers (write-watchpoints, serial taps).
+        void add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn);
 
         std::uint16_t read_u16(std::uint16_t addr) { return read_u8(addr) + (read_u8(addr + 1) << 8); }
 
@@ -105,6 +108,8 @@ namespace gbemu {
         unsigned ppu_stub_counter{0};
         static constexpr unsigned ppu_stub_step{32};
 
-        std::array<mmio_write_fn, 0x80> mmio_write_handlers{};
+        // TODO(small_vector): typical occupancy is 1-3 handlers per address,
+        // batch swap to a small_vector<mmio_write_fn, 2> once we pick an impl.
+        std::array<std::vector<mmio_write_fn>, 0x80> mmio_write_handlers{};
     };
 } // namespace gbemu

@@ -3,7 +3,7 @@
 gbemu::mmu::mmu() {
     // Boot ROM disable lives in MMU itself: writing nonzero to 0xFF50 unmaps
     // the BIOS from 0x0000-0x00FF. On DMG this is one-shot until reset.
-    set_mmio_write_handler(0xFF50, [this](std::uint8_t v) {
+    add_mmio_write_handler(0xFF50, [this](std::uint8_t v) {
         if (v != 0)
             bios_accessible = false;
     });
@@ -18,8 +18,8 @@ gbemu::mmu::mmu() {
     mmio[0xFF4D - 0xFF00] = 0xFF;
 }
 
-void gbemu::mmu::set_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
-    mmio_write_handlers[addr - 0xFF00] = std::move(fn);
+void gbemu::mmu::add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
+    mmio_write_handlers[addr - 0xFF00].push_back(std::move(fn));
 }
 
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
@@ -140,7 +140,7 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
             // memory mapped i/o
             else if (addr < 0xFF80) {
                 mmio[addr - 0xFF00] = val;
-                if (auto& fn = mmio_write_handlers[addr - 0xFF00]; fn) {
+                for (auto& fn : mmio_write_handlers[addr - 0xFF00]) {
                     fn(val);
                 }
             }

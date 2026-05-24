@@ -1,8 +1,11 @@
+#include <cstdio>
 #include <fstream>
+#include <iostream>
 
 #include <SDL2/SDL.h>
 #include <app.h>
 #include <core.h>
+#include <debugger.h>
 #include <exc.hpp>
 
 Application::Application() : cfg("cfg/gbemu.conf") {
@@ -32,6 +35,19 @@ void Application::set_rom_file(std::string_view path) {
 
 void Application::run() {
     gbemu::core core;
+    gbemu::debugger debugger{core};
+
+    // Stdout-echo of bytes the cartridge transmits via the serial link.  The
+    // hardware-emulation half of $FF02 (clear SC bit 7, raise IF.3) lives in
+    // serial::on_sc_write; this observer is just for human-visible output and
+    // will be removed once the PR5 ImGui serial panel ships.  Skipped in
+    // future headless mode.
+    core.mmu.add_mmio_write_handler(0xFF02, [&core](std::uint8_t v) {
+        if (v == 0x81) {
+            std::putchar(static_cast<char>(core.mmu.hwr_sb()));
+            std::fflush(stdout);
+        }
+    });
 
     auto window = SDL_CreateWindow("GbEmu", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, cfg.win.width,
                                    cfg.win.height, SDL_WINDOW_SHOWN);
@@ -72,10 +88,16 @@ void Application::run() {
                 quit = true;
                 break;
             } else if (e.type == SDL_KEYDOWN) {
-                // F12: diagnostic dump of the PC ring (useful when chasing
-                // ROMs that hang in an infinite loop).
+                // F12: diagnostic dump of registers + recent PCs (useful when
+                // chasing ROMs that hang in an infinite loop).  Routed through
+                // the debugger so the format matches the headless script
+                // runner (PR2).
                 if (e.key.keysym.sym == SDLK_F12) {
-                    core.dump_pc_ring();
+                    std::cout << "=== regs @cycle=" << debugger.total_cycles() << " ===\n";
+                    debugger.dump_regs(std::cout);
+                    std::cout << "=== pc-ring 32 ===\n";
+                    debugger.dump_pc_ring(std::cout, 32);
+                    std::cout.flush();
                 }
                 // game.input(e.key.keysym.scancode);
             }
@@ -85,7 +107,9 @@ void Application::run() {
         constexpr std::uint32_t CYCLES_PER_FRAME = 70224; // valore esatto DMG
         std::uint32_t budget = 0;
         while (budget < CYCLES_PER_FRAME) {
-            budget += core.step(); // step ora deve ritornare i T-cycle consumati
+            // Route through the debugger seam (pass-through in PR1; gains
+            // breakpoint / watchpoint / run-until handling in PR2).
+            budget += debugger.step();
         }
 
         if (core.ppu.consume_frame_ready()) {

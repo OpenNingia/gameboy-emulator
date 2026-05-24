@@ -24,10 +24,10 @@ namespace gbemu {
         bool halted{false};
         bool ime_pending{false};
         bool ei_just_executed{false};
-        uint8_t extra_cycles{0};
+        std::uint8_t extra_cycles{0};
 
         // execute an instruction and returns total cycles
-        uint8_t step();
+        std::uint8_t step();
         // push u16 on the stack
         void push(std::uint16_t u16);
         // pop u16 from the stack

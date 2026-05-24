@@ -4,7 +4,7 @@
 using namespace gbemu;
 
 dma::dma(mmu& m) : mmu_(m) {
-    m.set_mmio_write_handler(0xFF46, [this](std::uint8_t v) { trigger(v); });
+    m.add_mmio_write_handler(0xFF46, [this](std::uint8_t v) { trigger(v); });
 }
 
 void dma::trigger(std::uint8_t val) {

@@ -44,6 +44,7 @@ namespace gbemu {
 
         std::array<std::uint16_t, 256> pc_ring;
         std::size_t pc_idx;
+        std::uint64_t total_cycles{0};
 
         // load a cartridge
         void load(rom_file& c);
