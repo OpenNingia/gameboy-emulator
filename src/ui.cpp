@@ -17,6 +17,7 @@
 #include <core.h>
 #include <debugger.h>
 #include <disasm.h>
+#include <gb_layout.h>
 #include <imgui.h>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
@@ -185,13 +186,13 @@ namespace gbemu::ui {
                 return;
             }
 
-            // Fit the 160x144 framebuffer inside the panel's available area,
+            // Fit the GB framebuffer inside the panel's available area,
             // preserving aspect ratio.  Integer scaling preferred for the
             // pixel grid, but we let it be fractional so resizing feels
             // responsive — pixel-perfect mode can land in PR5.
             const ImVec2 avail = ImGui::GetContentRegionAvail();
-            constexpr float gb_w = 160.0f;
-            constexpr float gb_h = 144.0f;
+            constexpr float gb_w = static_cast<float>(gb::LCD_WIDTH);
+            constexpr float gb_h = static_cast<float>(gb::LCD_HEIGHT);
             const float sx = avail.x / gb_w;
             const float sy = avail.y / gb_h;
             const float scale = (sx < sy) ? sx : sy;
@@ -364,13 +365,13 @@ namespace gbemu::ui {
                 std::uint32_t size;
             };
             static constexpr std::array<region, 7> regions = {{
-                {"ROM", 0x0000, 0x8000},
-                {"VRAM", 0x8000, 0x2000},
-                {"ERAM", 0xA000, 0x2000},
-                {"WRAM", 0xC000, 0x2000},
-                {"OAM", 0xFE00, 0x00A0},
-                {"I/O", 0xFF00, 0x0080},
-                {"HRAM", 0xFF80, 0x0080},
+                {"ROM", gb::ROM_BASE, gb::ROM_VISIBLE_SIZE},
+                {"VRAM", gb::VRAM_BASE, gb::VRAM_SIZE},
+                {"ERAM", gb::ERAM_BASE, gb::ERAM_SIZE},
+                {"WRAM", gb::WRAM_BASE, gb::WRAM_SIZE},
+                {"OAM", gb::OAM_BASE, gb::OAM_TOTAL_BYTES},
+                {"I/O", gb::io::BASE, gb::IO_REGION_SIZE},
+                {"HRAM", gb::HRAM_BASE, gb::HRAM_SIZE},
             }};
 
             // One MemoryEditor per region so cursor/selection state doesn't
@@ -510,25 +511,21 @@ namespace gbemu::ui {
 
         // ---------- PR5: PPU / MBC / Serial / PC-ring ----------
 
-        // Shared DMG four-shade palette used by the BGP/OBP swatches and the
-        // tile / map viewers.  Matches the ARGB constants in ppu.cpp.
-        constexpr std::array<std::uint32_t, 4> kDmgPalette = {0xFFFFFFFFu, 0xFFAAAAAAu, 0xFF555555u, 0xFF000000u};
-
-        // Decode an 8x8 GB tile (16 bytes at vram_offset) into `out` (a
-        // row-major buffer of dst_stride pixels per row), placing the
+        // Decode an 8x8 GB tile (TILE_BYTES bytes at vram_offset) into `out`
+        // (a row-major buffer of dst_stride pixels per row), placing the
         // top-left corner of the tile at (dst_x, dst_y).  Each output pixel
-        // is ARGB8888 driven by `palette` (BGP-mapped).
+        // is ARGB8888 driven by `bgp` (BGP-mapped).
         void decode_tile_8x8(const std::uint8_t* vram, std::uint32_t vram_offset, std::uint32_t* out,
                              std::uint32_t dst_stride, std::uint32_t dst_x, std::uint32_t dst_y,
                              const std::uint8_t bgp) {
-            for (std::uint32_t row = 0; row < 8; ++row) {
+            for (std::uint32_t row = 0; row < gb::TILE_PIXELS; ++row) {
                 const std::uint8_t lo = vram[vram_offset + row * 2];
                 const std::uint8_t hi = vram[vram_offset + row * 2 + 1];
-                for (std::uint32_t col = 0; col < 8; ++col) {
+                for (std::uint32_t col = 0; col < gb::TILE_PIXELS; ++col) {
                     const std::uint8_t shift = static_cast<std::uint8_t>(7 - col);
                     const std::uint8_t ci = static_cast<std::uint8_t>((((hi >> shift) & 1) << 1) | ((lo >> shift) & 1));
                     const std::uint8_t shade = (bgp >> (ci * 2)) & 0x03;
-                    out[(dst_y + row) * dst_stride + (dst_x + col)] = kDmgPalette[shade];
+                    out[(dst_y + row) * dst_stride + (dst_x + col)] = gb::DMG_PALETTE_ARGB[shade];
                 }
             }
         }
@@ -546,10 +543,13 @@ namespace gbemu::ui {
             std::array<std::uint32_t, 128 * 192> pixels{};
             const std::uint8_t bgp = c.core->mmu.hwr_bgp();
             const std::uint8_t* vram = c.core->mmu.vram.data();
-            for (std::uint32_t t = 0; t < 384; ++t) {
-                const std::uint32_t tx = (t % 16) * 8;
-                const std::uint32_t ty = (t / 16) * 8;
-                decode_tile_8x8(vram, t * 16, pixels.data(), 128, tx, ty, bgp);
+            // The viewer covers $8000-$97FF: 384 tiles laid out 16 wide × 24 tall.
+            constexpr std::uint32_t tiles_per_row = 16;
+            constexpr std::uint32_t total_tiles = 384;
+            for (std::uint32_t t = 0; t < total_tiles; ++t) {
+                const std::uint32_t tx = (t % tiles_per_row) * gb::TILE_PIXELS;
+                const std::uint32_t ty = (t / tiles_per_row) * gb::TILE_PIXELS;
+                decode_tile_8x8(vram, t * gb::TILE_BYTES, pixels.data(), 128, tx, ty, bgp);
             }
             SDL_UpdateTexture(c.ppu_tiles_tex, nullptr, pixels.data(), 128 * 4);
         }
@@ -568,17 +568,22 @@ namespace gbemu::ui {
             std::array<std::uint32_t, 256 * 256> pixels{};
             const std::uint8_t lcdc = c.core->mmu.hwr_lcdc();
             const std::uint8_t bgp = c.core->mmu.hwr_bgp();
-            const bool data_8000 = (lcdc & 0x10) != 0;
-            const std::uint16_t map_base = c.ppu_bgmap_idx ? 0x9C00 : 0x9800;
+            const bool data_8000 = (lcdc & gb::lcdc::tile_data_8000) != 0;
+            const std::uint16_t map_base = c.ppu_bgmap_idx ? gb::BG_MAP_1 : gb::BG_MAP_0;
             const std::uint8_t* vram = c.core->mmu.vram.data();
-            for (std::uint32_t ty = 0; ty < 32; ++ty) {
-                for (std::uint32_t tx = 0; tx < 32; ++tx) {
-                    const std::uint8_t idx = vram[(map_base - 0x8000) + ty * 32 + tx];
+            // Signed-mode tile data window is centred at $9000 — offset
+            // gb::TILE_DATA_SIGNED_BASE - gb::VRAM_BASE = $1000 inside the VRAM array.
+            constexpr std::uint32_t signed_window_off = gb::TILE_DATA_SIGNED_BASE - gb::VRAM_BASE;
+            for (std::uint32_t ty = 0; ty < gb::TILES_PER_MAP_ROW; ++ty) {
+                for (std::uint32_t tx = 0; tx < gb::TILES_PER_MAP_ROW; ++tx) {
+                    const std::uint8_t idx = vram[(map_base - gb::VRAM_BASE) + ty * gb::TILES_PER_MAP_ROW + tx];
                     const std::uint32_t tile_off =
-                        data_8000 ? static_cast<std::uint32_t>(idx) * 16u
+                        data_8000 ? static_cast<std::uint32_t>(idx) * gb::TILE_BYTES
                                   : static_cast<std::uint32_t>(
-                                        0x1000 + static_cast<std::int32_t>(static_cast<std::int8_t>(idx)) * 16);
-                    decode_tile_8x8(vram, tile_off, pixels.data(), 256, tx * 8, ty * 8, bgp);
+                                        signed_window_off +
+                                        static_cast<std::int32_t>(static_cast<std::int8_t>(idx)) * gb::TILE_BYTES);
+                    decode_tile_8x8(vram, tile_off, pixels.data(), 256, tx * gb::TILE_PIXELS, ty * gb::TILE_PIXELS,
+                                    bgp);
                 }
             }
             SDL_UpdateTexture(c.ppu_bgmap_tex, nullptr, pixels.data(), 256 * 4);
@@ -588,7 +593,7 @@ namespace gbemu::ui {
             ImGui::TextUnformatted(label);
             for (int i = 0; i < 4; ++i) {
                 const std::uint8_t shade = (pal >> (i * 2)) & 0x03;
-                const std::uint32_t argb = kDmgPalette[shade];
+                const std::uint32_t argb = gb::DMG_PALETTE_ARGB[shade];
                 const ImVec4 col{((argb >> 16) & 0xFF) / 255.0f, ((argb >> 8) & 0xFF) / 255.0f, (argb & 0xFF) / 255.0f,
                                  1.0f};
                 ImGui::SameLine();

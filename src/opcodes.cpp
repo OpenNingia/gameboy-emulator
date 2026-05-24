@@ -1,7 +1,9 @@
-// Generated from ops_db.json
-// https://gist.github.com/bberak/ca001281bb8431d2706afd31401e802b
+// Originally seeded from scripts/opcodes.json via scripts/gen_ops.py; bodies
+// are now hand-maintained.  The header table (inc/opcodes.hpp) is still
+// machine-generated and must NOT be edited.
 
 #include <exc.hpp>
+#include <gb_layout.h>
 #include <log.h>
 #include <opcodes.hpp>
 
@@ -449,7 +451,7 @@ IMPL_INSTR(ld_a__de_) {
 0xFF80-0xFFFE: Working & Stack RAM (127 bytes)
 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld_a__c_) {
-    cpu.regs.af.hi = cpu.mmu.read_u8(0xFF00 + cpu.regs.bc.lo);
+    cpu.regs.af.hi = cpu.mmu.read_u8(gb::io::BASE + cpu.regs.bc.lo);
 }
 
 // E2 LD (C), A
@@ -458,7 +460,7 @@ IMPL_INSTR(ld_a__c_) {
 0xFF80-0xFFFE: Working & Stack RAM (127 bytes)
 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld__c__a) {
-    cpu.mmu.write_u8(0xFF00 + cpu.regs.bc.lo, cpu.regs.af.hi);
+    cpu.mmu.write_u8(gb::io::BASE + cpu.regs.bc.lo, cpu.regs.af.hi);
 }
 
 // F0 LD A, (a8)
@@ -467,7 +469,7 @@ IMPL_INSTR(ld__c__a) {
 for a8, although the immediate operand only has the lower-order 8 bits. 0xFF00-0xFF7F: Port/Mode registers, control
 register, sound register 0xFF80-0xFFFE: Working & Stack RAM (127 bytes) 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld_a__a8_) {
-    auto addr = cpu.mmu.read_u8(cpu.regs.pc++) | 0xFF00;
+    auto addr = cpu.mmu.read_u8(cpu.regs.pc++) | gb::io::BASE;
     cpu.regs.af.hi = cpu.mmu.read_u8(addr);
 }
 
@@ -477,7 +479,7 @@ IMPL_INSTR(ld_a__a8_) {
 for a8, although the immediate operand only has the lower-order 8 bits. 0xFF00-0xFF7F: Port/Mode registers, control
 register, sound register 0xFF80-0xFFFE: Working & Stack RAM (127 bytes) 0xFFFF: Interrupt Enable Register */
 IMPL_INSTR(ld__a8__a) {
-    std::uint16_t addr = cpu.mmu.read_u8(cpu.regs.pc++) | 0xFF00;
+    std::uint16_t addr = cpu.mmu.read_u8(cpu.regs.pc++) | gb::io::BASE;
     cpu.mmu.write_u8(addr, cpu.regs.af.hi);
 }
 
@@ -3593,7 +3595,7 @@ IMPL_INSTR(stop) {
               "STOP @ {:04x}  next={:02x}  A={:02x} BC={:04x} DE={:04x} HL={:04x} SP={:04x}  gb_id=[D800]={:02x}  "
               "KEY1=[FF4D]={:02x}",
               stop_pc, cpu.mmu.read_u8(cpu.regs.pc), cpu.regs.af.hi, cpu.regs.bc.u16, cpu.regs.de.u16, cpu.regs.hl.u16,
-              cpu.regs.sp, cpu.mmu.read_u8(0xD800), cpu.mmu.read_u8(0xFF4D));
+              cpu.regs.sp, cpu.mmu.read_u8(0xD800), cpu.mmu.read_u8(gb::io::KEY1));
     cpu.regs.pc++; // skip the padding byte
     cpu.stopped = true;
 }

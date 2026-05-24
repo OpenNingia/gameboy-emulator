@@ -83,3 +83,4 @@ Implementare gestione joypad con bindings configurabili da tastiera e controller
 Necessario per molti giochi.
 
 ## Shader effetto green-LCD
+https://github.com/libretro/glsl-shaders/blob/master/handheld/gameboy.glslp

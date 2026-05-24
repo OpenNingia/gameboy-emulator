@@ -1,12 +1,11 @@
 #include <apu.h>
+#include <gb_layout.h>
 
 using namespace gbemu;
 
 namespace {
-    constexpr std::uint64_t CPU_HZ = 4194304;
-
-    // Frame sequencer ticks at 512 Hz. 4194304 / 512 = 8192 T-cycles/step.
-    constexpr std::uint32_t FRAME_SEQ_PERIOD = 8192;
+    // Frame sequencer ticks at 512 Hz. CPU_HZ / 512 = 8192 T-cycles/step.
+    constexpr std::uint32_t FRAME_SEQ_PERIOD = gb::CPU_HZ / 512;
 
     // 8-step duty patterns. Bit ordering: MSB is step 0, LSB is step 7.
     constexpr std::uint8_t DUTY_TABLE[4] = {
@@ -16,9 +15,9 @@ namespace {
         0b01111110, // 75%
     };
 
-    constexpr std::uint16_t NR50_OFF = 0xFF24 - 0xFF00;
-    constexpr std::uint16_t NR51_OFF = 0xFF25 - 0xFF00;
-    constexpr std::uint16_t NR52_OFF = 0xFF26 - 0xFF00;
+    constexpr std::uint16_t NR50_OFF = gb::io_offset(gb::io::NR50);
+    constexpr std::uint16_t NR51_OFF = gb::io_offset(gb::io::NR51);
+    constexpr std::uint16_t NR52_OFF = gb::io_offset(gb::io::NR52);
 
     // Bits forced to 1 on reads of $FF10-$FF25. Write-only fields and
     // unused address slots read back as all-1s on real hardware.
@@ -29,62 +28,66 @@ namespace {
         0xFF, 0xFF, 0x00, 0x00, 0xBF, // unused NR41 NR42 NR43 NR44
         0x00, 0x00,                   // NR50 NR51
     };
-    static_assert(sizeof(READ_MASKS) == (0xFF25 - 0xFF10 + 1));
+    static_assert(sizeof(READ_MASKS) == (gb::io::NR51 - gb::io::NR10 + 1));
 } // namespace
 
 apu::apu(mmu& mmu) : mmu_(mmu) {
     // CH1: NR10 (sweep), NR11-NR14 (square + length/envelope/freq/trigger).
-    mmu_.add_mmio_write_handler(0xFF10, [this](std::uint8_t v) { on_nr10(v); });
-    mmu_.add_mmio_write_handler(0xFF11, [this](std::uint8_t v) { on_nr11(v); });
-    mmu_.add_mmio_write_handler(0xFF12, [this](std::uint8_t v) { on_nr12(v); });
-    mmu_.add_mmio_write_handler(0xFF13, [this](std::uint8_t v) { on_nr13(v); });
-    mmu_.add_mmio_write_handler(0xFF14, [this](std::uint8_t v) { on_nr14(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR10, [this](std::uint8_t v) { on_nr10(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR11, [this](std::uint8_t v) { on_nr11(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR12, [this](std::uint8_t v) { on_nr12(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR13, [this](std::uint8_t v) { on_nr13(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR14, [this](std::uint8_t v) { on_nr14(v); });
     // CH2: NR21-NR24.
-    mmu_.add_mmio_write_handler(0xFF16, [this](std::uint8_t v) { on_nr21(v); });
-    mmu_.add_mmio_write_handler(0xFF17, [this](std::uint8_t v) { on_nr22(v); });
-    mmu_.add_mmio_write_handler(0xFF18, [this](std::uint8_t v) { on_nr23(v); });
-    mmu_.add_mmio_write_handler(0xFF19, [this](std::uint8_t v) { on_nr24(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR21, [this](std::uint8_t v) { on_nr21(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR22, [this](std::uint8_t v) { on_nr22(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR23, [this](std::uint8_t v) { on_nr23(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR24, [this](std::uint8_t v) { on_nr24(v); });
     // CH3: NR30-NR34 (wave: DAC / length / level / freq / trigger).
-    mmu_.add_mmio_write_handler(0xFF1A, [this](std::uint8_t v) { on_nr30(v); });
-    mmu_.add_mmio_write_handler(0xFF1B, [this](std::uint8_t v) { on_nr31(v); });
-    mmu_.add_mmio_write_handler(0xFF1C, [this](std::uint8_t v) { on_nr32(v); });
-    mmu_.add_mmio_write_handler(0xFF1D, [this](std::uint8_t v) { on_nr33(v); });
-    mmu_.add_mmio_write_handler(0xFF1E, [this](std::uint8_t v) { on_nr34(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR30, [this](std::uint8_t v) { on_nr30(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR31, [this](std::uint8_t v) { on_nr31(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR32, [this](std::uint8_t v) { on_nr32(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR33, [this](std::uint8_t v) { on_nr33(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR34, [this](std::uint8_t v) { on_nr34(v); });
     // CH4: NR41-NR44 (noise: length / envelope / polynomial / trigger).
-    mmu_.add_mmio_write_handler(0xFF20, [this](std::uint8_t v) { on_nr41(v); });
-    mmu_.add_mmio_write_handler(0xFF21, [this](std::uint8_t v) { on_nr42(v); });
-    mmu_.add_mmio_write_handler(0xFF22, [this](std::uint8_t v) { on_nr43(v); });
-    mmu_.add_mmio_write_handler(0xFF23, [this](std::uint8_t v) { on_nr44(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR41, [this](std::uint8_t v) { on_nr41(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR42, [this](std::uint8_t v) { on_nr42(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR43, [this](std::uint8_t v) { on_nr43(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR44, [this](std::uint8_t v) { on_nr44(v); });
     // $FF15 and $FF1F are unused / unmapped — reads always return 0xFF.
     // A trivial handler keeps the mmio byte pinned to 0xFF after any write.
-    mmu_.add_mmio_write_handler(0xFF15, [this](std::uint8_t v) { apply_read_mask(0xFF15, v); });
-    mmu_.add_mmio_write_handler(0xFF1F, [this](std::uint8_t v) { apply_read_mask(0xFF1F, v); });
+    constexpr std::uint16_t unused_ch2_pad = 0xFF15; // between NR14 and NR21
+    constexpr std::uint16_t unused_ch4_pad = 0xFF1F; // between NR34 and NR41
+    mmu_.add_mmio_write_handler(unused_ch2_pad, [this](std::uint8_t v) { apply_read_mask(unused_ch2_pad, v); });
+    mmu_.add_mmio_write_handler(unused_ch4_pad, [this](std::uint8_t v) { apply_read_mask(unused_ch4_pad, v); });
     // $FF27-$FF2F are also unused and read back 0xFF. Blargg test 01 iterates
     // across this whole range and expects every write to leave a 0xFF byte
     // behind.
-    for (std::uint16_t a = 0xFF27; a <= 0xFF2F; ++a) {
-        mmu_.add_mmio_write_handler(a, [this, a](std::uint8_t) { mmu_.mmio[a - 0xFF00] = 0xFF; });
+    constexpr std::uint16_t unused_tail_begin = 0xFF27;
+    constexpr std::uint16_t unused_tail_end = 0xFF2F; // inclusive
+    for (std::uint16_t a = unused_tail_begin; a <= unused_tail_end; ++a) {
+        mmu_.add_mmio_write_handler(a, [this, a](std::uint8_t) { mmu_.mmio[gb::io_offset(a)] = gb::OPEN_BUS; });
     }
     // Pre-stamp the read-mask bits across the entire NR10..NR51 range so
     // reads issued before any ROM-driven write return the canonical
     // "mostly 1s" byte for each register (matches DMG power-on state for
     // the unused / write-only bit positions).
-    for (std::uint16_t a = 0xFF10; a <= 0xFF25; ++a) {
-        mmu_.mmio[a - 0xFF00] = READ_MASKS[a - 0xFF10];
+    for (std::uint16_t a = gb::io::NR10; a <= gb::io::NR51; ++a) {
+        mmu_.mmio[gb::io_offset(a)] = READ_MASKS[a - gb::io::NR10];
     }
-    for (std::uint16_t a = 0xFF27; a <= 0xFF2F; ++a) {
-        mmu_.mmio[a - 0xFF00] = 0xFF;
+    for (std::uint16_t a = unused_tail_begin; a <= unused_tail_end; ++a) {
+        mmu_.mmio[gb::io_offset(a)] = gb::OPEN_BUS;
     }
     // Master mixer — NR50 (master volume / VIN), NR51 (channel pan).
-    mmu_.add_mmio_write_handler(0xFF24, [this](std::uint8_t v) { on_nr50(v); });
-    mmu_.add_mmio_write_handler(0xFF25, [this](std::uint8_t v) { on_nr51(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR50, [this](std::uint8_t v) { on_nr50(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR51, [this](std::uint8_t v) { on_nr51(v); });
     // Master / status — NR52 is the power switch + per-channel status.
-    mmu_.add_mmio_write_handler(0xFF26, [this](std::uint8_t v) { on_nr52(v); });
+    mmu_.add_mmio_write_handler(gb::io::NR52, [this](std::uint8_t v) { on_nr52(v); });
     // DIV write quirk — only fires on ROM-driven writes now that timer::step
     // increments DIV via direct mmio write (bypassing write_u8). Resetting
     // the system counter on a ROM DIV write can produce an extra frame
     // sequencer step if the FS-clocking bit was high before the reset.
-    mmu_.add_mmio_write_handler(0xFF04, [this](std::uint8_t v) { on_div_write(v); });
+    mmu_.add_mmio_write_handler(gb::io::DIV, [this](std::uint8_t v) { on_div_write(v); });
 }
 
 // --- square_channel: register loads -----------------------------------------
@@ -437,7 +440,7 @@ float apu::noise_channel::sample() const {
     } while (0)
 
 void apu::on_nr10(std::uint8_t v) {
-    GATE(0xFF10);
+    GATE(gb::io::NR10);
     const bool was_decrease = ch1_sweep_.decrease;
     ch1_sweep_.load_nr10(v);
     // DMG quirk: leaving negate mode (decrease 1→0) after at least one
@@ -446,7 +449,7 @@ void apu::on_nr10(std::uint8_t v) {
     if (was_decrease && !ch1_sweep_.decrease && ch1_sweep_.negate_used) {
         ch1_sq_.channel_enabled = false;
     }
-    apply_read_mask(0xFF10, v);
+    apply_read_mask(gb::io::NR10, v);
 }
 
 void apu::on_nr11(std::uint8_t v) {
@@ -455,141 +458,141 @@ void apu::on_nr11(std::uint8_t v) {
     // forced to its read-mask since duty isn't updated.
     if (!powered_) {
         ch1_sq_.length = 64 - (v & 0x3F);
-        apply_read_mask(0xFF11, 0);
+        apply_read_mask(gb::io::NR11, 0);
         return;
     }
     ch1_sq_.load_nrx1(v);
-    apply_read_mask(0xFF11, v);
+    apply_read_mask(gb::io::NR11, v);
 }
 
 void apu::on_nr12(std::uint8_t v) {
-    GATE(0xFF12);
+    GATE(gb::io::NR12);
     ch1_sq_.load_nrx2(v);
-    apply_read_mask(0xFF12, v);
+    apply_read_mask(gb::io::NR12, v);
 }
 
 void apu::on_nr13(std::uint8_t v) {
-    GATE(0xFF13);
+    GATE(gb::io::NR13);
     ch1_sq_.load_nrx3(v);
-    apply_read_mask(0xFF13, v);
+    apply_read_mask(gb::io::NR13, v);
 }
 
 void apu::on_nr14(std::uint8_t v) {
-    GATE(0xFF14);
+    GATE(gb::io::NR14);
     const bool nclk = next_step_clocks_length();
     if (ch1_sq_.load_nrx4(v, nclk)) {
         ch1_sq_.trigger(nclk);
         if (ch1_sweep_.trigger(ch1_sq_.freq_raw))
             ch1_sq_.channel_enabled = false;
     }
-    apply_read_mask(0xFF14, v);
+    apply_read_mask(gb::io::NR14, v);
 }
 
 void apu::on_nr21(std::uint8_t v) {
     if (!powered_) {
         ch2_.length = 64 - (v & 0x3F);
-        apply_read_mask(0xFF16, 0);
+        apply_read_mask(gb::io::NR21, 0);
         return;
     }
     ch2_.load_nrx1(v);
-    apply_read_mask(0xFF16, v);
+    apply_read_mask(gb::io::NR21, v);
 }
 
 void apu::on_nr22(std::uint8_t v) {
-    GATE(0xFF17);
+    GATE(gb::io::NR22);
     ch2_.load_nrx2(v);
-    apply_read_mask(0xFF17, v);
+    apply_read_mask(gb::io::NR22, v);
 }
 
 void apu::on_nr23(std::uint8_t v) {
-    GATE(0xFF18);
+    GATE(gb::io::NR23);
     ch2_.load_nrx3(v);
-    apply_read_mask(0xFF18, v);
+    apply_read_mask(gb::io::NR23, v);
 }
 
 void apu::on_nr24(std::uint8_t v) {
-    GATE(0xFF19);
+    GATE(gb::io::NR24);
     const bool nclk = next_step_clocks_length();
     if (ch2_.load_nrx4(v, nclk))
         ch2_.trigger(nclk);
-    apply_read_mask(0xFF19, v);
+    apply_read_mask(gb::io::NR24, v);
 }
 
 void apu::on_nr30(std::uint8_t v) {
-    GATE(0xFF1A);
+    GATE(gb::io::NR30);
     ch3_.load_nr30(v);
-    apply_read_mask(0xFF1A, v);
+    apply_read_mask(gb::io::NR30, v);
 }
 
 void apu::on_nr31(std::uint8_t v) {
     // DMG: NR31 is fully length on DMG, and accepted even while off.
     if (!powered_) {
         ch3_.load_nr31(v);
-        apply_read_mask(0xFF1B, 0);
+        apply_read_mask(gb::io::NR31, 0);
         return;
     }
     ch3_.load_nr31(v);
-    apply_read_mask(0xFF1B, v);
+    apply_read_mask(gb::io::NR31, v);
 }
 
 void apu::on_nr32(std::uint8_t v) {
-    GATE(0xFF1C);
+    GATE(gb::io::NR32);
     ch3_.load_nr32(v);
-    apply_read_mask(0xFF1C, v);
+    apply_read_mask(gb::io::NR32, v);
 }
 
 void apu::on_nr33(std::uint8_t v) {
-    GATE(0xFF1D);
+    GATE(gb::io::NR33);
     ch3_.load_nr33(v);
-    apply_read_mask(0xFF1D, v);
+    apply_read_mask(gb::io::NR33, v);
 }
 
 void apu::on_nr34(std::uint8_t v) {
-    GATE(0xFF1E);
+    GATE(gb::io::NR34);
     const bool nclk = next_step_clocks_length();
     if (ch3_.load_nr34(v, nclk))
         ch3_.trigger(nclk);
-    apply_read_mask(0xFF1E, v);
+    apply_read_mask(gb::io::NR34, v);
 }
 
 void apu::on_nr41(std::uint8_t v) {
     if (!powered_) {
         ch4_.load_nr41(v);
-        apply_read_mask(0xFF20, 0);
+        apply_read_mask(gb::io::NR41, 0);
         return;
     }
     ch4_.load_nr41(v);
-    apply_read_mask(0xFF20, v);
+    apply_read_mask(gb::io::NR41, v);
 }
 
 void apu::on_nr42(std::uint8_t v) {
-    GATE(0xFF21);
+    GATE(gb::io::NR42);
     ch4_.load_nr42(v);
-    apply_read_mask(0xFF21, v);
+    apply_read_mask(gb::io::NR42, v);
 }
 
 void apu::on_nr43(std::uint8_t v) {
-    GATE(0xFF22);
+    GATE(gb::io::NR43);
     ch4_.load_nr43(v);
-    apply_read_mask(0xFF22, v);
+    apply_read_mask(gb::io::NR43, v);
 }
 
 void apu::on_nr44(std::uint8_t v) {
-    GATE(0xFF23);
+    GATE(gb::io::NR44);
     const bool nclk = next_step_clocks_length();
     if (ch4_.load_nr44(v, nclk))
         ch4_.trigger(nclk);
-    apply_read_mask(0xFF23, v);
+    apply_read_mask(gb::io::NR44, v);
 }
 
 void apu::on_nr50(std::uint8_t v) {
-    GATE(0xFF24);
-    apply_read_mask(0xFF24, v);
+    GATE(gb::io::NR50);
+    apply_read_mask(gb::io::NR50, v);
 }
 
 void apu::on_nr51(std::uint8_t v) {
-    GATE(0xFF25);
-    apply_read_mask(0xFF25, v);
+    GATE(gb::io::NR51);
+    apply_read_mask(gb::io::NR51, v);
 }
 
 #undef GATE
@@ -645,11 +648,11 @@ void apu::power_off() {
     ch3_.length = ch3_len;
     ch4_.length = ch4_len;
 
-    // Wipe NR10..NR25 (logical value = 0) but leave the read-mask bits set
+    // Wipe NR10..NR51 (logical value = 0) but leave the read-mask bits set
     // so reads after power-off still return the canonical "mostly 1s" byte
-    // for each address. Wave RAM ($FF30-$FF3F) is preserved.
-    for (std::uint16_t a = 0xFF10; a <= 0xFF25; ++a) {
-        mmu_.mmio[a - 0xFF00] = READ_MASKS[a - 0xFF10];
+    // for each address. Wave RAM is preserved.
+    for (std::uint16_t a = gb::io::NR10; a <= gb::io::NR51; ++a) {
+        mmu_.mmio[gb::io_offset(a)] = READ_MASKS[a - gb::io::NR10];
     }
     // Hold the frame sequencer in reset while powered off. Resumes from
     // step 0 on the next power-on.
@@ -659,7 +662,7 @@ void apu::power_off() {
 }
 
 void apu::apply_read_mask(std::uint16_t addr, std::uint8_t v) {
-    mmu_.mmio[addr - 0xFF00] = v | READ_MASKS[addr - 0xFF10];
+    mmu_.mmio[gb::io_offset(addr)] = v | READ_MASKS[addr - gb::io::NR10];
 }
 
 void apu::refresh_nr52_status() {
@@ -722,8 +725,8 @@ void apu::step(std::uint32_t cycles) {
     advance_frame_sequencer(cycles);
     ch1_sq_.tick_frequency(cycles);
     ch2_.tick_frequency(cycles);
-    // CH3 reads its waveform directly from MMU-backed wave RAM at $FF30.
-    ch3_.tick_frequency(cycles, &mmu_.mmio[0xFF30 - 0xFF00]);
+    // CH3 reads its waveform directly from MMU-backed wave RAM.
+    ch3_.tick_frequency(cycles, &mmu_.mmio[gb::io_offset(gb::io::WAVE_RAM_BASE)]);
     ch4_.tick_frequency(cycles);
 
     // Keep NR52's read-back channel-enabled bits in sync so ROMs polling
@@ -731,8 +734,8 @@ void apu::step(std::uint32_t cycles) {
     refresh_nr52_status();
 
     sample_acc_ += static_cast<std::uint64_t>(cycles) * SAMPLE_RATE;
-    while (sample_acc_ >= CPU_HZ) {
-        sample_acc_ -= CPU_HZ;
+    while (sample_acc_ >= gb::CPU_HZ) {
+        sample_acc_ -= gb::CPU_HZ;
         emit_sample();
     }
 }

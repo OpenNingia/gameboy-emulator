@@ -1,25 +1,26 @@
+#include <gb_layout.h>
 #include <mmu.h>
 
 gbemu::mmu::mmu() {
-    // Boot ROM disable lives in MMU itself: writing nonzero to 0xFF50 unmaps
-    // the BIOS from 0x0000-0x00FF. On DMG this is one-shot until reset.
-    add_mmio_write_handler(0xFF50, [this](std::uint8_t v) {
+    // Boot ROM disable lives in MMU itself: writing nonzero to BOOT_OFF unmaps
+    // the BIOS from $0000-$00FF. On DMG this is one-shot until reset.
+    add_mmio_write_handler(gb::io::BOOT_OFF, [this](std::uint8_t v) {
         if (v != 0)
             bios_accessible = false;
     });
 
     // CGB-only registers — on DMG these read back as open-bus 0xFF.  Blargg's
-    // cpu_instrs runtime probes KEY1 ($FF4D) in cpu_fast to decide whether the
-    // CPU is already in double-speed mode; without 0xFF here the probe falls
-    // through to a STOP that would otherwise lock up the test on DMG.
+    // cpu_instrs runtime probes KEY1 in cpu_fast to decide whether the CPU is
+    // already in double-speed mode; without 0xFF here the probe falls through
+    // to a STOP that would otherwise lock up the test on DMG.
     // TODO(CGB): when CGB support is added this must become 0x7E on CGB, and
     // KEY1 writes must respect bit 0 (prepare speed switch) being the only
     // writable bit.
-    mmio[0xFF4D - 0xFF00] = 0xFF;
+    mmio[gb::io_offset(gb::io::KEY1)] = gb::OPEN_BUS;
 }
 
 void gbemu::mmu::add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
-    mmio_write_handlers[addr - 0xFF00].push_back(std::move(fn));
+    mmio_write_handlers[gb::io_offset(addr)].push_back(std::move(fn));
 }
 
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
@@ -32,7 +33,7 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
                 return bios[addr];
             }
 
-            return cart ? cart->read(addr) : std::uint8_t{0xFF};
+            return cart ? cart->read(addr) : gb::OPEN_BUS;
         }
             // cartridge ROM (bank 0 fixed slot)
         case 0x1000:
@@ -43,51 +44,51 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
         case 0x5000:
         case 0x6000:
         case 0x7000:
-            return cart ? cart->read(addr) : std::uint8_t{0xFF};
+            return cart ? cart->read(addr) : gb::OPEN_BUS;
 
             // gpu vram
         case 0x8000:
         case 0x9000:
-            return vram[addr - 0x8000];
+            return vram[addr - gb::VRAM_BASE];
 
             // cartridge external ram
         case 0xA000:
         case 0xB000:
-            return cart ? cart->read(addr) : std::uint8_t{0xFF};
+            return cart ? cart->read(addr) : gb::OPEN_BUS;
 
             // working ram
         case 0xC000:
         case 0xD000:
-            return wram[addr - 0xC000];
+            return wram[addr - gb::WRAM_BASE];
 
             // echo ram
         case 0xE000:
-            return wram[addr - 0xE000];
+            return wram[addr - gb::ECHO_BASE];
 
         case 0xF000:
             // echo ram
-            if (addr < 0xFE00)
-                return wram[addr - 0xE000];
+            if (addr < gb::OAM_BASE)
+                return wram[addr - gb::ECHO_BASE];
             // sprite ram
-            if (addr < 0xFEA0)
-                return sram[addr - 0xFE00];
+            if (addr < gb::OAM_BASE + gb::OAM_TOTAL_BYTES)
+                return sram[addr - gb::OAM_BASE];
             // black hole
-            if (addr < 0xFF00)
+            if (addr < gb::io::BASE)
                 return 0;
             // memory mapped i/o
-            if (addr < 0xFF80) {
-                auto v = mmio[addr - 0xFF00];
-                // $FF0F (IF) — bits 5-7 are unimplemented in hardware and
-                // read back as 1 (open-bus / pull-up).  Blargg's halt_bug.gb
-                // depends on this: it prints IF after the test and the CRC
-                // includes those high bits.  Without this mask we produce
-                // e.g. "01 10 11 ..." where a real DMG shows "01 10 F1 ...".
-                if (addr == 0xFF0F)
-                    return v | 0xE0;
+            if (addr < gb::HRAM_BASE) {
+                auto v = mmio[gb::io_offset(addr)];
+                // IF ($FF0F) bits 5-7 are unimplemented in hardware and read
+                // back as 1 (open-bus / pull-up). Blargg's halt_bug.gb depends
+                // on this: it prints IF after the test and the CRC includes
+                // those high bits. Without the mask we'd produce e.g.
+                // "01 10 11 ..." where a real DMG shows "01 10 F1 ...".
+                if (addr == gb::io::IF)
+                    return static_cast<std::uint8_t>(v | gb::irq_bit::if_unimpl_high);
                 return v;
             }
-            // zram
-            return zram[addr - 0xFF80];
+            // zram (HRAM)
+            return zram[addr - gb::HRAM_BASE];
         default:
             throw gbemu_exception{"Invalid address!"};
     }
@@ -115,7 +116,7 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
             // gpu vram
         case 0x8000:
         case 0x9000:
-            vram[addr - 0x8000] = val;
+            vram[addr - gb::VRAM_BASE] = val;
             break;
 
             // cartridge external ram
@@ -128,37 +129,38 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
             // working ram
         case 0xC000:
         case 0xD000:
-            wram[addr - 0xC000] = val;
+            wram[addr - gb::WRAM_BASE] = val;
             break;
 
             // echo ram
         case 0xE000:
-            wram[addr - 0xE000] = val;
+            wram[addr - gb::ECHO_BASE] = val;
             break;
 
         case 0xF000:
             // echo ram
-            if (addr < 0xFE00)
-                wram[addr - 0xE000] = val;
+            if (addr < gb::OAM_BASE)
+                wram[addr - gb::ECHO_BASE] = val;
             // sprite ram
-            else if (addr < 0xFEA0)
-                sram[addr - 0xFE00] = val;
+            else if (addr < gb::OAM_BASE + gb::OAM_TOTAL_BYTES)
+                sram[addr - gb::OAM_BASE] = val;
             // "Not Usable" region $FEA0-$FEFF — on real DMG writes here are
             // silently ignored (modulo specific OAM-corruption side effects we
             // don't model). Several commercial ROMs (e.g. Tetris) hit it
             // during normal execution, so throwing is wrong: drop the write.
-            else if (addr < 0xFF00)
+            else if (addr < gb::io::BASE)
                 break;
             // memory mapped i/o
-            else if (addr < 0xFF80) {
-                mmio[addr - 0xFF00] = val;
-                for (auto& fn : mmio_write_handlers[addr - 0xFF00]) {
+            else if (addr < gb::HRAM_BASE) {
+                const auto off = gb::io_offset(addr);
+                mmio[off] = val;
+                for (auto& fn : mmio_write_handlers[off]) {
                     fn(val);
                 }
             }
-            // zram
+            // zram (HRAM)
             else
-                zram[addr - 0xFF80] = val;
+                zram[addr - gb::HRAM_BASE] = val;
             break;
         default:
             throw gbemu_exception{"Invalid address!"};

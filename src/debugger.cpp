@@ -7,11 +7,13 @@
 #include <core.h>
 #include <debugger.h>
 #include <disasm.h>
+#include <gb_layout.h>
 
 using namespace gbemu;
 
 debugger::debugger(core& c) : core_(c) {
-    c.mmu.add_mmio_write_handler(0xFF02, [this](std::uint8_t v) {
+    c.mmu.add_mmio_write_handler(gb::io::SC, [this](std::uint8_t v) {
+        // SC = 0x81: bit 7 = transfer start, bit 0 = internal clock source.
         if (v == 0x81) {
             serial_buf_.push_back(static_cast<char>(core_.mmu.hwr_sb()));
         }

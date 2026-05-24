@@ -9,6 +9,7 @@
 #include <core.h>
 #include <debugger.h>
 #include <exc.hpp>
+#include <gb_layout.h>
 #include <joypad.h>
 #include <ui.h>
 
@@ -241,7 +242,8 @@ void Application::run() {
     if (!renderer)
         throw gbemu::gbemu_exception{"SDL Renderer creation failed!"};
 
-    auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 160, 144);
+    auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, gb::LCD_WIDTH,
+                                     gb::LCD_HEIGHT);
 
     auto* ui_ctx = gbemu::ui::init(window, renderer, debugger, core);
 
@@ -320,11 +322,9 @@ void Application::run() {
         // `run_until(none)` so that breakpoints and watchpoints set via the UI
         // actually fire — they auto-pause the debugger when they hit.
         if (!debugger.is_paused()) {
-            // 4.19 MHz / 60 fps ≈ 69905 T-cycles per frame
-            constexpr std::uint64_t CYCLES_PER_FRAME = 70224; // valore esatto DMG
             gbemu::stop_condition cond{};
             cond.kind = gbemu::stop_kind::none;
-            const auto rr = debugger.run_until(cond, CYCLES_PER_FRAME);
+            const auto rr = debugger.run_until(cond, gb::CYCLES_PER_FRAME);
             if (rr.outcome == gbemu::run_outcome::breakpoint || rr.outcome == gbemu::run_outcome::watchpoint) {
                 debugger.pause();
             }
@@ -333,7 +333,7 @@ void Application::run() {
         // Refresh the GB framebuffer texture on every new frame ready edge.
         // When paused the texture keeps showing the last produced frame.
         if (core.ppu.consume_frame_ready()) {
-            SDL_UpdateTexture(texture, nullptr, core.ppu.framebuffer(), 160 * 4);
+            SDL_UpdateTexture(texture, nullptr, core.ppu.framebuffer(), gb::LCD_WIDTH * 4);
         }
 
         SDL_RenderClear(renderer);
