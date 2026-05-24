@@ -134,9 +134,12 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
             // sprite ram
             else if (addr < 0xFEA0)
                 sram[addr - 0xFE00] = val;
-            // black hole
+            // "Not Usable" region $FEA0-$FEFF — on real DMG writes here are
+            // silently ignored (modulo specific OAM-corruption side effects we
+            // don't model). Several commercial ROMs (e.g. Tetris) hit it
+            // during normal execution, so throwing is wrong: drop the write.
             else if (addr < 0xFF00)
-                throw gbemu_exception{"Not addressable!"};
+                break;
             // memory mapped i/o
             else if (addr < 0xFF80) {
                 mmio[addr - 0xFF00] = val;

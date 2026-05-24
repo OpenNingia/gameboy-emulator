@@ -14,9 +14,7 @@ namespace gbemu {
     struct core;
 
     // Watchpoint: range [addr, addr+len) sampled after every step.  When any
-    // byte differs from the last sample, the watchpoint fires.  Read-side
-    // watching would require instrumenting reads — not in PR2; for now both
-    // "write" and "change" semantics collapse to "post-step change detection".
+    // byte differs from the last sample, the watchpoint fires
     struct watchpoint {
         std::uint16_t addr;
         std::uint16_t len;
@@ -66,8 +64,7 @@ namespace gbemu {
         std::uint64_t instructions{0};
     };
 
-    // Debugger skeleton shared by the ImGui panels (PR3+) and the headless
-    // script runner (PR2).
+    // Debugger skeleton shared by the ImGui panels and the headless script runner
     //
     // The debugger owns a serial ring buffer fed by a handler it installs on
     // $FF02 in its constructor; both the headless `serial-dump` command and

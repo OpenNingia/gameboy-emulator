@@ -1,5 +1,3 @@
-// ImGui scaffolding (docking branch) + the full PR3-PR5 panel set.
-//
 // Panels: Display, CPU, Disassembly, Memory (per-region tabs via the vendored
 // imgui_memory_editor.h), Breakpoints + Watchpoints, PPU (LCDC/STAT decode +
 // palette swatches + VRAM tile viewer + BG tile-map viewer), MBC (banking
@@ -233,7 +231,7 @@ namespace gbemu::ui {
                 (void)dbg.step();
             ImGui::SameLine();
             if (ImGui::Button("Step Over")) {
-                // PR3 stub: identical to Step.  Proper step-over (run to the
+                // Stub: identical to Step.  Proper step-over (run to the
                 // instruction after a CALL/RST) needs disassembler-length
                 // awareness — landing in a follow-up.
                 (void)dbg.step();

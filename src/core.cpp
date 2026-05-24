@@ -60,6 +60,7 @@ std::uint32_t core::step() {
         }
 
         ppu.step(total);
+        apu.step(total); // step the APU with the same cadence as the PPU so that audio timing tracks video timing
         timer.step(total);
 
         total_cycles += total;

@@ -20,7 +20,12 @@ void timer::step(std::uint32_t cycles) {
     div_cnt += cycles;
     while (div_cnt >= 256) {
         div_cnt -= 256;
-        mmu_.hwr_div(mmu_.hwr_div() + 1);
+        // Direct mmio update — bypasses write_u8 so registered $FF04 handlers
+        // (which model the "ROM writes DIV → reset to 0" hardware behavior)
+        // don't see every internal timer tick as a ROM-driven write. Before
+        // this, our own div_trigger handler was zeroing mmio[4] on every
+        // increment and DIV never actually counted.
+        mmu_.mmio[4]++;
     }
 
     auto tac = mmu_.hwr_tac();

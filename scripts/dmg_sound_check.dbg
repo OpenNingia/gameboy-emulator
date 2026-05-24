@@ -1,0 +1,27 @@
+# Run Blargg's dmg_sound.gb headless and dump the final result.
+#
+# The test ROM mirrors its text output and final status into cartridge RAM
+# starting at $A000 (signature $DE,$B0,$61 at $A001-$A003, zero-terminated
+# string at $A004).  We also capture the serial trace, which Blargg drives
+# concurrently.
+#
+# Usage:
+#   .\GbEmu.exe --headless --script ..\..\scripts\dmg_sound_check.dbg \
+#       --out result.txt "C:\code\emu\gb-test-roms-master\dmg_sound\dmg_sound.gb"
+
+echo === Pre-run state ===
+dump mbc
+
+echo === Running (cap 800M cycles ~= 190s emulated) ===
+run-until serial-match "Passed" max-cycles 800000000
+
+echo === Final serial buffer ===
+serial-dump
+
+echo === $A000 header (status + signature) ===
+dump mem 0xA000 8
+
+echo === $A004 text (zero-terminated, dump 512 bytes) ===
+dump mem 0xA004 512
+
+exit

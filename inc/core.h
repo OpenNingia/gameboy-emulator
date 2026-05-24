@@ -17,6 +17,7 @@
 #    include <registers.h>
 #    include <serial.h>
 #    include <timer.h>
+#    include <apu.h>
 
 namespace gbemu {
 
@@ -30,6 +31,7 @@ namespace gbemu {
               serial(mmu),
               dma(mmu),
               timer(mmu),
+              apu(mmu),
               pc_ring(),
               pc_idx(0) {}
 
@@ -41,6 +43,7 @@ namespace gbemu {
         serial serial;
         dma dma;
         timer timer;
+        apu apu;
 
         std::array<std::uint16_t, 256> pc_ring;
         std::size_t pc_idx;

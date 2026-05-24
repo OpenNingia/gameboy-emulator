@@ -4,6 +4,8 @@
 
 #include <SDL2/SDL.h>
 #include <app.h>
+#include <apu.h>
+#include <audio_ring_buffer.hpp>
 #include <core.h>
 #include <debugger.h>
 #include <exc.hpp>
@@ -44,6 +46,22 @@ namespace {
         if (f)
             f << w << ' ' << h << '\n';
     }
+
+    // SDL audio callback — invoked on the SDL audio thread when the device
+    // wants more samples.  Drains stereo float frames out of the APU's ring
+    // buffer; on underrun (ring empty) the remaining slots are filled with
+    // silence so the audio device keeps consuming on schedule.
+    void SDLCALL audio_callback(void* userdata, Uint8* stream, int len) {
+        auto* ring = static_cast<gbemu::audio_ring_buffer*>(userdata);
+        auto* out = reinterpret_cast<float*>(stream);
+        const int frames = len / int(2 * sizeof(float));
+        for (int i = 0; i < frames; ++i) {
+            float l = 0.0f, r = 0.0f;
+            ring->pop(l, r); // pop() leaves l/r at 0 on underrun
+            out[i * 2] = l;
+            out[i * 2 + 1] = r;
+        }
+    }
 } // namespace
 
 Application::Application() : cfg("cfg/gbemu.conf") {
@@ -81,7 +99,7 @@ void Application::run() {
     // stdout-echo handler was retired in PR5.
 
     // load bios
-    if (!cfg.bios.path.empty()) {
+    if (!cfg.bios.path.empty() && !cfg.bios.skip) {
         load_bios(core, cfg.bios.path);
     }
 
@@ -94,8 +112,35 @@ void Application::run() {
         // No window, no renderer, no event loop — just run the script and
         // return.  PPU keeps running internally; its framebuffer is just
         // never presented, so VBlank edges remain observable by run-until.
+        // APU output stays disabled in headless mode: nobody is draining the
+        // ring buffer, and enabling push would deadlock at the first full
+        // buffer.  Sample-pacing counters still advance, so cycle accounting
+        // is unaffected.
         gbemu::run_script(debugger, script_path_, output_path_);
         return;
+    }
+
+    // Open the audio device once the core (and therefore the APU's ring
+    // buffer) exists.  Format is 48 kHz / F32 / stereo to match
+    // gbemu::apu::SAMPLE_RATE.  `samples=1024` is the per-callback frame count
+    // — small enough to keep latency low (~21 ms at 48 kHz) without thrashing
+    // the audio thread.  We use SDL_AUDIO_ALLOW_FREQUENCY_CHANGE=0 (default)
+    // so SDL is forced to give us exactly the rate we asked for; otherwise
+    // the APU's sample cadence would drift from the actual device rate.
+    SDL_AudioDeviceID audio_dev = 0;
+    {
+        SDL_AudioSpec want{}, have{};
+        want.freq = gbemu::apu::SAMPLE_RATE;
+        want.format = AUDIO_F32SYS;
+        want.channels = 2;
+        want.samples = 1024;
+        want.callback = audio_callback;
+        want.userdata = &core.apu.output();
+        audio_dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+        if (audio_dev == 0)
+            throw gbemu::gbemu_exception{"SDL_OpenAudioDevice failed!"};
+        core.apu.enable_output(true);
+        SDL_PauseAudioDevice(audio_dev, 0); // start the audio thread
     }
 
     // Restore last-used SDL window dimensions if available; otherwise fall
@@ -175,6 +220,17 @@ void Application::run() {
         int final_w = 0, final_h = 0;
         SDL_GetWindowSize(window, &final_w, &final_h);
         save_window_state(final_w, final_h);
+    }
+
+    // Close the audio device before the core (and the ring buffer it owns)
+    // goes out of scope, otherwise the audio thread could fire a final
+    // callback into freed memory.  enable_output(false) belt-and-braces
+    // prevents any in-flight emit_sample from blocking on a ring nobody is
+    // draining anymore.
+    if (audio_dev) {
+        SDL_PauseAudioDevice(audio_dev, 1);
+        core.apu.enable_output(false);
+        SDL_CloseAudioDevice(audio_dev);
     }
 
     gbemu::ui::shutdown(ui_ctx);

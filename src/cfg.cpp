@@ -15,4 +15,5 @@ config::config(std::string const& file_path) {
 
     app_rom.lookupValue("path", rom.path);
     app_bios.lookupValue("path", bios.path);
+    app_bios.lookupValue("skip", bios.skip);
 }

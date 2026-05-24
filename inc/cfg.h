@@ -12,6 +12,7 @@ namespace gbemu {
 
         struct bioscfg {
             std::string path;
+            bool skip;
         } bios;
     };
 } // namespace gbemu
