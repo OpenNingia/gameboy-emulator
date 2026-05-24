@@ -523,8 +523,21 @@ e propagarlo nelle parti pubbliche del codebase.
 - Non in collisione con marchi Nintendo / "Game Boy" / "GB".
 - Idealmente breve (≤ 8 char), pronunciabile, dominio plausibilmente
   disponibile.
-- Candidati TBD — la scelta del nome è la parte lenta, il rename meccanico
-  è banale una volta deciso.
+- Candidati proposti (verificati su emulator-zone, Emulation General Wiki,
+  GitHub topic `gameboy-emulator`, awesome-gbdev), in ordine decrescente
+  di pulizia:
+  - **BoringBoy** — clean: nessuna collisione né come emulatore né in altri
+    settori rilevanti.
+  - **RageBoy** — nessun emulatore con questo nome; resta collisione con il
+    meme "RageGuy / FFFFFFUUUUUU" (settore diverso, accettabile).
+  - **StarBoy** — nessun emulatore con questo nome, ma c'è un gioco indie
+    pixel-art "StarBoy" su itch.io / Steam (mrkdji) + brano di The Weeknd.
+    Stesso ecosistema retro-gaming → rischio confusione medio.
+  - **BoyBoy** — nessun emulatore esattamente con questo nome, ma esiste
+    **My Boy!** (emulatore GBA Android molto popolare). Fonetica/dominio
+    troppo vicini → da escludere.
+- La scelta del nome è la parte lenta, il rename meccanico è banale una
+  volta deciso.
 
 **Superfici pubbliche da rinominare** (path concreti, da grep su `GbEmu` /
 `gbemu`):

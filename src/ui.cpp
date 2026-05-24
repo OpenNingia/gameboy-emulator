@@ -11,7 +11,9 @@
 #include <cfloat>
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #include <SDL2/SDL.h>
 #include <core.h>
@@ -37,6 +39,10 @@ namespace gbemu::ui {
             gbemu::core* core;
             std::uint16_t base;
         };
+
+        // Persistent state files kept next to imgui.ini in CWD.
+        constexpr const char* RECENT_ROMS_FILE = "gbemu_recent.txt";
+        constexpr std::size_t MAX_RECENT_ROMS = 8;
 
     } // namespace
 
@@ -85,7 +91,36 @@ namespace gbemu::ui {
         gbemu::gfx::presenter* ppu_tiles_present{nullptr};
         gbemu::gfx::presenter* ppu_bgmap_present{nullptr};
         int ppu_bgmap_idx{0}; // 0 → $9800, 1 → $9C00
+
+        // Menu-bar / popup state.
+        host_actions actions{};
+        std::vector<std::string> recent_roms{};
+        bool show_about_popup{false};
     };
+
+    namespace {
+
+        // Recents persistence: one path per line, MRU first. Missing file is
+        // not an error (first launch). Save is best-effort.
+        void load_recent_roms(context& c) {
+            c.recent_roms.clear();
+            std::ifstream f(RECENT_ROMS_FILE);
+            std::string line;
+            while (std::getline(f, line) && c.recent_roms.size() < MAX_RECENT_ROMS) {
+                if (!line.empty())
+                    c.recent_roms.push_back(line);
+            }
+        }
+
+        void save_recent_roms(const context& c) {
+            std::ofstream f(RECENT_ROMS_FILE);
+            if (!f)
+                return;
+            for (const auto& p : c.recent_roms)
+                f << p << '\n';
+        }
+
+    } // namespace
 
     namespace {
 
@@ -135,6 +170,140 @@ namespace gbemu::ui {
             ImGui::DockBuilderFinish(dockspace_id);
         }
 
+        void draw_menu_bar(context& c) {
+            auto& dbg = *c.dbg;
+
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Load ROM...", "Ctrl+O"))
+                    c.actions.load_rom_dialog_requested = true;
+
+                // Recent ROMs submenu — disabled (and shows "(none)") when
+                // the MRU list is empty so the user gets the feedback that
+                // it exists but has nothing to offer yet.
+                if (ImGui::BeginMenu("Recent ROMs", !c.recent_roms.empty())) {
+                    for (std::size_t i = 0; i < c.recent_roms.size(); ++i) {
+                        // PushID guards against duplicate basenames showing
+                        // up in the list (rare but possible across folders).
+                        ImGui::PushID(static_cast<int>(i));
+                        if (ImGui::MenuItem(c.recent_roms[i].c_str()))
+                            c.actions.pending_rom_load = c.recent_roms[i];
+                        ImGui::PopID();
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Clear list")) {
+                        c.recent_roms.clear();
+                        save_recent_roms(c);
+                    }
+                    ImGui::EndMenu();
+                }
+
+                ImGui::Separator();
+
+                if (ImGui::MenuItem("Exit", "Alt+F4"))
+                    c.actions.quit_requested = true;
+
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Emulation")) {
+                const bool paused = dbg.is_paused();
+                if (paused) {
+                    if (ImGui::MenuItem("Resume", "Space"))
+                        dbg.resume();
+                } else {
+                    if (ImGui::MenuItem("Pause", "Space"))
+                        dbg.pause();
+                }
+                if (ImGui::MenuItem("Reset", "Ctrl+R"))
+                    dbg.reset();
+
+                // Speed and Save/Load State live behind TODO §3 and §2
+                // respectively.  Surfaced as disabled submenus so users see
+                // the placeholder rather than wondering where these features
+                // will land.
+                if (ImGui::BeginMenu("Speed", false)) {
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("Save State", false)) {
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("Load State", false)) {
+                    ImGui::EndMenu();
+                }
+
+                ImGui::Separator();
+
+                const bool is_fs = c.window && (SDL_GetWindowFlags(c.window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+                if (ImGui::MenuItem("Toggle Fullscreen", "F11", is_fs)) {
+                    SDL_SetWindowFullscreen(c.window, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+                }
+
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("View")) {
+                ImGui::MenuItem("Display", nullptr, &c.show_display);
+                ImGui::MenuItem("CPU", nullptr, &c.show_cpu);
+                ImGui::MenuItem("Disassembly", nullptr, &c.show_disasm);
+                ImGui::MenuItem("Memory", nullptr, &c.show_memory);
+                ImGui::MenuItem("Breakpoints", nullptr, &c.show_breakpoints);
+                ImGui::MenuItem("PPU", nullptr, &c.show_ppu);
+                ImGui::MenuItem("MBC", nullptr, &c.show_mbc);
+                ImGui::MenuItem("Serial", nullptr, &c.show_serial);
+                ImGui::MenuItem("PC ring", nullptr, &c.show_pc_ring);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Reset layout"))
+                    c.layout_reset_requested = true;
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("About")) {
+                if (ImGui::MenuItem("About GbEmu..."))
+                    c.show_about_popup = true;
+                ImGui::EndMenu();
+            }
+        }
+
+        void draw_about_popup(context& c) {
+            // Opening must happen *inside* the BeginPopupModal's parent
+            // window scope, hence the two-step "request flag → OpenPopup
+            // here" dance.
+            if (c.show_about_popup) {
+                c.show_about_popup = false;
+                ImGui::OpenPopup("About GbEmu");
+            }
+
+            // Centre the popup on the viewport — auto-resize keeps it tight
+            // around the content regardless of font scaling.
+            const ImVec2 centre = ImGui::GetMainViewport()->GetCenter();
+            ImGui::SetNextWindowPos(centre, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+            if (ImGui::BeginPopupModal("About GbEmu", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextUnformatted("GbEmu");
+                ImGui::TextDisabled("Game Boy emulator");
+                ImGui::Separator();
+                ImGui::Text("Version    0.1.0-dev");
+                ImGui::Text("Built      %s %s", __DATE__, __TIME__);
+                SDL_version sdlv;
+                SDL_GetVersion(&sdlv);
+                ImGui::Text("SDL2       %u.%u.%u", sdlv.major, sdlv.minor, sdlv.patch);
+                ImGui::Text("ImGui      %s", ImGui::GetVersion());
+                ImGui::Separator();
+
+                if (ImGui::Button("Copy version info")) {
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf), "GbEmu 0.1.0-dev | SDL2 %u.%u.%u | ImGui %s | built %s %s",
+                                  sdlv.major, sdlv.minor, sdlv.patch, ImGui::GetVersion(), __DATE__, __TIME__);
+                    ImGui::SetClipboardText(buf);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("OK"))
+                    ImGui::CloseCurrentPopup();
+
+                ImGui::EndPopup();
+            }
+        }
+
         void setup_dockspace_and_menubar(context& c) {
             const ImGuiViewport* vp = ImGui::GetMainViewport();
             ImGui::SetNextWindowPos(vp->WorkPos);
@@ -165,23 +334,13 @@ namespace gbemu::ui {
             ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
 
             if (ImGui::BeginMenuBar()) {
-                if (ImGui::BeginMenu("View")) {
-                    ImGui::MenuItem("Display", nullptr, &c.show_display);
-                    ImGui::MenuItem("CPU", nullptr, &c.show_cpu);
-                    ImGui::MenuItem("Disassembly", nullptr, &c.show_disasm);
-                    ImGui::MenuItem("Memory", nullptr, &c.show_memory);
-                    ImGui::MenuItem("Breakpoints", nullptr, &c.show_breakpoints);
-                    ImGui::MenuItem("PPU", nullptr, &c.show_ppu);
-                    ImGui::MenuItem("MBC", nullptr, &c.show_mbc);
-                    ImGui::MenuItem("Serial", nullptr, &c.show_serial);
-                    ImGui::MenuItem("PC ring", nullptr, &c.show_pc_ring);
-                    ImGui::Separator();
-                    if (ImGui::MenuItem("Reset layout"))
-                        c.layout_reset_requested = true;
-                    ImGui::EndMenu();
-                }
+                draw_menu_bar(c);
                 ImGui::EndMenuBar();
             }
+
+            // About popup must be drawn inside the host window scope so it
+            // inherits the viewport — keep it adjacent to the menu bar.
+            draw_about_popup(c);
 
             ImGui::End();
         }
@@ -789,7 +948,24 @@ namespace gbemu::ui {
         ctx->dbg = &dbg;
         ctx->core = &c;
         ctx->display_present = gbemu::gfx::presenter_create(backend, gb::LCD_WIDTH, gb::LCD_HEIGHT);
+        load_recent_roms(*ctx);
         return ctx;
+    }
+
+    host_actions& actions(context* ctx) {
+        return ctx->actions;
+    }
+
+    void add_recent_rom(context* ctx, const std::string& path) {
+        if (!ctx || path.empty())
+            return;
+        auto& rec = ctx->recent_roms;
+        // Dedup first so the moved-to-front entry doesn't leave a duplicate.
+        rec.erase(std::remove(rec.begin(), rec.end(), path), rec.end());
+        rec.insert(rec.begin(), path);
+        if (rec.size() > MAX_RECENT_ROMS)
+            rec.resize(MAX_RECENT_ROMS);
+        save_recent_roms(*ctx);
     }
 
     void shutdown(context* ctx) {

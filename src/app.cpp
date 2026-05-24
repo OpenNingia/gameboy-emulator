@@ -1,11 +1,12 @@
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
-#include <iostream>
 
 #include <SDL2/SDL.h>
 #include <app.h>
 #include <apu.h>
 #include <audio_ring_buffer.hpp>
+#include <card.h>
 #include <core.h>
 #include <debugger.h>
 #include <exc.hpp>
@@ -15,6 +16,14 @@
 #include <log.h>
 #include <paths.h>
 #include <ui.h>
+
+#ifdef _WIN32
+#    include <SDL2/SDL_syswm.h>
+#    include <windows.h>
+// Pulled in after windows.h so MAX_PATH / OPENFILENAMEW are visible.
+#    include <commdlg.h>
+#    pragma comment(lib, "comdlg32.lib")
+#endif
 
 namespace gbemu {
     // Defined in src/script_runner.cpp.
@@ -66,6 +75,66 @@ namespace {
             out[i * 2] = l;
             out[i * 2 + 1] = r;
         }
+    }
+
+    // Open a native "Load ROM" file dialog parented to `parent`. Returns the
+    // picked path (UTF-8) or "" on cancel.  The dialog runs its own message
+    // pump, so the SDL window freezes for the duration — acceptable for a
+    // user-initiated modal action.  OFN_NOCHANGEDIR prevents the dialog from
+    // mutating the process CWD (we rely on it for imgui.ini / window state).
+    std::string open_rom_dialog(SDL_Window* parent, const std::string& initial_dir) {
+#ifdef _WIN32
+        HWND hwnd = nullptr;
+        SDL_SysWMinfo wmi;
+        SDL_VERSION(&wmi.version);
+        if (parent && SDL_GetWindowWMInfo(parent, &wmi))
+            hwnd = wmi.info.win.window;
+
+        // Convert initial_dir (UTF-8) to wide for the dialog, then flip any
+        // forward slashes to backslashes — Win32 common dialogs silently
+        // ignore lpstrInitialDir when it contains `/`, and the repo-wide
+        // convention is to emit POSIX-style separators (see paths::to_generic).
+        std::wstring wdir;
+        if (!initial_dir.empty()) {
+            const int len = MultiByteToWideChar(CP_UTF8, 0, initial_dir.c_str(), -1, nullptr, 0);
+            if (len > 1) {
+                wdir.resize(static_cast<std::size_t>(len - 1));
+                MultiByteToWideChar(CP_UTF8, 0, initial_dir.c_str(), -1, wdir.data(), len);
+                for (auto& ch : wdir)
+                    if (ch == L'/')
+                        ch = L'\\';
+            }
+        }
+
+        wchar_t path[MAX_PATH] = {0};
+        OPENFILENAMEW ofn{};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = hwnd;
+        ofn.lpstrFilter = L"Game Boy ROMs (*.gb;*.gbc)\0*.gb;*.gbc\0All files (*.*)\0*.*\0";
+        ofn.lpstrFile = path;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrTitle = L"Load ROM";
+        ofn.lpstrInitialDir = wdir.empty() ? nullptr : wdir.c_str();
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+        if (!GetOpenFileNameW(&ofn))
+            return {};
+
+        const int u8len = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+        if (u8len <= 1)
+            return {};
+        std::string result(static_cast<std::size_t>(u8len - 1), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, path, -1, result.data(), u8len, nullptr, nullptr);
+        // Round-trip through filesystem::path so the returned UTF-8 picks up
+        // forward-slash separators — repo-wide convention (see memory note
+        // "Forward slashes everywhere").
+        return std::filesystem::path{result}.generic_string();
+#else
+        (void)parent;
+        (void)initial_dir;
+        // Non-Windows builds: TODO when nfd / tinyfiledialogs lands in vcpkg.json.
+        return {};
+#endif
     }
 } // namespace
 
@@ -298,15 +367,26 @@ void Application::run() {
                 quit = true;
                 break;
             } else if (e.type == SDL_KEYDOWN && !imgui_captured) {
-                // F12: diagnostic dump of registers + recent PCs.  Routed
-                // through the debugger so the format matches the headless
-                // script runner.
-                if (e.key.keysym.sym == SDLK_F12) {
-                    std::cout << "=== regs @cycle=" << debugger.total_cycles() << " ===\n";
-                    debugger.dump_regs(std::cout);
-                    std::cout << "=== pc-ring 32 ===\n";
-                    debugger.dump_pc_ring(std::cout, 32);
-                    std::cout.flush();
+                // Menu-bar hotkeys.  Mirror the shortcut hints rendered in
+                // ui.cpp's draw_menu_bar — keep them in sync if either side
+                // changes.  Repeat-gated because they are one-shot toggles;
+                // joypad mapping below is also repeat-gated for the same
+                // reason.  None of the bound keys overlap with the joypad
+                // bindings (arrows / Z / X / Backspace / Enter), so the
+                // joypad pass-through below stays correct.
+                if (!e.key.repeat) {
+                    const auto k = e.key.keysym.sym;
+                    const bool ctrl = (e.key.keysym.mod & KMOD_CTRL) != 0;
+                    if (k == SDLK_F11) {
+                        const bool is_fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+                        SDL_SetWindowFullscreen(window, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+                    } else if (k == SDLK_SPACE) {
+                        debugger.toggle_running();
+                    } else if (ctrl && k == SDLK_r) {
+                        debugger.reset();
+                    } else if (ctrl && k == SDLK_o) {
+                        gbemu::ui::actions(ui_ctx).load_rom_dialog_requested = true;
+                    }
                 }
                 gbemu::joypad::button btn;
                 if (!e.key.repeat && map_keycode_to_button(e.key.keysym.sym, btn))
@@ -363,6 +443,42 @@ void Application::run() {
         SDL_RenderClear(renderer);
         gbemu::ui::render_frame(ui_ctx);
         SDL_RenderPresent(renderer);
+
+        // Drain UI -> Application requests after the frame is on screen so
+        // blocking ops (native file dialog) and state-mutating ones (ROM
+        // hot-swap) never run inside NewFrame/Render.  See ui::host_actions
+        // for the contract.
+        auto& acts = gbemu::ui::actions(ui_ctx);
+        if (acts.quit_requested) {
+            acts.quit_requested = false;
+            quit = true;
+        }
+        if (acts.load_rom_dialog_requested) {
+            acts.load_rom_dialog_requested = false;
+            const auto roms_dir = gbemu::paths::resolve_under(base_, cfg.paths.roms_dir);
+            auto picked = open_rom_dialog(window, roms_dir);
+            if (!picked.empty())
+                acts.pending_rom_load = std::move(picked);
+        }
+        if (!acts.pending_rom_load.empty()) {
+            auto path = std::move(acts.pending_rom_load);
+            acts.pending_rom_load.clear();
+            try {
+                gbemu::rom_file rf{};
+                rf.load_from(path);
+                core.load(rf);
+                // reset() wipes RAM / VRAM / regs and re-runs init() with the
+                // freshly attached cart in place — same path as Ctrl+R after
+                // the swap, so banking state, MBC, BIOS overlay, total cycles
+                // all land at power-on.
+                core.reset();
+                debugger.resume();
+                gbemu::ui::add_recent_rom(ui_ctx, path);
+                LOG_INFO(gbemu::log::root(), "Loaded ROM: {}", path);
+            } catch (const std::exception& e) {
+                LOG_ERROR(gbemu::log::root(), "Load ROM failed ({}): {}", path, e.what());
+            }
+        }
     }
 
     // Snapshot final window dimensions before teardown so the next launch
