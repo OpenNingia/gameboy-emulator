@@ -10,6 +10,7 @@
 #include <debugger.h>
 #include <exc.hpp>
 #include <gb_layout.h>
+#include <gfx.h>
 #include <joypad.h>
 #include <ui.h>
 
@@ -242,10 +243,16 @@ void Application::run() {
     if (!renderer)
         throw gbemu::gbemu_exception{"SDL Renderer creation failed!"};
 
-    auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, gb::LCD_WIDTH,
-                                     gb::LCD_HEIGHT);
+    // gfx::backend wraps the SDL_Renderer so the UI can spawn presenters
+    // for the GB display and the PPU panel's tile/map viewers without
+    // depending on SDL_Texture directly.  When/if an OpenGL3 backend lands,
+    // only this factory call and the imgui backend init in ui::init swap;
+    // ui.cpp stays untouched.
+    auto* gfx_backend = gbemu::gfx::sdl_backend_create(renderer);
+    if (!gfx_backend)
+        throw gbemu::gbemu_exception{"gfx backend creation failed!"};
 
-    auto* ui_ctx = gbemu::ui::init(window, renderer, debugger, core);
+    auto* ui_ctx = gbemu::ui::init(window, renderer, gfx_backend, debugger, core);
 
     // Open the first available game controller, if any. The matching
     // SDL_CONTROLLERDEVICEADDED event also fires in the main loop, so
@@ -330,14 +337,10 @@ void Application::run() {
             }
         }
 
-        // Refresh the GB framebuffer texture on every new frame ready edge.
-        // When paused the texture keeps showing the last produced frame.
-        if (core.ppu.consume_frame_ready()) {
-            SDL_UpdateTexture(texture, nullptr, core.ppu.framebuffer(), gb::LCD_WIDTH * 4);
-        }
-
+        // The PPU's frame-ready edge is now consumed inside ui::render_frame
+        // (the UI owns the display presenter and refreshes it before drawing).
         SDL_RenderClear(renderer);
-        gbemu::ui::render_frame(ui_ctx, texture);
+        gbemu::ui::render_frame(ui_ctx);
         SDL_RenderPresent(renderer);
     }
 
@@ -364,7 +367,7 @@ void Application::run() {
         SDL_GameControllerClose(controller);
 
     gbemu::ui::shutdown(ui_ctx);
-    SDL_DestroyTexture(texture);
+    gbemu::gfx::backend_destroy(gfx_backend);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
 }

@@ -18,6 +18,7 @@
 #include <debugger.h>
 #include <disasm.h>
 #include <gb_layout.h>
+#include <gfx.h>
 #include <imgui.h>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
@@ -41,8 +42,14 @@ namespace gbemu::ui {
     struct context {
         SDL_Window* window{nullptr};
         SDL_Renderer* renderer{nullptr};
+        gbemu::gfx::backend* backend{nullptr};
         gbemu::debugger* dbg{nullptr};
         gbemu::core* core{nullptr};
+
+        // Streaming presenter for the GB framebuffer shown in the Display
+        // panel.  Created eagerly in ui::init; uploaded each time the PPU
+        // signals a new frame.
+        gbemu::gfx::presenter* display_present{nullptr};
 
         // Panel visibility (driven by the View menu).
         bool show_display{true};
@@ -69,13 +76,13 @@ namespace gbemu::ui {
         char wp_input_buf[8]{};
         int wp_len_input{1};
 
-        // PPU panel: streaming textures for the VRAM tile grid (128x192 px,
-        // 16x24 tiles of 8x8) and the BG tile map viewer (256x256 px).  Both
-        // are created lazily on first use and recycled across frames.  The
-        // map_idx flag selects which of the two BG maps to view ($9800 vs
-        // $9C00); independent of LCDC.3 so the user can inspect either.
-        SDL_Texture* ppu_tiles_tex{nullptr};
-        SDL_Texture* ppu_bgmap_tex{nullptr};
+        // PPU panel: streaming presenters for the VRAM tile grid (128x192
+        // px, 16x24 tiles of 8x8) and the BG tile map viewer (256x256 px).
+        // Both are created lazily on first use and recycled across frames.
+        // The map_idx flag selects which of the two BG maps to view ($9800
+        // vs $9C00); independent of LCDC.3 so the user can inspect either.
+        gbemu::gfx::presenter* ppu_tiles_present{nullptr};
+        gbemu::gfx::presenter* ppu_bgmap_present{nullptr};
         int ppu_bgmap_idx{0}; // 0 → $9800, 1 → $9C00
     };
 
@@ -178,7 +185,7 @@ namespace gbemu::ui {
             ImGui::End();
         }
 
-        void draw_display_panel(context& c, SDL_Texture* gb_texture) {
+        void draw_display_panel(context& c) {
             if (!c.show_display)
                 return;
             if (!ImGui::Begin("Display", &c.show_display)) {
@@ -200,7 +207,8 @@ namespace gbemu::ui {
 
             const ImVec2 cur = ImGui::GetCursorPos();
             ImGui::SetCursorPos(ImVec2(cur.x + (avail.x - img_size.x) * 0.5f, cur.y + (avail.y - img_size.y) * 0.5f));
-            ImGui::Image(reinterpret_cast<ImTextureID>(gb_texture), img_size);
+            if (c.display_present)
+                ImGui::Image(gbemu::gfx::presenter_imgui_id(c.display_present), img_size);
 
             ImGui::End();
         }
@@ -532,12 +540,12 @@ namespace gbemu::ui {
 
         // Repaint the 16x24 tile-data grid covering VRAM $8000-$97FF.  Tiles
         // are laid out row-major: index 0 top-left, index 15 top-right,
-        // index 16 second row, etc.  Result is uploaded into ppu_tiles_tex.
+        // index 16 second row, etc.  Result is uploaded into the tile
+        // presenter (lazily allocated on first call).
         void refresh_tile_viewer_texture(context& c) {
-            if (!c.ppu_tiles_tex) {
-                c.ppu_tiles_tex =
-                    SDL_CreateTexture(c.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 128, 192);
-                if (!c.ppu_tiles_tex)
+            if (!c.ppu_tiles_present) {
+                c.ppu_tiles_present = gbemu::gfx::presenter_create(c.backend, 128, 192);
+                if (!c.ppu_tiles_present)
                     return;
             }
             std::array<std::uint32_t, 128 * 192> pixels{};
@@ -551,7 +559,7 @@ namespace gbemu::ui {
                 const std::uint32_t ty = (t / tiles_per_row) * gb::TILE_PIXELS;
                 decode_tile_8x8(vram, t * gb::TILE_BYTES, pixels.data(), 128, tx, ty, bgp);
             }
-            SDL_UpdateTexture(c.ppu_tiles_tex, nullptr, pixels.data(), 128 * 4);
+            gbemu::gfx::presenter_upload(c.ppu_tiles_present, pixels.data());
         }
 
         // Repaint a 256x256 BG tile-map viewer.  Reads tile indices from the
@@ -559,10 +567,9 @@ namespace gbemu::ui {
         // tile data through the current LCDC.4 addressing mode (the same
         // logic ppu::render_bg_scanline uses).
         void refresh_bgmap_viewer_texture(context& c) {
-            if (!c.ppu_bgmap_tex) {
-                c.ppu_bgmap_tex =
-                    SDL_CreateTexture(c.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 256);
-                if (!c.ppu_bgmap_tex)
+            if (!c.ppu_bgmap_present) {
+                c.ppu_bgmap_present = gbemu::gfx::presenter_create(c.backend, 256, 256);
+                if (!c.ppu_bgmap_present)
                     return;
             }
             std::array<std::uint32_t, 256 * 256> pixels{};
@@ -586,7 +593,7 @@ namespace gbemu::ui {
                                     bgp);
                 }
             }
-            SDL_UpdateTexture(c.ppu_bgmap_tex, nullptr, pixels.data(), 256 * 4);
+            gbemu::gfx::presenter_upload(c.ppu_bgmap_present, pixels.data());
         }
 
         void palette_swatch(const char* label, std::uint8_t pal) {
@@ -649,16 +656,16 @@ namespace gbemu::ui {
             // hides (only freed in ui::shutdown) so reopening is instant.
             ImGui::SeparatorText("VRAM tiles ($8000-$97FF)");
             refresh_tile_viewer_texture(c);
-            if (c.ppu_tiles_tex)
-                ImGui::Image(reinterpret_cast<ImTextureID>(c.ppu_tiles_tex), ImVec2(128 * 2, 192 * 2));
+            if (c.ppu_tiles_present)
+                ImGui::Image(gbemu::gfx::presenter_imgui_id(c.ppu_tiles_present), ImVec2(128 * 2, 192 * 2));
 
             ImGui::SeparatorText("BG map");
             ImGui::RadioButton("$9800", &c.ppu_bgmap_idx, 0);
             ImGui::SameLine();
             ImGui::RadioButton("$9C00", &c.ppu_bgmap_idx, 1);
             refresh_bgmap_viewer_texture(c);
-            if (c.ppu_bgmap_tex)
-                ImGui::Image(reinterpret_cast<ImTextureID>(c.ppu_bgmap_tex), ImVec2(256, 256));
+            if (c.ppu_bgmap_present)
+                ImGui::Image(gbemu::gfx::presenter_imgui_id(c.ppu_bgmap_present), ImVec2(256, 256));
 
             ImGui::End();
         }
@@ -763,7 +770,7 @@ namespace gbemu::ui {
 
     } // namespace
 
-    context* init(SDL_Window* window, SDL_Renderer* renderer, debugger& dbg, gbemu::core& c) {
+    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, gbemu::core& c) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
@@ -782,22 +789,22 @@ namespace gbemu::ui {
         auto* ctx = new context{};
         ctx->window = window;
         ctx->renderer = renderer;
+        ctx->backend = backend;
         ctx->dbg = &dbg;
         ctx->core = &c;
+        ctx->display_present = gbemu::gfx::presenter_create(backend, gb::LCD_WIDTH, gb::LCD_HEIGHT);
         return ctx;
     }
 
     void shutdown(context* ctx) {
         if (!ctx)
             return;
-        if (ctx->ppu_tiles_tex) {
-            SDL_DestroyTexture(ctx->ppu_tiles_tex);
-            ctx->ppu_tiles_tex = nullptr;
-        }
-        if (ctx->ppu_bgmap_tex) {
-            SDL_DestroyTexture(ctx->ppu_bgmap_tex);
-            ctx->ppu_bgmap_tex = nullptr;
-        }
+        gbemu::gfx::presenter_destroy(ctx->ppu_tiles_present);
+        ctx->ppu_tiles_present = nullptr;
+        gbemu::gfx::presenter_destroy(ctx->ppu_bgmap_present);
+        ctx->ppu_bgmap_present = nullptr;
+        gbemu::gfx::presenter_destroy(ctx->display_present);
+        ctx->display_present = nullptr;
         ImGui_ImplSDLRenderer2_Shutdown();
         ImGui_ImplSDL2_Shutdown();
         ImGui::DestroyContext();
@@ -820,16 +827,25 @@ namespace gbemu::ui {
         return io.WantCaptureMouse;
     }
 
-    void render_frame(context* ctx, SDL_Texture* gb_texture) {
+    void render_frame(context* ctx) {
         if (!ctx)
             return;
+
+        // Refresh the GB framebuffer presenter on every new frame-ready edge
+        // from the PPU.  When paused, no edge fires and the Display panel
+        // keeps showing the last produced frame.  Previously this lived in
+        // Application::run; consolidating it here lets the UI fully own the
+        // display presenter's lifecycle.
+        if (ctx->display_present && ctx->core && ctx->core->ppu.consume_frame_ready()) {
+            gbemu::gfx::presenter_upload(ctx->display_present, ctx->core->ppu.framebuffer());
+        }
 
         ImGui_ImplSDLRenderer2_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
         setup_dockspace_and_menubar(*ctx);
-        draw_display_panel(*ctx, gb_texture);
+        draw_display_panel(*ctx);
         draw_cpu_panel(*ctx);
         draw_disasm_panel(*ctx);
         draw_memory_panel(*ctx);

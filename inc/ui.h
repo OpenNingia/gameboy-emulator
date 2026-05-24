@@ -1,12 +1,13 @@
 #pragma once
-#ifndef _H_UI_H_
-#    define _H_UI_H_
 
-#    include <SDL2/SDL.h>
+#include <SDL2/SDL.h>
 
 namespace gbemu {
     struct core;
     struct debugger;
+    namespace gfx {
+        struct backend;
+    }
 } // namespace gbemu
 
 namespace gbemu::ui {
@@ -16,10 +17,14 @@ namespace gbemu::ui {
     struct context;
 
     // Initialise ImGui (docking branch) bound to the given SDL2 window +
-    // renderer.  Returns a handle to be passed to subsequent calls; the
-    // caller owns lifetime and must invoke shutdown() before destroying
-    // the SDL renderer/window.
-    context* init(SDL_Window* window, SDL_Renderer* renderer, debugger& dbg, core& c);
+    // renderer, plus a gfx backend used by the UI to spawn presenters for
+    // the GB display and the PPU tile/map viewers.  The SDL_Renderer is
+    // still required for the imgui_impl_sdlrenderer2 backend; the gfx
+    // backend hides the underlying texture API from the rest of ui.cpp.
+    // Returns a handle to be passed to subsequent calls; the caller owns
+    // lifetime and must invoke shutdown() before destroying the SDL
+    // renderer/window/gfx backend.
+    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, core& c);
 
     // Tear down ImGui in reverse order.  Safe to call with nullptr.
     void shutdown(context* ctx);
@@ -31,10 +36,8 @@ namespace gbemu::ui {
 
     // Build one ImGui frame: dockspace + menu bar + panels + render to the
     // bound SDL renderer.  The caller still owns SDL_RenderClear and
-    // SDL_RenderPresent.  `gb_texture` is the 160x144 ARGB streaming texture
-    // shown in the Display panel.
-    void render_frame(context* ctx, SDL_Texture* gb_texture);
+    // SDL_RenderPresent.  Consumes the PPU's frame-ready edge to refresh
+    // the Display panel's texture in-place.
+    void render_frame(context* ctx);
 
 } // namespace gbemu::ui
-
-#endif // _H_UI_H_
