@@ -267,18 +267,33 @@ sensato). Solo accuratezza hardware DMG sul piano audio.
 
 ---
 
-## 9. Refactor: sub-instruction (M-cycle) timing — **fatto (hybrid)**
+## 9. Refactor: sub-instruction (M-cycle) timing — **fatto (hybrid, PPU bulk)**
 
 Implementato il modello tick-driven: ogni accesso bus (`cpu::bus_read` /
 `bus_write` / `bus_read_u16` / `bus_write_u16` / `bus_read_i8`) chiama
 `cpu::tick(4)` prima del trasferimento e propaga al `tick_fn` installato da
-`core::core()` (lambda captureless → ppu.step + apu.step + timer.step +
-total_cycles). I cicli interni non coperti dagli accessi (preparazione SP di
-PUSH, ALU 16-bit di ADD HL,rr, branch PC update, ecc.) sono *bulk-ticked*
-alla fine di `cpu::step()` con `tick(target - step_cycles)` dove `target =
-e.cycles + extra_cycles`. `irq::dispatch()` ticca i suoi 20 T (8 entry + 8
-push + 4 jump-internal) via `cpu.tick`. `core::step()` non chiama più
-esplicitamente `ppu/apu/timer.step` e non somma a mano i 20 T dell'IRQ.
+`core::core()`. I cicli interni non coperti dagli accessi (preparazione SP
+di PUSH, ALU 16-bit di ADD HL,rr, branch PC update, ecc.) sono
+*bulk-ticked* alla fine di `cpu::step()` con `tick(target - step_cycles)`
+dove `target = e.cycles + extra_cycles`. `irq::dispatch()` ticca i suoi 20 T
+(8 entry + 8 push + 4 jump-internal) via `cpu.tick`.
+
+**APU / timer / total_cycles** avanzano a granularità M-cycle dentro il
+callback. **Il PPU no**: i tick destinati al PPU sono accumulati in
+`core::pending_ppu_t` e svuotati in un unico `ppu.step(pending_ppu_t)` a
+fine `core::step()`. La ragione è che il nostro PPU renderizza la scanline
+in modo atomico in `enter_drawing()`: forwardare i tick mid-istruzione
+sposta l'ordine relativo fra scritture CPU e transizioni di modo del PPU,
+rompendo i giochi che ritunano SCX/SCY/LCDC in HBlank STAT IRQ stretti
+(sintomo originale: status bar di Super Mario Land che flickerava di una
+scanline a intervalli irregolari — bisect ha incolpato il commit che
+attivava il tick PPU intra-istruzione).
+
+**Accuratezza PPU sub-istruzione** (Mooneye PPU suite, FIFO emulation,
+trucchi mid-scanline su LCDC, BG-priority quirks) richiederebbe un PPU
+dot-driven vero con latching dei registri al momento corretto. Lavoro
+separato e grosso — non è una "pulizia" del modello attuale, è un
+rewrite della pipeline.
 
 **Stato test Blargg:**
 - `cpu_instrs.gb` ✅

@@ -54,13 +54,19 @@ std::uint32_t core::step() {
     auto saved_pc = regs.pc;
 
     try {
-        // Under M-cycle accounting cpu.step() ticks PPU/APU/timer via the
-        // callback installed in core::core(); irq.dispatch() does the same
-        // (its 20 T of servicing flow through cpu.tick). total_cycles is
-        // updated by the callback, so no explicit accounting here.
+        // APU / timer / total_cycles tick at M-cycle granularity via the
+        // tick callback installed in core::core(); PPU ticks accumulate in
+        // pending_ppu_t and are flushed here in one bulk step so the PPU
+        // sees CPU memory writes and its own mode transitions in the same
+        // relative order it would on the per-instruction model.  See the
+        // callback comment in core.h for why.
         auto total = static_cast<std::uint32_t>(cpu.step());
         if (irq.dispatch()) {
             total += 20;
+        }
+        if (pending_ppu_t) {
+            ppu.step(pending_ppu_t);
+            pending_ppu_t = 0;
         }
         return total;
     } catch (const gbemu_exception& e) {
