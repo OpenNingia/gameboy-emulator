@@ -7,8 +7,9 @@ find_package(LibConfig CONFIG REQUIRED)
 find_package(quill CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(absl CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
-add_executable(GbEmu "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp")
+add_executable(GbEmu "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp" "ui.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(GbEmu
@@ -19,6 +20,7 @@ target_link_libraries(GbEmu
     quill::quill
     CLI11::CLI11
     absl::inlined_vector
+    imgui::imgui
 )
 
 target_include_directories(GbEmu PRIVATE ${CMAKE_SOURCE_DIR}/inc)

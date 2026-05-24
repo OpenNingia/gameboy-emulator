@@ -7,6 +7,7 @@
 #include <core.h>
 #include <debugger.h>
 #include <exc.hpp>
+#include <ui.h>
 
 namespace gbemu {
     // Defined in src/script_runner.cpp.
@@ -75,7 +76,7 @@ void Application::run() {
     }
 
     auto window = SDL_CreateWindow("GbEmu", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, cfg.win.width,
-                                   cfg.win.height, SDL_WINDOW_SHOWN);
+                                   cfg.win.height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
     if (!window)
         throw gbemu::gbemu_exception{"SDL Window creation failed!"};
@@ -85,26 +86,23 @@ void Application::run() {
     if (!renderer)
         throw gbemu::gbemu_exception{"SDL Renderer creation failed!"};
 
-    SDL_RenderSetLogicalSize(renderer, 160, 144);
-
-    bool quit = false;
-
-    // texture
     auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 160, 144);
 
-    std::array<std::uint32_t, 160 * 144> framebuffer{};
+    auto* ui_ctx = gbemu::ui::init(window, renderer, debugger, core);
 
+    bool quit = false;
     while (!quit) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            const bool imgui_captured = gbemu::ui::process_event(ui_ctx, e);
+
             if (e.type == SDL_QUIT) {
                 quit = true;
                 break;
-            } else if (e.type == SDL_KEYDOWN) {
-                // F12: diagnostic dump of registers + recent PCs (useful when
-                // chasing ROMs that hang in an infinite loop).  Routed through
-                // the debugger so the format matches the headless script
-                // runner.
+            } else if (e.type == SDL_KEYDOWN && !imgui_captured) {
+                // F12: diagnostic dump of registers + recent PCs.  Routed
+                // through the debugger so the format matches the headless
+                // script runner.
                 if (e.key.keysym.sym == SDLK_F12) {
                     std::cout << "=== regs @cycle=" << debugger.total_cycles() << " ===\n";
                     debugger.dump_regs(std::cout);
@@ -112,29 +110,34 @@ void Application::run() {
                     debugger.dump_pc_ring(std::cout, 32);
                     std::cout.flush();
                 }
-                // game.input(e.key.keysym.scancode);
             }
         }
 
-        // 4.19 MHz / 60 fps ≈ 69905 T-cycles per frame
-        constexpr std::uint32_t CYCLES_PER_FRAME = 70224; // valore esatto DMG
-        std::uint32_t budget = 0;
-        while (budget < CYCLES_PER_FRAME) {
-            // Route through the debugger seam.  Breakpoints / watchpoints are
-            // not enforced in interactive mode here (yet) — the script runner
-            // is the only consumer that acts on them in PR2; PR3 wires this
-            // up to the ImGui controls.
-            budget += debugger.step().cycles;
+        // Step the emulator only when the CPU panel hasn't paused it.  ImGui
+        // keeps drawing either way so the user can inspect state and use the
+        // Step / Step Over buttons.
+        if (!debugger.is_paused()) {
+            // 4.19 MHz / 60 fps ≈ 69905 T-cycles per frame
+            constexpr std::uint32_t CYCLES_PER_FRAME = 70224; // valore esatto DMG
+            std::uint32_t budget = 0;
+            while (budget < CYCLES_PER_FRAME) {
+                budget += debugger.step().cycles;
+            }
         }
 
+        // Refresh the GB framebuffer texture on every new frame ready edge.
+        // When paused the texture keeps showing the last produced frame.
         if (core.ppu.consume_frame_ready()) {
             SDL_UpdateTexture(texture, nullptr, core.ppu.framebuffer(), 160 * 4);
-            SDL_RenderClear(renderer);
-            SDL_RenderCopy(renderer, texture, nullptr, nullptr);
-            SDL_RenderPresent(renderer);
         }
+
+        SDL_RenderClear(renderer);
+        gbemu::ui::render_frame(ui_ctx, texture);
+        SDL_RenderPresent(renderer);
     }
 
+    gbemu::ui::shutdown(ui_ctx);
+    SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
 }

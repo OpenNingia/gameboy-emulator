@@ -51,6 +51,14 @@ namespace gbemu {
         max_cycles_safety, // hit the safety cap without satisfying the condition
     };
 
+    // Coarse-grain execution mode driven by the ImGui CPU panel (Run/Pause
+    // buttons).  Headless / script-runner usage doesn't consult this — it
+    // only gates the SDL main loop's CPU step in interactive mode.
+    enum class run_state {
+        Running,
+        Paused,
+    };
+
     struct run_result {
         run_outcome outcome{run_outcome::max_cycles_safety};
         std::uint16_t hit_addr{0};
@@ -108,6 +116,12 @@ namespace gbemu {
         const std::vector<char>& serial_buffer() const { return serial_buf_; }
         void serial_clear() { serial_buf_.clear(); }
 
+        // Run-state controls (interactive UI only).
+        bool is_paused() const { return state_ == run_state::Paused; }
+        void pause() { state_ = run_state::Paused; }
+        void resume() { state_ = run_state::Running; }
+        void toggle_running() { state_ = is_paused() ? run_state::Running : run_state::Paused; }
+
     private:
         // Returns true and refreshes `last` if any watched byte changed.  Caller
         // gets the first changed watchpoint's base address via `out_addr`.
@@ -117,6 +131,7 @@ namespace gbemu {
         std::vector<char> serial_buf_;
         std::array<std::uint8_t, 8192> bp_bitmap_{};
         absl::InlinedVector<watchpoint, 2> watchpoints_{};
+        run_state state_{run_state::Running};
     };
 
 } // namespace gbemu
