@@ -8,6 +8,11 @@
 #include <debugger.h>
 #include <exc.hpp>
 
+namespace gbemu {
+    // Defined in src/script_runner.cpp.
+    int run_script(debugger& dbg, const std::string& script_path, const std::string& out_path);
+} // namespace gbemu
+
 Application::Application() : cfg("cfg/gbemu.conf") {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
         throw gbemu::gbemu_exception{"SDL Initialization failed!"};
@@ -41,13 +46,33 @@ void Application::run() {
     // hardware-emulation half of $FF02 (clear SC bit 7, raise IF.3) lives in
     // serial::on_sc_write; this observer is just for human-visible output and
     // will be removed once the PR5 ImGui serial panel ships.  Skipped in
-    // future headless mode.
-    core.mmu.add_mmio_write_handler(0xFF02, [&core](std::uint8_t v) {
-        if (v == 0x81) {
-            std::putchar(static_cast<char>(core.mmu.hwr_sb()));
-            std::fflush(stdout);
-        }
-    });
+    // headless mode (the debugger's serial ring buffer serves serial-dump).
+    if (!headless_) {
+        core.mmu.add_mmio_write_handler(0xFF02, [&core](std::uint8_t v) {
+            if (v == 0x81) {
+                std::putchar(static_cast<char>(core.mmu.hwr_sb()));
+                std::fflush(stdout);
+            }
+        });
+    }
+
+    // load bios
+    if (!cfg.bios.path.empty()) {
+        load_bios(core, cfg.bios.path);
+    }
+
+    // load rom
+    load_rom(core, cfg.rom.path);
+
+    core.init();
+
+    if (headless_) {
+        // No window, no renderer, no event loop — just run the script and
+        // return.  PPU keeps running internally; its framebuffer is just
+        // never presented, so VBlank edges remain observable by run-until.
+        gbemu::run_script(debugger, script_path_, output_path_);
+        return;
+    }
 
     auto window = SDL_CreateWindow("GbEmu", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, cfg.win.width,
                                    cfg.win.height, SDL_WINDOW_SHOWN);
@@ -61,18 +86,6 @@ void Application::run() {
         throw gbemu::gbemu_exception{"SDL Renderer creation failed!"};
 
     SDL_RenderSetLogicalSize(renderer, 160, 144);
-
-    // load bios(
-    if (!cfg.bios.path.empty()) {
-        load_bios(core, cfg.bios.path);
-    }
-
-    // load rom
-    load_rom(core, cfg.rom.path);
-
-    core.init();
-
-    // const int speed = 16;
 
     bool quit = false;
 
@@ -91,7 +104,7 @@ void Application::run() {
                 // F12: diagnostic dump of registers + recent PCs (useful when
                 // chasing ROMs that hang in an infinite loop).  Routed through
                 // the debugger so the format matches the headless script
-                // runner (PR2).
+                // runner.
                 if (e.key.keysym.sym == SDLK_F12) {
                     std::cout << "=== regs @cycle=" << debugger.total_cycles() << " ===\n";
                     debugger.dump_regs(std::cout);
@@ -107,9 +120,11 @@ void Application::run() {
         constexpr std::uint32_t CYCLES_PER_FRAME = 70224; // valore esatto DMG
         std::uint32_t budget = 0;
         while (budget < CYCLES_PER_FRAME) {
-            // Route through the debugger seam (pass-through in PR1; gains
-            // breakpoint / watchpoint / run-until handling in PR2).
-            budget += debugger.step();
+            // Route through the debugger seam.  Breakpoints / watchpoints are
+            // not enforced in interactive mode here (yet) — the script runner
+            // is the only consumer that acts on them in PR2; PR3 wires this
+            // up to the ImGui controls.
+            budget += debugger.step().cycles;
         }
 
         if (core.ppu.consume_frame_ready()) {

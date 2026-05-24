@@ -1,6 +1,3 @@
-#include <cstdio>
-#include <string>
-
 #include <core.h>
 #include <exc.hpp>
 #include <log.h>
@@ -48,30 +45,6 @@ void core::init() {
         regs.sp = 0xFFFE;
         regs.pc = 0x100;
     }
-}
-
-void core::dump_pc_ring() const {
-    // Walk the ring oldest -> newest.  pc_idx is where the *next* PC would
-    // be written, so it doubles as the position of the oldest entry.
-    LOG_INFO(log::root(), "=== PC ring dump (most recent first) ===");
-    constexpr std::size_t cols = 8;
-    std::string line;
-    line.reserve(cols * 6 + 4);
-    for (std::size_t i = 0; i < pc_ring.size(); ++i) {
-        std::size_t k = (pc_idx + pc_ring.size() - 1 - i) % pc_ring.size();
-        char buf[8];
-        std::snprintf(buf, sizeof(buf), "%04X ", pc_ring[k]);
-        line += buf;
-        if ((i + 1) % cols == 0) {
-            LOG_INFO(log::root(), "{}", line);
-            line.clear();
-        }
-    }
-    if (!line.empty())
-        LOG_INFO(log::root(), "{}", line);
-    LOG_INFO(log::root(), "AF={:04x} BC={:04x} DE={:04x} HL={:04x} SP={:04x} PC={:04x} IF={:02x} IE={:02x} IME={}",
-             regs.af.u16, regs.bc.u16, regs.de.u16, regs.hl.u16, regs.sp, regs.pc, mmu.hwr_if(), mmu.hwr_ie(),
-             cpu.interrupt_enabled ? 1 : 0);
 }
 
 std::uint32_t core::step() {

@@ -6,7 +6,6 @@
 #include <memory>
 
 #include <absl/container/inlined_vector.h>
-
 #include <exc.hpp>
 #include <mbc.h>
 

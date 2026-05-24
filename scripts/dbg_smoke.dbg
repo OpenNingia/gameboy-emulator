@@ -1,0 +1,29 @@
+# Sample debug script — smoke test for the PR2 headless runner.
+#
+# Run from the build directory:
+#   .\GbEmu.exe --headless --script ..\scripts\dbg_smoke.dbg --out dump.txt <rom>
+# The ROM path can be passed positionally on the command line (overrides
+# cfg/gbemu.conf application.rom.path); for the canonical exercise pass
+# Blargg's cpu_instrs.gb so the serial-match check below has something to
+# wait on ("01:ok  02:ok  ..." → the first ':' arrives quickly).
+
+echo Initial state (post-init; PC=$0000 when a BIOS is loaded, $0100 otherwise)
+dump regs
+dump pc-ring 8
+disasm pc 8
+
+echo Memory snapshot at WRAM start
+dump mem 0xC000 32
+
+echo Cartridge MBC info
+dump mbc
+
+echo Run a few thousand instructions and watch for the first colon in serial
+run-until serial-match ":" max-cycles 50000000
+
+echo State after first colon
+dump regs
+serial-dump
+dump pc-ring 16
+
+exit

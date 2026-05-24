@@ -54,10 +54,6 @@ namespace gbemu {
         void init();
         // execute an emulation step
         std::uint32_t step();
-        // diagnostic: log the PC ring (oldest -> newest) plus the current
-        // register snapshot.  Useful for figuring out where a runaway ROM
-        // is spinning.
-        void dump_pc_ring() const;
     };
 } // namespace gbemu
 

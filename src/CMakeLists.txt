@@ -8,7 +8,7 @@ find_package(quill CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(absl CONFIG REQUIRED)
 
-add_executable(GbEmu "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp")
+add_executable(GbEmu "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(GbEmu
