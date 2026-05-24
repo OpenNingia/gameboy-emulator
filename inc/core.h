@@ -16,6 +16,7 @@
 #    include <ppu.h>
 #    include <registers.h>
 #    include <serial.h>
+#    include <timer.h>
 
 namespace gbemu {
 
@@ -28,6 +29,7 @@ namespace gbemu {
               irq(cpu, mmu),
               serial(mmu),
               dma(mmu),
+              timer(mmu),
               crd(),
               pc_ring(),
               pc_idx(0) {}
@@ -39,6 +41,7 @@ namespace gbemu {
         irq irq;
         serial serial;
         dma dma;
+        timer timer;
 
         std::optional<rom_file> crd;
 
