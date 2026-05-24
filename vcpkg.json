@@ -2,6 +2,8 @@
   "dependencies": [
     "quill",
     "sdl2",
-    "libconfig"
+    "libconfig",
+    "cli11",
+    "abseil"
   ]
 }

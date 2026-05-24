@@ -5,6 +5,8 @@ project(GbEmu)
 find_package(SDL2 CONFIG REQUIRED)
 find_package(LibConfig CONFIG REQUIRED)
 find_package(quill CONFIG REQUIRED)
+find_package(CLI11 CONFIG REQUIRED)
+find_package(absl CONFIG REQUIRED)
 
 add_executable(GbEmu "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
@@ -15,6 +17,8 @@ target_link_libraries(GbEmu
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
     libconfig::libconfig libconfig::libconfig++
     quill::quill
+    CLI11::CLI11
+    absl::inlined_vector
 )
 
 target_include_directories(GbEmu PRIVATE ${CMAKE_SOURCE_DIR}/inc)

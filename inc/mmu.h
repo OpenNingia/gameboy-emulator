@@ -4,7 +4,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <vector>
+
+#include <absl/container/inlined_vector.h>
 
 #include <exc.hpp>
 #include <mbc.h>
@@ -108,8 +109,9 @@ namespace gbemu {
         unsigned ppu_stub_counter{0};
         static constexpr unsigned ppu_stub_step{32};
 
-        // TODO(small_vector): typical occupancy is 1-3 handlers per address,
-        // batch swap to a small_vector<mmio_write_fn, 2> once we pick an impl.
-        std::array<std::vector<mmio_write_fn>, 0x80> mmio_write_handlers{};
+        // Inline N=2 covers the typical occupancy (hardware emulation
+        // handler + at most one or two debug observers); rarer 3+ cases
+        // spill to heap.
+        std::array<absl::InlinedVector<mmio_write_fn, 2>, 0x80> mmio_write_handlers{};
     };
 } // namespace gbemu
