@@ -11,6 +11,14 @@ std::uint16_t cpu::fetch() {
 
     // read first byte from
     std::uint16_t op = mmu.read_u8(regs.pc++);
+    // HALT bug: the byte right after HALT is fetched without advancing PC,
+    // so the next instruction sees the same byte (and its immediates) again.
+    // Only the very first fetch after HALT is affected; the CB-prefix second
+    // byte is part of the same instruction and still consumes a normal byte.
+    if (halt_bug) {
+        --regs.pc;
+        halt_bug = false;
+    }
     if (prefix == op) {
         op <<= 8;
         op |= mmu.read_u8(regs.pc++);

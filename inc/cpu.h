@@ -24,6 +24,10 @@ namespace gbemu {
         bool halted{false};
         bool ime_pending{false};
         bool ei_just_executed{false};
+        // HALT bug: set when HALT is executed with IME=0 and IF&IE&0x1F != 0.
+        // The next fetch must read PC without incrementing it, so the byte
+        // after HALT gets executed twice.
+        bool halt_bug{false};
         std::uint8_t extra_cycles{0};
 
         // execute an instruction and returns total cycles

@@ -3557,7 +3557,17 @@ is cancelled, the program starts from the address indicated by the program count
 is set, the contents of the program coounter are pushed to the stack and control jumps to the starting address of the
 interrupt. If the RESET terminal goes LOW in HALT moode, the mode becomes that of a normal reset. */
 IMPL_INSTR(halt) {
-    cpu.halted = true;
+    // HALT bug: if IME=0 and there is already a pending interrupt
+    // (IF & IE & 0x1F != 0), the CPU does NOT enter halt mode.  Instead the
+    // next instruction byte is read twice (the fetch right after this HALT
+    // does not advance PC).  cpu::step() handles the PC rewind via the
+    // halt_bug flag.
+    auto pending = cpu.mmu.hwr_if() & cpu.mmu.hwr_ie() & 0x1F;
+    if (!cpu.interrupt_enabled && pending) {
+        cpu.halt_bug = true;
+    } else {
+        cpu.halted = true;
+    }
 }
 
 // 10 STOP

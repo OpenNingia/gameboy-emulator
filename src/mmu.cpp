@@ -75,8 +75,17 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
             if (addr < 0xFF00)
                 return 0;
             // memory mapped i/o
-            if (addr < 0xFF80)
-                return mmio[addr - 0xFF00];
+            if (addr < 0xFF80) {
+                auto v = mmio[addr - 0xFF00];
+                // $FF0F (IF) — bits 5-7 are unimplemented in hardware and
+                // read back as 1 (open-bus / pull-up).  Blargg's halt_bug.gb
+                // depends on this: it prints IF after the test and the CRC
+                // includes those high bits.  Without this mask we produce
+                // e.g. "01 10 11 ..." where a real DMG shows "01 10 F1 ...".
+                if (addr == 0xFF0F)
+                    return v | 0xE0;
+                return v;
+            }
             // zram
             return zram[addr - 0xFF80];
         default:
