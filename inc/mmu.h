@@ -3,8 +3,10 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 
 #include <exc.hpp>
+#include <mbc.h>
 
 #define DEF_HWREG(x, addr)         \
     std::uint8_t hwr_##x() const { \
@@ -36,14 +38,11 @@ namespace gbemu {
 
         // bios code 0x0000 -> 0x00FF
         ram_t<0x0100> bios{};
-        // first rom bank 0x0000 -> 0x3FFF
-        ram_t<0x4000> rom0{};
-        // second rom bank 0x4000 -> 0x7FFF
-        ram_t<0x4000> rom1{};
+        // cartridge (ROM + external RAM); owns its own bytes and handles
+        // banking.  Installed by core::load(rom_file&) via attach_cartridge.
+        std::unique_ptr<mbc> cart{};
         // gpu vram 0x8000 -> 0x9FFF
         ram_t<0x2000> vram{};
-        // cardrige external memory 0xA000 -> 0xBFFF
-        ram_t<0x2000> eram{};
         // working ram 0xC000 -> 0xDFFF
         ram_t<0x2000> wram{};
         // echo ram (addressed by code) 0xE000 -> 0xFDFF
@@ -53,6 +52,10 @@ namespace gbemu {
         ram_t<0x0080> mmio{};
         // zero-page ram
         ram_t<0x0080> zram{};
+
+        // Install the cartridge.  Called once after the ROM has been read
+        // off disk and the appropriate mbc subclass has been instantiated.
+        void attach_cartridge(std::unique_ptr<mbc> c) { cart = std::move(c); }
 
         std::uint8_t read_u8(std::uint16_t addr) const;
         std::int8_t read_i8(std::uint16_t addr) const;

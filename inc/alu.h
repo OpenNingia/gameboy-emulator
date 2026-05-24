@@ -274,14 +274,10 @@ namespace gbemu {
         }
 
         // RES n, v: ritorna v con bit n a 0. Nessun flag affected.
-        static std::uint8_t res(std::uint8_t v, std::uint8_t n) {
-            return static_cast<std::uint8_t>(v & ~(1u << n));
-        }
+        static std::uint8_t res(std::uint8_t v, std::uint8_t n) { return static_cast<std::uint8_t>(v & ~(1u << n)); }
 
         // SET n, v: ritorna v con bit n a 1. Nessun flag affected.
-        static std::uint8_t set(std::uint8_t v, std::uint8_t n) {
-            return static_cast<std::uint8_t>(v | (1u << n));
-        }
+        static std::uint8_t set(std::uint8_t v, std::uint8_t n) { return static_cast<std::uint8_t>(v | (1u << n)); }
 
     private:
         registers& regs;

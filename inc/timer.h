@@ -1,9 +1,10 @@
 #pragma once
 #ifndef _H_TIMER_H_
-#define _H_TIMER_H_
+#    define _H_TIMER_H_
 
-#include <cstdint>
-#include <mmu.h>
+#    include <cstdint>
+
+#    include <mmu.h>
 
 namespace gbemu {
     struct timer {
@@ -15,10 +16,10 @@ namespace gbemu {
         // triggers
         void div_trigger(std::uint8_t val);
 
-        private:
-            mmu& mmu_;
-            std::uint32_t div_cnt{0};
-            std::uint32_t tima_cnt{0};
+    private:
+        mmu& mmu_;
+        std::uint32_t div_cnt{0};
+        std::uint32_t tima_cnt{0};
     };
 } // namespace gbemu
 

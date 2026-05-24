@@ -30,7 +30,6 @@ namespace gbemu {
               serial(mmu),
               dma(mmu),
               timer(mmu),
-              crd(),
               pc_ring(),
               pc_idx(0) {}
 
@@ -43,8 +42,6 @@ namespace gbemu {
         dma dma;
         timer timer;
 
-        std::optional<rom_file> crd;
-
         std::array<std::uint16_t, 256> pc_ring;
         std::size_t pc_idx;
 
@@ -56,6 +53,10 @@ namespace gbemu {
         void init();
         // execute an emulation step
         std::uint32_t step();
+        // diagnostic: log the PC ring (oldest -> newest) plus the current
+        // register snapshot.  Useful for figuring out where a runaway ROM
+        // is spinning.
+        void dump_pc_ring() const;
     };
 } // namespace gbemu
 

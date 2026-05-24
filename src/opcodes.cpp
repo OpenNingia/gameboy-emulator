@@ -2,6 +2,7 @@
 // https://gist.github.com/bberak/ca001281bb8431d2706afd31401e802b
 
 #include <exc.hpp>
+#include <log.h>
 #include <opcodes.hpp>
 
 #define IMPL_INSTR(x)                                        \
@@ -3566,5 +3567,23 @@ cancelled by a reset signal. If the RESET terminal goes LOW in STOP mode, it bec
 following conditions should be met before a STOP instruction is executed and stop mode is entered: All interrupt-enable
 (IE) flags are reset. Input to P10-P13 is LOW for all. */
 IMPL_INSTR(stop) {
+    // The STOP opcode (0x10) is followed by a padding byte (typically 0x00)
+    // that the CPU silently consumes.  We diagnostic-log every STOP so we can
+    // tell whether the ROM intentionally stopped (cpu_speed_toggle on CGB) or
+    // we landed on a 0x10 byte by mistake.  The Blargg cpu_instrs framework
+    // stores its DMG/CGB identifier at $D800 (the `gb_id` symbol from
+    // runtime.s) so dumping that byte tells us whether cpu_fast should have
+    // returned early on DMG.
+    //
+    // TODO(CGB): on CGB, STOP with KEY1 bit 0 set must perform a speed switch
+    // (clear bit 0, toggle bit 7) instead of halting the CPU.  The current
+    // body is DMG-only behaviour.
+    std::uint16_t stop_pc = static_cast<std::uint16_t>(cpu.regs.pc - 1);
+    LOG_DEBUG(gbemu::log::root(),
+              "STOP @ {:04x}  next={:02x}  A={:02x} BC={:04x} DE={:04x} HL={:04x} SP={:04x}  gb_id=[D800]={:02x}  "
+              "KEY1=[FF4D]={:02x}",
+              stop_pc, cpu.mmu.read_u8(cpu.regs.pc), cpu.regs.af.hi, cpu.regs.bc.u16, cpu.regs.de.u16, cpu.regs.hl.u16,
+              cpu.regs.sp, cpu.mmu.read_u8(0xD800), cpu.mmu.read_u8(0xFF4D));
+    cpu.regs.pc++; // skip the padding byte
     cpu.stopped = true;
 }

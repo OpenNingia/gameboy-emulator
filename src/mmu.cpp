@@ -7,6 +7,15 @@ gbemu::mmu::mmu() {
         if (v != 0)
             bios_accessible = false;
     });
+
+    // CGB-only registers — on DMG these read back as open-bus 0xFF.  Blargg's
+    // cpu_instrs runtime probes KEY1 ($FF4D) in cpu_fast to decide whether the
+    // CPU is already in double-speed mode; without 0xFF here the probe falls
+    // through to a STOP that would otherwise lock up the test on DMG.
+    // TODO(CGB): when CGB support is added this must become 0x7E on CGB, and
+    // KEY1 writes must respect bit 0 (prepare speed switch) being the only
+    // writable bit.
+    mmio[0xFF4D - 0xFF00] = 0xFF;
 }
 
 void gbemu::mmu::set_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
@@ -23,30 +32,28 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
                 return bios[addr];
             }
 
-            return rom0[addr];
+            return cart ? cart->read(addr) : std::uint8_t{0xFF};
         }
-            // first rom bank
+            // cartridge ROM (bank 0 fixed slot)
         case 0x1000:
         case 0x2000:
         case 0x3000:
-            return rom0[addr];
-
-            // second rom bank
+            // cartridge ROM (banked slot)
         case 0x4000:
         case 0x5000:
         case 0x6000:
         case 0x7000:
-            return rom1[addr - 0x4000];
+            return cart ? cart->read(addr) : std::uint8_t{0xFF};
 
             // gpu vram
         case 0x8000:
         case 0x9000:
             return vram[addr - 0x8000];
 
-            // external ram
+            // cartridge external ram
         case 0xA000:
         case 0xB000:
-            return eram[addr - 0xA000];
+            return cart ? cart->read(addr) : std::uint8_t{0xFF};
 
             // working ram
         case 0xC000:
@@ -83,20 +90,17 @@ std::int8_t gbemu::mmu::read_i8(std::uint16_t addr) const {
 
 void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
     switch (addr & 0xF000) {
-            // first rom bank | bios
+            // cartridge ROM area — writes drive MBC control registers
         case 0x0000:
         case 0x1000:
         case 0x2000:
         case 0x3000:
-            // nothing to do, but don't throw an exception since some cartridges use this area for bank switching
-            break;
-
-            // second rom bank
         case 0x4000:
         case 0x5000:
         case 0x6000:
         case 0x7000:
-            // nothing to do, but don't throw an exception since some cartridges use this area for bank switching
+            if (cart)
+                cart->write(addr, val);
             break;
 
             // gpu vram
@@ -105,10 +109,11 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
             vram[addr - 0x8000] = val;
             break;
 
-            // external ram
+            // cartridge external ram
         case 0xA000:
         case 0xB000:
-            eram[addr - 0xA000] = val;
+            if (cart)
+                cart->write(addr, val);
             break;
 
             // working ram
@@ -174,4 +179,3 @@ void gbemu::mmu::initialize_registers() {
     hwr_ie(0x00);
     hwr_dma(0xFF);
 }
-

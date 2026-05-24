@@ -1,7 +1,8 @@
 #pragma once
 
-#include <cfg.h>
 #include <string_view>
+
+#include <cfg.h>
 
 class Application {
 public:
