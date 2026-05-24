@@ -377,12 +377,19 @@ void Application::run() {
                 if (!e.key.repeat) {
                     const auto k = e.key.keysym.sym;
                     const bool ctrl = (e.key.keysym.mod & KMOD_CTRL) != 0;
+                    // Emulation hotkeys (Space / Ctrl+R) are gated on a
+                    // cartridge being attached — mirrors the menu and CPU
+                    // panel buttons, which BeginDisabled when no cart, so
+                    // accidental Space presses on the fresh-launch "no ROM"
+                    // screen don't kick the BIOS into rendering 0xFF bytes
+                    // as a Nintendo logo (i.e. the black rectangle).
+                    const bool rom_loaded = core.mmu.cart() != nullptr;
                     if (k == SDLK_F11) {
                         const bool is_fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
                         SDL_SetWindowFullscreen(window, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-                    } else if (k == SDLK_SPACE) {
+                    } else if (k == SDLK_SPACE && rom_loaded) {
                         debugger.toggle_running();
-                    } else if (ctrl && k == SDLK_r) {
+                    } else if (ctrl && k == SDLK_r && rom_loaded) {
                         debugger.reset();
                     } else if (ctrl && k == SDLK_o) {
                         gbemu::ui::actions(ui_ctx).load_rom_dialog_requested = true;

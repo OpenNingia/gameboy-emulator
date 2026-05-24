@@ -170,6 +170,14 @@ namespace gbemu::ui {
             ImGui::DockBuilderFinish(dockspace_id);
         }
 
+        // True when a cartridge is attached.  Used to gate emulation controls
+        // (Resume/Pause/Reset, Step/Step Over) — without a cart the MMU
+        // returns open-bus for every cart read, so "running" just executes
+        // 0xFF bytes (or, with BIOS, paints garbage in place of the logo).
+        bool has_rom(const context& c) {
+            return c.core && c.core->mmu.cart() != nullptr;
+        }
+
         void draw_menu_bar(context& c) {
             auto& dbg = *c.dbg;
 
@@ -207,6 +215,8 @@ namespace gbemu::ui {
 
             if (ImGui::BeginMenu("Emulation")) {
                 const bool paused = dbg.is_paused();
+                const bool rom_loaded = has_rom(c);
+                ImGui::BeginDisabled(!rom_loaded);
                 if (paused) {
                     if (ImGui::MenuItem("Resume", "Space"))
                         dbg.resume();
@@ -216,6 +226,7 @@ namespace gbemu::ui {
                 }
                 if (ImGui::MenuItem("Reset", "Ctrl+R"))
                     dbg.reset();
+                ImGui::EndDisabled();
 
                 // Speed and Save/Load State live behind TODO §3 and §2
                 // respectively.  Surfaced as disabled submenus so users see
@@ -387,6 +398,8 @@ namespace gbemu::ui {
             const auto& cpu = core.cpu;
 
             const bool paused = dbg.is_paused();
+            const bool rom_loaded = has_rom(c);
+            ImGui::BeginDisabled(!rom_loaded);
             if (paused) {
                 if (ImGui::Button("Run"))
                     dbg.resume();
@@ -405,6 +418,7 @@ namespace gbemu::ui {
             ImGui::SameLine();
             if (ImGui::Button("Reset"))
                 dbg.reset();
+            ImGui::EndDisabled();
 
             ImGui::Separator();
 
