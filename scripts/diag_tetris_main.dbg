@@ -1,0 +1,34 @@
+# Verify that the main game loop is actually progressing — $FF85 should be
+# incrementing as the VBlank IRQ handler runs.
+
+# Skip past the joypad polling + LCD enable.
+break 0x02BA
+run-until bp max-cycles 5000000
+echo === after EI at $02BA ===
+dump regs
+dump ppu
+dump mem 0xFF80 16
+break-clear 0x02BA
+
+# Now snapshot $FF85 every few hundred thousand cycles.
+step-cycles 500000
+echo === @+500k ===
+dump regs
+dump mem 0xFF80 16
+
+step-cycles 500000
+echo === @+1M ===
+dump regs
+dump mem 0xFF80 16
+
+step-cycles 500000
+echo === @+1.5M ===
+dump regs
+dump mem 0xFF80 16
+
+# Set a breakpoint right after the wait-loop exit and see if it fires.
+break 0x02F2
+run-until bp max-cycles 5000000
+echo === reached $02F2 (loop exited) ===
+dump regs
+dump mem 0xFF80 16

@@ -762,7 +762,11 @@ namespace gbemu::ui {
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        // Keyboard nav is intentionally NOT enabled: it would let ImGui
+        // claim the arrow keys, Enter, Backspace and Tab — the same keys
+        // the emulator wires to the GB joypad (Up/Down/Left/Right, Start,
+        // Select). Without nav, ImGui still works fine via mouse; the
+        // arrows always reach core.joypad in the main event loop.
 
         ImGui::StyleColorsDark();
 
@@ -797,7 +801,17 @@ namespace gbemu::ui {
     bool process_event(context* /*ctx*/, const SDL_Event& e) {
         ImGui_ImplSDL2_ProcessEvent(&e);
         const ImGuiIO& io = ImGui::GetIO();
-        return io.WantCaptureKeyboard || io.WantCaptureMouse;
+        // Only treat the event as "captured by ImGui" for keyboard input
+        // when the user is actively editing an InputText (hex address in
+        // Breakpoints, "Go to" in Disassembly, etc.) — i.e. WantTextInput,
+        // not the broader WantCaptureKeyboard. The latter also flips true
+        // whenever any window has focus, which would swallow the GB joypad
+        // keys for the entire session. Mouse events follow the usual
+        // WantCaptureMouse rule so panels eat clicks/hover.
+        const bool is_kb = (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP || e.type == SDL_TEXTINPUT);
+        if (is_kb)
+            return io.WantTextInput;
+        return io.WantCaptureMouse;
     }
 
     void render_frame(context* ctx, SDL_Texture* gb_texture) {

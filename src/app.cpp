@@ -9,6 +9,7 @@
 #include <core.h>
 #include <debugger.h>
 #include <exc.hpp>
+#include <joypad.h>
 #include <ui.h>
 
 namespace gbemu {
@@ -64,8 +65,88 @@ namespace {
     }
 } // namespace
 
+namespace {
+    // Hard-coded keyboard bindings. Arrow keys drive the D-pad; Z/X are A/B
+    // (typical fceux/SameBoy convention so the player's right hand sits
+    // naturally over them); Backspace = Select, Enter = Start. Returns
+    // false for unmapped keys so the caller can early-out.
+    bool map_keycode_to_button(SDL_Keycode k, gbemu::joypad::button& out) {
+        using b = gbemu::joypad::button;
+        switch (k) {
+            case SDLK_UP:
+                out = b::up;
+                return true;
+            case SDLK_DOWN:
+                out = b::down;
+                return true;
+            case SDLK_LEFT:
+                out = b::left;
+                return true;
+            case SDLK_RIGHT:
+                out = b::right;
+                return true;
+            case SDLK_z:
+                out = b::a;
+                return true;
+            case SDLK_x:
+                out = b::b;
+                return true;
+            case SDLK_BACKSPACE:
+                out = b::select;
+                return true;
+            case SDLK_RETURN:
+                out = b::start;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // Gamepad bindings. SDL_GameController normalizes vendor layouts (Xbox,
+    // PlayStation, Switch Pro, generic) onto a single virtual layout, so we
+    // can hard-code SDL's symbolic buttons here. GB-A maps to gamepad-A
+    // (south on Xbox-style pads), GB-B maps to gamepad-X (west) — the
+    // industry-standard mapping that keeps the "B" button as the secondary
+    // action under the thumb's resting position.
+    bool map_controller_button_to_button(Uint8 sdl_btn, gbemu::joypad::button& out) {
+        using b = gbemu::joypad::button;
+        switch (sdl_btn) {
+            case SDL_CONTROLLER_BUTTON_DPAD_UP:
+                out = b::up;
+                return true;
+            case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+                out = b::down;
+                return true;
+            case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+                out = b::left;
+                return true;
+            case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+                out = b::right;
+                return true;
+            case SDL_CONTROLLER_BUTTON_A:
+                out = b::a;
+                return true;
+            case SDL_CONTROLLER_BUTTON_X:
+                out = b::b;
+                return true;
+            case SDL_CONTROLLER_BUTTON_BACK:
+                out = b::select;
+                return true;
+            case SDL_CONTROLLER_BUTTON_START:
+                out = b::start;
+                return true;
+            default:
+                return false;
+        }
+    }
+} // namespace
+
 Application::Application() : cfg("cfg/gbemu.conf") {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
+    // SDL_INIT_GAMECONTROLLER pulls in SDL_INIT_JOYSTICK and SDL_INIT_EVENTS;
+    // we rely on it for both the SDL_GameController API used below and the
+    // automatic SDL_CONTROLLERDEVICEADDED events fired at startup for
+    // already-connected pads.
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0)
         throw gbemu::gbemu_exception{"SDL Initialization failed!"};
 }
 
@@ -164,6 +245,19 @@ void Application::run() {
 
     auto* ui_ctx = gbemu::ui::init(window, renderer, debugger, core);
 
+    // Open the first available game controller, if any. The matching
+    // SDL_CONTROLLERDEVICEADDED event also fires in the main loop, so
+    // hotplug works the same way — this just covers the case where a
+    // controller was already plugged in at startup.
+    SDL_GameController* controller = nullptr;
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) {
+            controller = SDL_GameControllerOpen(i);
+            if (controller)
+                break;
+        }
+    }
+
     bool quit = false;
     while (!quit) {
         SDL_Event e;
@@ -183,6 +277,39 @@ void Application::run() {
                     std::cout << "=== pc-ring 32 ===\n";
                     debugger.dump_pc_ring(std::cout, 32);
                     std::cout.flush();
+                }
+                gbemu::joypad::button btn;
+                if (!e.key.repeat && map_keycode_to_button(e.key.keysym.sym, btn))
+                    core.joypad.set_button(btn, true);
+            } else if (e.type == SDL_KEYUP && !imgui_captured) {
+                gbemu::joypad::button btn;
+                if (map_keycode_to_button(e.key.keysym.sym, btn))
+                    core.joypad.set_button(btn, false);
+            } else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
+                gbemu::joypad::button btn;
+                if (map_controller_button_to_button(e.cbutton.button, btn))
+                    core.joypad.set_button(btn, true);
+            } else if (e.type == SDL_CONTROLLERBUTTONUP) {
+                gbemu::joypad::button btn;
+                if (map_controller_button_to_button(e.cbutton.button, btn))
+                    core.joypad.set_button(btn, false);
+            } else if (e.type == SDL_CONTROLLERDEVICEADDED) {
+                // Hot-plug: claim the new pad only if we don't already
+                // have one open. e.cdevice.which is a *joystick index* on
+                // CONTROLLERDEVICEADDED (per SDL docs), suitable for
+                // SDL_GameControllerOpen.
+                if (!controller)
+                    controller = SDL_GameControllerOpen(e.cdevice.which);
+            } else if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
+                // Here e.cdevice.which is an *instance id*. Match against
+                // the open controller's instance id and close if it's the
+                // one that went away.
+                if (controller) {
+                    SDL_Joystick* j = SDL_GameControllerGetJoystick(controller);
+                    if (j && SDL_JoystickInstanceID(j) == e.cdevice.which) {
+                        SDL_GameControllerClose(controller);
+                        controller = nullptr;
+                    }
                 }
             }
         }
@@ -232,6 +359,9 @@ void Application::run() {
         core.apu.enable_output(false);
         SDL_CloseAudioDevice(audio_dev);
     }
+
+    if (controller)
+        SDL_GameControllerClose(controller);
 
     gbemu::ui::shutdown(ui_ctx);
     SDL_DestroyTexture(texture);

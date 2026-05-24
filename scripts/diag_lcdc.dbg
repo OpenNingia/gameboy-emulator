@@ -1,0 +1,60 @@
+# Track all LCDC writes for long enough to see if the title-screen state
+# ($D3) becomes sticky or keeps getting clobbered.
+watch 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w1 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w2 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w3 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w4 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w5 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w6 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w7 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w8 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w9 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w10 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w11 ===
+dump regs
+dump mem 0xFF40 1
+run-until bp max-cycles 5000000
+echo === w12 ===
+dump regs
+dump mem 0xFF40 1
+
+watch-clear-all
+
+step-cycles 5000000
+echo === after +5M cycles of free-running ===
+dump regs
+dump ppu
+dump mem 0xFF40 1
+dump mem 0xFF80 8

@@ -69,3 +69,15 @@
      HALT non incrementa PC".
   3. Aggiungere `halt_bug` ai membri di `cpu` (`inc/cpu.h`).
   4. Validare con `halt_bug.gb` headless.
+
+## Debug - Reset e Step Over
+Reset non funziona e Step Over fa la stessa cosa di Step
+
+## Save & Load State
+Molto utile in un emulatore
+
+## Joypad & Bindings
+Implementare gestione joypad con bindings configurabili da tastiera e controller di gioco
+
+## PPU con sprite e window
+Necessario per molti giochi.

@@ -13,6 +13,7 @@
 #    include <dma.h>
 #    include <instruction.h>
 #    include <irq.h>
+#    include <joypad.h>
 #    include <mmu.h>
 #    include <ppu.h>
 #    include <registers.h>
@@ -32,6 +33,7 @@ namespace gbemu {
               dma(mmu),
               timer(mmu),
               apu(mmu),
+              joypad(mmu),
               pc_ring(),
               pc_idx(0) {}
 
@@ -44,6 +46,7 @@ namespace gbemu {
         dma dma;
         timer timer;
         apu apu;
+        joypad joypad;
 
         std::array<std::uint16_t, 256> pc_ring;
         std::size_t pc_idx;

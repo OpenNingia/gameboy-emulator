@@ -1,0 +1,45 @@
+# Trace every VBlank IRQ dispatch ($0040) right after the EI at $02BA, and
+# correlate with cycle count to see why $FF85 takes 22 frames to first show up.
+
+break 0x02BA
+run-until bp max-cycles 5000000
+echo === at EI ===
+dump regs
+dump mem 0xFF40 16
+
+break-clear 0x02BA
+break 0x0040
+
+# Try to catch the first VBlank IRQ dispatch.
+run-until bp max-cycles 5000000
+echo === VBlank IRQ #1 ===
+dump regs
+dump mem 0xFF40 16
+dump mem 0xFF80 16
+dump pc-ring
+
+run-until bp max-cycles 5000000
+echo === VBlank IRQ #2 ===
+dump regs
+dump mem 0xFF85 1
+
+run-until bp max-cycles 5000000
+echo === VBlank IRQ #3 ===
+dump regs
+dump mem 0xFF85 1
+
+run-until bp max-cycles 5000000
+echo === VBlank IRQ #4 ===
+dump regs
+
+run-until bp max-cycles 5000000
+echo === VBlank IRQ #5 ===
+dump regs
+
+run-until bp max-cycles 5000000
+echo === VBlank IRQ #6 ===
+dump regs
+
+run-until bp max-cycles 5000000
+echo === VBlank IRQ #7 ===
+dump regs
