@@ -81,3 +81,5 @@ Implementare gestione joypad con bindings configurabili da tastiera e controller
 
 ## PPU con sprite e window
 Necessario per molti giochi.
+
+## Shader effetto green-LCD
