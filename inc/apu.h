@@ -1,11 +1,11 @@
 #pragma once
 #ifndef _H_APU_H_
-#define _H_APU_H_
+#    define _H_APU_H_
 
-#include <cstdint>
+#    include <cstdint>
 
-#include <audio_ring_buffer.hpp>
-#include <mmu.h>
+#    include <audio_ring_buffer.hpp>
+#    include <mmu.h>
 
 namespace gbemu {
     struct apu {
@@ -63,12 +63,16 @@ namespace gbemu {
             void load_nrx1(std::uint8_t v);
             void load_nrx2(std::uint8_t v);
             void load_nrx3(std::uint8_t v);
-            bool load_nrx4(std::uint8_t v);
+            // next_step_clocks_length carries the FS phase needed for the
+            // "extra length clock" quirk: writing NRx4 with length_enable
+            // rising from 0->1 while the next FS step would NOT clock length
+            // clocks length once immediately.
+            bool load_nrx4(std::uint8_t v, bool next_step_clocks_length);
 
             void tick_frequency(std::uint32_t cycles);
             void tick_length();
             void tick_envelope();
-            void trigger();
+            void trigger(bool next_step_clocks_length);
             float sample() const;
         };
 
@@ -77,14 +81,14 @@ namespace gbemu {
         // the fetched nibble.
         struct wave_channel {
             // Configuration (mirrors NR30..NR34 + NR32)
-            std::uint16_t length{0};      // 8-bit width, 256-step counter
+            std::uint16_t length{0}; // 8-bit width, 256-step counter
             bool length_enabled{false};
             std::uint8_t output_level{0}; // 0=mute, 1=100%, 2=50%, 3=25%
             std::uint16_t freq_raw{0};
 
             // Runtime state
             bool channel_enabled{false};
-            bool dac_enabled{false};       // NR30 bit 7 — explicit DAC bit
+            bool dac_enabled{false}; // NR30 bit 7 — explicit DAC bit
             std::int32_t freq_timer{8};
             std::uint8_t wave_pos{0};      // 0..31
             std::uint8_t sample_buffer{0}; // last fetched 4-bit nibble
@@ -93,13 +97,13 @@ namespace gbemu {
             void load_nr31(std::uint8_t v);
             void load_nr32(std::uint8_t v);
             void load_nr33(std::uint8_t v);
-            bool load_nr34(std::uint8_t v);
+            bool load_nr34(std::uint8_t v, bool next_step_clocks_length);
 
             // Wave RAM is passed in by the apu (it lives in mmu.mmio at
             // $FF30-$FF3F). Keeping it external avoids a back-pointer.
             void tick_frequency(std::uint32_t cycles, const std::uint8_t* wave_ram);
             void tick_length();
-            void trigger();
+            void trigger(bool next_step_clocks_length);
             float sample() const;
         };
 
@@ -129,12 +133,12 @@ namespace gbemu {
             void load_nr41(std::uint8_t v);
             void load_nr42(std::uint8_t v);
             void load_nr43(std::uint8_t v);
-            bool load_nr44(std::uint8_t v); // returns trigger bit
+            bool load_nr44(std::uint8_t v, bool next_step_clocks_length); // returns trigger bit
 
             void tick_frequency(std::uint32_t cycles);
             void tick_length();
             void tick_envelope();
-            void trigger();
+            void trigger(bool next_step_clocks_length);
             float sample() const;
         };
 
@@ -152,6 +156,12 @@ namespace gbemu {
             std::uint16_t shadow_freq{0};
             std::uint8_t timer{0};
             bool enabled{false};
+            // DMG quirk: once a sweep calculation has been performed in
+            // negate (subtract) mode, leaving negate mode by writing NR10
+            // with bit 3 cleared immediately disables the channel. Set by
+            // calc() whenever it runs with `decrease` true; reset by
+            // trigger().
+            bool negate_used{false};
 
             void load_nr10(std::uint8_t v);
 
@@ -167,7 +177,8 @@ namespace gbemu {
             bool tick(std::uint16_t& freq_inout);
 
         private:
-            bool calc(std::uint16_t& out) const;
+            // Not const: may set negate_used as a side effect.
+            bool calc(std::uint16_t& out);
         };
 
         mmu& mmu_;
@@ -210,6 +221,8 @@ namespace gbemu {
         void on_nr42(std::uint8_t v);
         void on_nr43(std::uint8_t v);
         void on_nr44(std::uint8_t v);
+        void on_nr50(std::uint8_t v);
+        void on_nr51(std::uint8_t v);
         void on_nr52(std::uint8_t v);
         void on_div_write(std::uint8_t v);
 
@@ -230,6 +243,12 @@ namespace gbemu {
         void advance_frame_sequencer(std::uint32_t cycles);
         void do_frame_seq_step();
         void emit_sample();
+
+        // True when the next FS step would clock the length counter (i.e.
+        // the currently-pending step is one of 0/2/4/6). Used by NRx4
+        // writes / triggers to decide whether the "extra length clock"
+        // quirk should fire.
+        bool next_step_clocks_length() const { return (frame_seq_step_ & 1) == 0; }
     };
 } // namespace gbemu
 

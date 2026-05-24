@@ -7,6 +7,7 @@
 #    include <string>
 
 #    include <alu.h>
+#    include <apu.h>
 #    include <card.h>
 #    include <cpu.h>
 #    include <dma.h>
@@ -17,7 +18,6 @@
 #    include <registers.h>
 #    include <serial.h>
 #    include <timer.h>
-#    include <apu.h>
 
 namespace gbemu {
 

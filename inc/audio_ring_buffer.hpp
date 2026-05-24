@@ -1,9 +1,9 @@
 #pragma once
 #ifndef _H_AUDIO_RING_BUFFER_H_
-#define _H_AUDIO_RING_BUFFER_H_
+#    define _H_AUDIO_RING_BUFFER_H_
 
-#include <atomic>
-#include <thread>
+#    include <atomic>
+#    include <thread>
 
 namespace gbemu {
     class audio_ring_buffer {

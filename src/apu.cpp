@@ -59,6 +59,12 @@ apu::apu(mmu& mmu) : mmu_(mmu) {
     // A trivial handler keeps the mmio byte pinned to 0xFF after any write.
     mmu_.add_mmio_write_handler(0xFF15, [this](std::uint8_t v) { apply_read_mask(0xFF15, v); });
     mmu_.add_mmio_write_handler(0xFF1F, [this](std::uint8_t v) { apply_read_mask(0xFF1F, v); });
+    // $FF27-$FF2F are also unused and read back 0xFF. Blargg test 01 iterates
+    // across this whole range and expects every write to leave a 0xFF byte
+    // behind.
+    for (std::uint16_t a = 0xFF27; a <= 0xFF2F; ++a) {
+        mmu_.add_mmio_write_handler(a, [this, a](std::uint8_t) { mmu_.mmio[a - 0xFF00] = 0xFF; });
+    }
     // Pre-stamp the read-mask bits across the entire NR10..NR51 range so
     // reads issued before any ROM-driven write return the canonical
     // "mostly 1s" byte for each register (matches DMG power-on state for
@@ -66,6 +72,12 @@ apu::apu(mmu& mmu) : mmu_(mmu) {
     for (std::uint16_t a = 0xFF10; a <= 0xFF25; ++a) {
         mmu_.mmio[a - 0xFF00] = READ_MASKS[a - 0xFF10];
     }
+    for (std::uint16_t a = 0xFF27; a <= 0xFF2F; ++a) {
+        mmu_.mmio[a - 0xFF00] = 0xFF;
+    }
+    // Master mixer — NR50 (master volume / VIN), NR51 (channel pan).
+    mmu_.add_mmio_write_handler(0xFF24, [this](std::uint8_t v) { on_nr50(v); });
+    mmu_.add_mmio_write_handler(0xFF25, [this](std::uint8_t v) { on_nr51(v); });
     // Master / status — NR52 is the power switch + per-channel status.
     mmu_.add_mmio_write_handler(0xFF26, [this](std::uint8_t v) { on_nr52(v); });
     // DIV write quirk — only fires on ROM-driven writes now that timer::step
@@ -100,9 +112,16 @@ void apu::square_channel::load_nrx3(std::uint8_t v) {
     freq_raw = (freq_raw & 0x0700) | v;
 }
 
-bool apu::square_channel::load_nrx4(std::uint8_t v) {
+bool apu::square_channel::load_nrx4(std::uint8_t v, bool next_step_clocks_length) {
     freq_raw = (freq_raw & 0x00FF) | (std::uint16_t(v & 0x07) << 8);
+    const bool old_le = length_enabled;
     length_enabled = (v & 0x40) != 0;
+    // Extra length clock quirk: enabling length while in the half period
+    // whose next FS step won't clock length tick the counter once now.
+    if (length_enabled && !old_le && length > 0 && !next_step_clocks_length) {
+        if (--length == 0)
+            channel_enabled = false;
+    }
     return (v & 0x80) != 0;
 }
 
@@ -138,10 +157,15 @@ void apu::square_channel::tick_envelope() {
     }
 }
 
-void apu::square_channel::trigger() {
+void apu::square_channel::trigger(bool next_step_clocks_length) {
     channel_enabled = dac_enabled;
-    if (length == 0)
+    if (length == 0) {
         length = 64;
+        // If length is enabled and we're in the no-clock-next-step half,
+        // the just-reloaded max value is clocked once → max - 1.
+        if (length_enabled && !next_step_clocks_length)
+            --length;
+    }
     freq_timer = (2048 - static_cast<std::int32_t>(freq_raw)) * 4;
     volume = env_initial_vol;
     env_timer = env_period;
@@ -173,6 +197,9 @@ bool apu::sweep_unit::trigger(std::uint16_t channel_freq) {
     // Hardware quirk: a period of 0 reloads the timer as 8.
     timer = (period > 0) ? period : 8;
     enabled = (period > 0) || (shift > 0);
+    // Trigger clears any prior "negate calculation occurred" record. The
+    // upcoming calc() call below is what may set it again for this run.
+    negate_used = false;
     // Immediate overflow check on trigger when shift>0. Result is NOT
     // written back on the trigger calculation — only the periodic tick does
     // the write-back.
@@ -210,12 +237,13 @@ bool apu::sweep_unit::tick(std::uint16_t& freq_inout) {
     return false;
 }
 
-bool apu::sweep_unit::calc(std::uint16_t& out) const {
+bool apu::sweep_unit::calc(std::uint16_t& out) {
     const std::uint32_t delta = static_cast<std::uint32_t>(shadow_freq) >> shift;
     std::uint32_t new_freq;
     if (decrease) {
         // shadow_freq <= 2047 and delta <= shadow_freq → never underflows.
         new_freq = static_cast<std::uint32_t>(shadow_freq) - delta;
+        negate_used = true;
     } else {
         new_freq = static_cast<std::uint32_t>(shadow_freq) + delta;
     }
@@ -244,9 +272,14 @@ void apu::wave_channel::load_nr33(std::uint8_t v) {
     freq_raw = (freq_raw & 0x0700) | v;
 }
 
-bool apu::wave_channel::load_nr34(std::uint8_t v) {
+bool apu::wave_channel::load_nr34(std::uint8_t v, bool next_step_clocks_length) {
     freq_raw = (freq_raw & 0x00FF) | (std::uint16_t(v & 0x07) << 8);
+    const bool old_le = length_enabled;
     length_enabled = (v & 0x40) != 0;
+    if (length_enabled && !old_le && length > 0 && !next_step_clocks_length) {
+        if (--length == 0)
+            channel_enabled = false;
+    }
     return (v & 0x80) != 0;
 }
 
@@ -269,10 +302,13 @@ void apu::wave_channel::tick_length() {
     }
 }
 
-void apu::wave_channel::trigger() {
+void apu::wave_channel::trigger(bool next_step_clocks_length) {
     channel_enabled = dac_enabled;
-    if (length == 0)
+    if (length == 0) {
         length = 256;
+        if (length_enabled && !next_step_clocks_length)
+            --length;
+    }
     freq_timer = (2048 - static_cast<std::int32_t>(freq_raw)) * 2;
     wave_pos = 0;
     // sample_buffer intentionally NOT reset — matches DMG behavior where
@@ -311,8 +347,13 @@ void apu::noise_channel::load_nr43(std::uint8_t v) {
     divisor_code = v & 0x07;
 }
 
-bool apu::noise_channel::load_nr44(std::uint8_t v) {
+bool apu::noise_channel::load_nr44(std::uint8_t v, bool next_step_clocks_length) {
+    const bool old_le = length_enabled;
     length_enabled = (v & 0x40) != 0;
+    if (length_enabled && !old_le && length > 0 && !next_step_clocks_length) {
+        if (--length == 0)
+            channel_enabled = false;
+    }
     return (v & 0x80) != 0;
 }
 
@@ -358,10 +399,13 @@ void apu::noise_channel::tick_envelope() {
     }
 }
 
-void apu::noise_channel::trigger() {
+void apu::noise_channel::trigger(bool next_step_clocks_length) {
     channel_enabled = dac_enabled;
-    if (length == 0)
+    if (length == 0) {
         length = 64;
+        if (length_enabled && !next_step_clocks_length)
+            --length;
+    }
     volume = env_initial_vol;
     env_timer = env_period;
     lfsr = 0x7FFF;
@@ -384,22 +428,36 @@ float apu::noise_channel::sample() const {
 // just stored is rewritten with `0 | read_mask`, so subsequent reads return
 // the mask-only value (matches DMG: write-only/unused bits still read 1 even
 // with the master off).
-#define GATE(addr)                                  \
-    do {                                            \
-        if (!powered_) {                            \
-            apply_read_mask((addr), 0);             \
-            return;                                 \
-        }                                           \
+#define GATE(addr)                      \
+    do {                                \
+        if (!powered_) {                \
+            apply_read_mask((addr), 0); \
+            return;                     \
+        }                               \
     } while (0)
 
 void apu::on_nr10(std::uint8_t v) {
     GATE(0xFF10);
+    const bool was_decrease = ch1_sweep_.decrease;
     ch1_sweep_.load_nr10(v);
+    // DMG quirk: leaving negate mode (decrease 1→0) after at least one
+    // sweep calculation has been done in negate mode immediately disables
+    // the channel.
+    if (was_decrease && !ch1_sweep_.decrease && ch1_sweep_.negate_used) {
+        ch1_sq_.channel_enabled = false;
+    }
     apply_read_mask(0xFF10, v);
 }
 
 void apu::on_nr11(std::uint8_t v) {
-    GATE(0xFF11);
+    // DMG quirk: even when powered off, the length portion of NRx1 writes
+    // is accepted (duty and other bits stay zero). The mmio byte is still
+    // forced to its read-mask since duty isn't updated.
+    if (!powered_) {
+        ch1_sq_.length = 64 - (v & 0x3F);
+        apply_read_mask(0xFF11, 0);
+        return;
+    }
     ch1_sq_.load_nrx1(v);
     apply_read_mask(0xFF11, v);
 }
@@ -418,8 +476,9 @@ void apu::on_nr13(std::uint8_t v) {
 
 void apu::on_nr14(std::uint8_t v) {
     GATE(0xFF14);
-    if (ch1_sq_.load_nrx4(v)) {
-        ch1_sq_.trigger();
+    const bool nclk = next_step_clocks_length();
+    if (ch1_sq_.load_nrx4(v, nclk)) {
+        ch1_sq_.trigger(nclk);
         if (ch1_sweep_.trigger(ch1_sq_.freq_raw))
             ch1_sq_.channel_enabled = false;
     }
@@ -427,7 +486,11 @@ void apu::on_nr14(std::uint8_t v) {
 }
 
 void apu::on_nr21(std::uint8_t v) {
-    GATE(0xFF16);
+    if (!powered_) {
+        ch2_.length = 64 - (v & 0x3F);
+        apply_read_mask(0xFF16, 0);
+        return;
+    }
     ch2_.load_nrx1(v);
     apply_read_mask(0xFF16, v);
 }
@@ -446,8 +509,9 @@ void apu::on_nr23(std::uint8_t v) {
 
 void apu::on_nr24(std::uint8_t v) {
     GATE(0xFF19);
-    if (ch2_.load_nrx4(v))
-        ch2_.trigger();
+    const bool nclk = next_step_clocks_length();
+    if (ch2_.load_nrx4(v, nclk))
+        ch2_.trigger(nclk);
     apply_read_mask(0xFF19, v);
 }
 
@@ -458,7 +522,12 @@ void apu::on_nr30(std::uint8_t v) {
 }
 
 void apu::on_nr31(std::uint8_t v) {
-    GATE(0xFF1B);
+    // DMG: NR31 is fully length on DMG, and accepted even while off.
+    if (!powered_) {
+        ch3_.load_nr31(v);
+        apply_read_mask(0xFF1B, 0);
+        return;
+    }
     ch3_.load_nr31(v);
     apply_read_mask(0xFF1B, v);
 }
@@ -477,13 +546,18 @@ void apu::on_nr33(std::uint8_t v) {
 
 void apu::on_nr34(std::uint8_t v) {
     GATE(0xFF1E);
-    if (ch3_.load_nr34(v))
-        ch3_.trigger();
+    const bool nclk = next_step_clocks_length();
+    if (ch3_.load_nr34(v, nclk))
+        ch3_.trigger(nclk);
     apply_read_mask(0xFF1E, v);
 }
 
 void apu::on_nr41(std::uint8_t v) {
-    GATE(0xFF20);
+    if (!powered_) {
+        ch4_.load_nr41(v);
+        apply_read_mask(0xFF20, 0);
+        return;
+    }
     ch4_.load_nr41(v);
     apply_read_mask(0xFF20, v);
 }
@@ -502,9 +576,20 @@ void apu::on_nr43(std::uint8_t v) {
 
 void apu::on_nr44(std::uint8_t v) {
     GATE(0xFF23);
-    if (ch4_.load_nr44(v))
-        ch4_.trigger();
+    const bool nclk = next_step_clocks_length();
+    if (ch4_.load_nr44(v, nclk))
+        ch4_.trigger(nclk);
     apply_read_mask(0xFF23, v);
+}
+
+void apu::on_nr50(std::uint8_t v) {
+    GATE(0xFF24);
+    apply_read_mask(0xFF24, v);
+}
+
+void apu::on_nr51(std::uint8_t v) {
+    GATE(0xFF25);
+    apply_read_mask(0xFF25, v);
 }
 
 #undef GATE
@@ -529,24 +614,25 @@ void apu::on_div_write(std::uint8_t /*v*/) {
     // system counter resets to 0; if that bit was 1 before the reset, the
     // FS sees a 1→0 transition and ticks once. Our 8192-cycle accumulator
     // mirrors counter mod 8192, so positions in [4096, 8191] map to
-    // "bit 12 was high".
-    if (frame_seq_acc_ >= 4096) {
+    // "bit 12 was high". The FS is held in reset while the APU is powered
+    // off, so the falling-edge quirk doesn't fire then.
+    if (powered_ && frame_seq_acc_ >= 4096) {
         do_frame_seq_step();
     }
     frame_seq_acc_ = 0;
 }
 
 void apu::power_off() {
-    // DMG quirk: length counters and their enables survive power-off. The
-    // rest of channel state and the NRxx mmio storage are wiped.
+    // DMG quirk: only the length COUNTER VALUES survive power-off. The
+    // length_enable bit lives in NRx4 bit 6, which is cleared along with
+    // every other NRxx register — preserving it here let the FS keep
+    // clocking lengths across the powered-on window between power-off and
+    // the next NRx4 write, decimating preserved length values before
+    // tests could trigger and measure them.
     const std::uint8_t ch1_len = ch1_sq_.length;
-    const bool ch1_le = ch1_sq_.length_enabled;
     const std::uint8_t ch2_len = ch2_.length;
-    const bool ch2_le = ch2_.length_enabled;
     const std::uint16_t ch3_len = ch3_.length;
-    const bool ch3_le = ch3_.length_enabled;
     const std::uint8_t ch4_len = ch4_.length;
-    const bool ch4_le = ch4_.length_enabled;
 
     ch1_sq_ = square_channel{};
     ch1_sweep_ = sweep_unit{};
@@ -554,10 +640,10 @@ void apu::power_off() {
     ch3_ = wave_channel{};
     ch4_ = noise_channel{};
 
-    ch1_sq_.length = ch1_len; ch1_sq_.length_enabled = ch1_le;
-    ch2_.length = ch2_len;    ch2_.length_enabled = ch2_le;
-    ch3_.length = ch3_len;    ch3_.length_enabled = ch3_le;
-    ch4_.length = ch4_len;    ch4_.length_enabled = ch4_le;
+    ch1_sq_.length = ch1_len;
+    ch2_.length = ch2_len;
+    ch3_.length = ch3_len;
+    ch4_.length = ch4_len;
 
     // Wipe NR10..NR25 (logical value = 0) but leave the read-mask bits set
     // so reads after power-off still return the canonical "mostly 1s" byte
@@ -565,6 +651,10 @@ void apu::power_off() {
     for (std::uint16_t a = 0xFF10; a <= 0xFF25; ++a) {
         mmu_.mmio[a - 0xFF00] = READ_MASKS[a - 0xFF10];
     }
+    // Hold the frame sequencer in reset while powered off. Resumes from
+    // step 0 on the next power-on.
+    frame_seq_acc_ = 0;
+    frame_seq_step_ = 0;
     powered_ = false;
 }
 
@@ -576,10 +666,14 @@ void apu::refresh_nr52_status() {
     // Preserve the written master-power bit, force unused bits to 1, and
     // OR in the live channel-enabled status (bits 0-3).
     std::uint8_t v = (mmu_.mmio[NR52_OFF] & 0x80) | 0x70;
-    if (ch1_sq_.channel_enabled) v |= 0x01;
-    if (ch2_.channel_enabled)    v |= 0x02;
-    if (ch3_.channel_enabled)    v |= 0x04;
-    if (ch4_.channel_enabled)    v |= 0x08;
+    if (ch1_sq_.channel_enabled)
+        v |= 0x01;
+    if (ch2_.channel_enabled)
+        v |= 0x02;
+    if (ch3_.channel_enabled)
+        v |= 0x04;
+    if (ch4_.channel_enabled)
+        v |= 0x08;
     mmu_.mmio[NR52_OFF] = v;
 }
 
@@ -615,6 +709,8 @@ void apu::do_frame_seq_step() {
 }
 
 void apu::advance_frame_sequencer(std::uint32_t cycles) {
+    if (!powered_)
+        return;
     frame_seq_acc_ += cycles;
     while (frame_seq_acc_ >= FRAME_SEQ_PERIOD) {
         frame_seq_acc_ -= FRAME_SEQ_PERIOD;
@@ -658,14 +754,22 @@ void apu::emit_sample() {
 
     const std::uint8_t nr51 = mmu_.mmio[NR51_OFF];
     float l = 0.0f, r = 0.0f;
-    if (nr51 & 0x10) l += ch1; // bit 4: CH1 left
-    if (nr51 & 0x01) r += ch1; // bit 0: CH1 right
-    if (nr51 & 0x20) l += ch2; // bit 5: CH2 left
-    if (nr51 & 0x02) r += ch2; // bit 1: CH2 right
-    if (nr51 & 0x40) l += ch3; // bit 6: CH3 left
-    if (nr51 & 0x04) r += ch3; // bit 2: CH3 right
-    if (nr51 & 0x80) l += ch4; // bit 7: CH4 left
-    if (nr51 & 0x08) r += ch4; // bit 3: CH4 right
+    if (nr51 & 0x10)
+        l += ch1; // bit 4: CH1 left
+    if (nr51 & 0x01)
+        r += ch1; // bit 0: CH1 right
+    if (nr51 & 0x20)
+        l += ch2; // bit 5: CH2 left
+    if (nr51 & 0x02)
+        r += ch2; // bit 1: CH2 right
+    if (nr51 & 0x40)
+        l += ch3; // bit 6: CH3 left
+    if (nr51 & 0x04)
+        r += ch3; // bit 2: CH3 right
+    if (nr51 & 0x80)
+        l += ch4; // bit 7: CH4 left
+    if (nr51 & 0x08)
+        r += ch4; // bit 3: CH4 right
 
     const std::uint8_t nr50 = mmu_.mmio[NR50_OFF];
     const float vol_l = static_cast<float>(((nr50 >> 4) & 0x07) + 1) / 8.0f;
