@@ -2,11 +2,12 @@
 
 #include <gb_layout.h>
 #include <irq.h>
+#include <pixel_pipeline.h>
 #include <ppu.h>
 
 using namespace gbemu;
 
-ppu::ppu(mmu& m, irq& i) : mmu_(m), irq_(i) {}
+ppu::ppu(mmu& m, irq& i) : mmu_(m), irq_(i), resolver_(m) {}
 
 void ppu::step(std::uint32_t t_cycles) {
     const auto lcdc = mmu_.hwr_lcdc();
@@ -129,18 +130,6 @@ void ppu::set_stat_mode(mode_e new_mode) {
 }
 
 namespace {
-    // Decode one BG/window tile pixel: returns the 2-bit color index (0..3)
-    // selected by `col` (the bit position within the row, 0..7) inside the
-    // pair of planar bytes (lo, hi).
-    inline std::uint8_t tile_color_index(std::uint8_t lo, std::uint8_t hi, std::uint8_t col) {
-        return static_cast<std::uint8_t>((((hi >> col) & 1) << 1) | ((lo >> col) & 1));
-    }
-
-    // Map a 2-bit color index through a palette register (BGP/OBP0/OBP1).
-    inline std::uint8_t shade_from_palette(std::uint8_t palette_reg, std::uint8_t color_index) {
-        return static_cast<std::uint8_t>((palette_reg >> (color_index * 2)) & 0x03);
-    }
-
     // Compute the VRAM byte address of `row` of the tile at `tile_index`,
     // honoring LCDC.4 addressing (true = $8000-unsigned, false = $9000-signed).
     inline std::uint16_t bg_tile_row_addr(std::uint8_t tile_index, std::uint8_t row, bool data_8000) {
@@ -155,12 +144,11 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
     const auto lcdc = mmu_.hwr_lcdc();
     const auto scy = mmu_.hwr_scy();
     const auto scx = mmu_.hwr_scx();
-    const auto bgp = mmu_.hwr_bgp();
 
     // LCDC.0 = BG enable. If off, fill scanline with shade 0 of BGP and treat
     // BG as transparent (color 0) for sprite priority so OBJs always show through.
     if (!(lcdc & gb::lcdc::bg_enable)) {
-        const auto bg_off = gb::DMG_PALETTE_ARGB[shade_from_palette(bgp, 0)];
+        const std::uint32_t bg_off = resolver_.resolve(palette_id::bg, 0);
         for (int px = 0; px < gb::LCD_WIDTH; ++px) {
             fb[ly * gb::LCD_WIDTH + px] = bg_off;
             bg_color_line[px] = 0;
@@ -187,10 +175,11 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
         const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE));
         const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
 
+        // (color_index, palette_id) is the pipeline intermediate; the resolver
+        // turns it into the final ARGB shade. On CGB the palette_id will come
+        // from the tile's attribute byte in VRAM bank 1 instead of being fixed.
         const std::uint8_t ci = tile_color_index(lo, hi, col);
-        const std::uint8_t shade = shade_from_palette(bgp, ci);
-
-        fb[ly * gb::LCD_WIDTH + px] = gb::DMG_PALETTE_ARGB[shade];
+        fb[ly * gb::LCD_WIDTH + px] = resolver_.resolve(palette_id::bg, ci);
         bg_color_line[px] = ci;
     }
 }
@@ -215,7 +204,6 @@ void ppu::render_window_scanline(std::uint8_t ly) {
 
     const std::uint16_t map_base = (lcdc & gb::lcdc::window_map_9c00) ? gb::BG_MAP_1 : gb::BG_MAP_0;
     const bool data_8000 = (lcdc & gb::lcdc::tile_data_8000) != 0;
-    const auto bgp = mmu_.hwr_bgp();
 
     const std::uint8_t y = window_line;
     const std::uint8_t tile_y = y >> 3;
@@ -235,9 +223,7 @@ void ppu::render_window_scanline(std::uint8_t ly) {
         const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
 
         const std::uint8_t ci = tile_color_index(lo, hi, col);
-        const std::uint8_t shade = shade_from_palette(bgp, ci);
-
-        fb[ly * gb::LCD_WIDTH + px] = gb::DMG_PALETTE_ARGB[shade];
+        fb[ly * gb::LCD_WIDTH + px] = resolver_.resolve(palette_id::bg, ci);
         bg_color_line[px] = ci; // sprites use this for the BG-priority bit
     }
 
@@ -288,7 +274,7 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
         const bool y_flip = (sp.attr & gb::oam_attr::y_flip) != 0;
         const bool x_flip = (sp.attr & gb::oam_attr::x_flip) != 0;
         const bool bg_priority = (sp.attr & gb::oam_attr::bg_priority) != 0;
-        const std::uint8_t pal = (sp.attr & gb::oam_attr::dmg_palette_obp1) ? mmu_.hwr_obp1() : mmu_.hwr_obp0();
+        const palette_id pal = (sp.attr & gb::oam_attr::dmg_palette_obp1) ? palette_id::obj1 : palette_id::obj0;
 
         int row = static_cast<int>(ly) - sprite_top;
         if (y_flip)
@@ -323,8 +309,7 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
             if (bg_priority && bg_color_line[screen_x] != 0)
                 continue; // OBJ behind BG colors 1-3
 
-            const std::uint8_t shade = shade_from_palette(pal, ci);
-            fb[ly * gb::LCD_WIDTH + screen_x] = gb::DMG_PALETTE_ARGB[shade];
+            fb[ly * gb::LCD_WIDTH + screen_x] = resolver_.resolve(pal, ci);
         }
     }
 }

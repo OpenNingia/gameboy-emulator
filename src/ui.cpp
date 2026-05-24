@@ -24,6 +24,7 @@
 #include <imgui_impl_sdlrenderer2.h>
 #include <imgui_internal.h>
 #include <mbc.h>
+#include <pixel_pipeline.h>
 #include <third_party/imgui_memory_editor.h>
 #include <ui.h>
 
@@ -521,19 +522,19 @@ namespace gbemu::ui {
 
         // Decode an 8x8 GB tile (TILE_BYTES bytes at vram_offset) into `out`
         // (a row-major buffer of dst_stride pixels per row), placing the
-        // top-left corner of the tile at (dst_x, dst_y).  Each output pixel
-        // is ARGB8888 driven by `bgp` (BGP-mapped).
+        // top-left corner of the tile at (dst_x, dst_y).  Each output pixel is
+        // resolved through `resolver` against `pal_id` (the viewer hardcodes
+        // palette_id::bg, matching the BG/window path in the live PPU).
         void decode_tile_8x8(const std::uint8_t* vram, std::uint32_t vram_offset, std::uint32_t* out,
                              std::uint32_t dst_stride, std::uint32_t dst_x, std::uint32_t dst_y,
-                             const std::uint8_t bgp) {
+                             const gbemu::palette_resolver& resolver, gbemu::palette_id pal_id) {
             for (std::uint32_t row = 0; row < gb::TILE_PIXELS; ++row) {
                 const std::uint8_t lo = vram[vram_offset + row * 2];
                 const std::uint8_t hi = vram[vram_offset + row * 2 + 1];
                 for (std::uint32_t col = 0; col < gb::TILE_PIXELS; ++col) {
                     const std::uint8_t shift = static_cast<std::uint8_t>(7 - col);
-                    const std::uint8_t ci = static_cast<std::uint8_t>((((hi >> shift) & 1) << 1) | ((lo >> shift) & 1));
-                    const std::uint8_t shade = (bgp >> (ci * 2)) & 0x03;
-                    out[(dst_y + row) * dst_stride + (dst_x + col)] = gb::DMG_PALETTE_ARGB[shade];
+                    const std::uint8_t ci = gbemu::tile_color_index(lo, hi, shift);
+                    out[(dst_y + row) * dst_stride + (dst_x + col)] = resolver.resolve(pal_id, ci);
                 }
             }
         }
@@ -549,7 +550,7 @@ namespace gbemu::ui {
                     return;
             }
             std::array<std::uint32_t, 128 * 192> pixels{};
-            const std::uint8_t bgp = c.core->mmu.hwr_bgp();
+            const gbemu::palette_resolver resolver{c.core->mmu};
             const std::uint8_t* vram = c.core->mmu.vram_bank().data();
             // The viewer covers $8000-$97FF: 384 tiles laid out 16 wide × 24 tall.
             constexpr std::uint32_t tiles_per_row = 16;
@@ -557,7 +558,7 @@ namespace gbemu::ui {
             for (std::uint32_t t = 0; t < total_tiles; ++t) {
                 const std::uint32_t tx = (t % tiles_per_row) * gb::TILE_PIXELS;
                 const std::uint32_t ty = (t / tiles_per_row) * gb::TILE_PIXELS;
-                decode_tile_8x8(vram, t * gb::TILE_BYTES, pixels.data(), 128, tx, ty, bgp);
+                decode_tile_8x8(vram, t * gb::TILE_BYTES, pixels.data(), 128, tx, ty, resolver, gbemu::palette_id::bg);
             }
             gbemu::gfx::presenter_upload(c.ppu_tiles_present, pixels.data());
         }
@@ -574,7 +575,7 @@ namespace gbemu::ui {
             }
             std::array<std::uint32_t, 256 * 256> pixels{};
             const std::uint8_t lcdc = c.core->mmu.hwr_lcdc();
-            const std::uint8_t bgp = c.core->mmu.hwr_bgp();
+            const gbemu::palette_resolver resolver{c.core->mmu};
             const bool data_8000 = (lcdc & gb::lcdc::tile_data_8000) != 0;
             const std::uint16_t map_base = c.ppu_bgmap_idx ? gb::BG_MAP_1 : gb::BG_MAP_0;
             const std::uint8_t* vram = c.core->mmu.vram_bank().data();
@@ -590,17 +591,16 @@ namespace gbemu::ui {
                                         signed_window_off +
                                         static_cast<std::int32_t>(static_cast<std::int8_t>(idx)) * gb::TILE_BYTES);
                     decode_tile_8x8(vram, tile_off, pixels.data(), 256, tx * gb::TILE_PIXELS, ty * gb::TILE_PIXELS,
-                                    bgp);
+                                    resolver, gbemu::palette_id::bg);
                 }
             }
             gbemu::gfx::presenter_upload(c.ppu_bgmap_present, pixels.data());
         }
 
-        void palette_swatch(const char* label, std::uint8_t pal) {
+        void palette_swatch(const char* label, const gbemu::palette_resolver& resolver, gbemu::palette_id pal_id) {
             ImGui::TextUnformatted(label);
             for (int i = 0; i < 4; ++i) {
-                const std::uint8_t shade = (pal >> (i * 2)) & 0x03;
-                const std::uint32_t argb = gb::DMG_PALETTE_ARGB[shade];
+                const std::uint32_t argb = resolver.resolve(pal_id, static_cast<std::uint8_t>(i));
                 const ImVec4 col{((argb >> 16) & 0xFF) / 255.0f, ((argb >> 8) & 0xFF) / 255.0f, (argb & 0xFF) / 255.0f,
                                  1.0f};
                 ImGui::SameLine();
@@ -645,9 +645,10 @@ namespace gbemu::ui {
                         (stat >> 4) & 1, (stat >> 3) & 1, (stat >> 2) & 1, stat & 3);
 
             ImGui::SeparatorText("Palettes");
-            palette_swatch("BGP ", mmu.hwr_bgp());
-            palette_swatch("OBP0", mmu.hwr_obp0());
-            palette_swatch("OBP1", mmu.hwr_obp1());
+            const gbemu::palette_resolver resolver{mmu};
+            palette_swatch("BGP ", resolver, gbemu::palette_id::bg);
+            palette_swatch("OBP0", resolver, gbemu::palette_id::obj0);
+            palette_swatch("OBP1", resolver, gbemu::palette_id::obj1);
 
             // Heavy-cost viewers refresh only when we're actually drawing the
             // panel — the early-return on `ImGui::Begin(... ) == false` above

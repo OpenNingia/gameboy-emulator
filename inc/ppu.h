@@ -5,6 +5,7 @@
 
 #include <gb_layout.h>
 #include <mmu.h>
+#include <pixel_pipeline.h>
 
 namespace gbemu {
     struct irq;
@@ -26,6 +27,7 @@ namespace gbemu {
     private:
         mmu& mmu_;
         irq& irq_;
+        palette_resolver resolver_;
         mode_e mode{mode_e::OAM_SCAN};
         std::uint32_t dots_in_mode{0};
         bool frame_ready{false};
