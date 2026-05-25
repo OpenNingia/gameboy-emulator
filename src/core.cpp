@@ -48,10 +48,24 @@ void core::init() {
         // initial registry values
         mmu.initialize_registers();
 
-        regs.af.u16 = 0x01B0;
-        regs.bc.u16 = 0x0013;
-        regs.de.u16 = 0x00D8;
-        regs.hl.u16 = 0x014D;
+        if (cgb_mode) {
+            // Post-CGB-BIOS snapshot: A=$11 is the CGB signature games
+            // check at boot (Pokémon Crystal hangs on a black screen
+            // without it because the CGB palette init path keys off
+            // A==$11 to seed BCPD); F=$80 carries the carry bit a real
+            // CGB leaves set after the logo check.  DE=$FF56 and
+            // HL=$000D mirror the values the actual boot ROM leaves
+            // behind.
+            regs.af.u16 = 0x1180;
+            regs.bc.u16 = 0x0000;
+            regs.de.u16 = 0xFF56;
+            regs.hl.u16 = 0x000D;
+        } else {
+            regs.af.u16 = 0x01B0;
+            regs.bc.u16 = 0x0013;
+            regs.de.u16 = 0x00D8;
+            regs.hl.u16 = 0x014D;
+        }
         regs.sp = 0xFFFE;
         regs.pc = 0x100;
     }

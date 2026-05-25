@@ -74,11 +74,17 @@ void gbemu::mmu::add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
 
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
     switch (addr & 0xF000) {
-            // the first 256 bytes can be either the bios
-            // or the first bank of cardrige
-            // depending on the 'bios_accessible_' flag
+            // CGB BIOS overlay spans $0000-$08FF with a "hole" at
+            // $0100-$01FF where the cartridge header shows through — that
+            // header window is what the CGB BIOS reads to do the Nintendo
+            // logo check and pick the colorization palette for DMG carts.
+            // DMG BIOS only populates $0000-$00FF and disables the overlay
+            // via BOOT_OFF before any read past $00FF, so the dispatch is
+            // the same shape for both models; the extra $0200-$08FF range
+            // stays zero on DMG, but no DMG code path reads it while the
+            // overlay is armed.
         case 0x0000: {
-            if (bios_accessible_ && addr < 0x100) {
+            if (bios_accessible_ && (addr < 0x100 || (addr >= 0x200 && addr < 0x900))) {
                 return bios_[addr];
             }
 

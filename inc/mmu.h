@@ -104,9 +104,14 @@ namespace gbemu {
         std::span<const std::uint8_t> wave_ram() const;
 
         // BIOS overlay.  load_bios copies the ROM image into the internal
-        // buffer and arms the overlay so $0000-$00FF subsequently returns
-        // BIOS bytes instead of cartridge bank 0; on a nonzero write to
-        // $FF50 the MMU disarms the overlay (one-shot until reset on DMG).
+        // buffer (sized for the larger CGB boot ROM at 0x900 bytes; the DMG
+        // boot ROM at 0x100 bytes loads into the same buffer via std::min in
+        // load_bios) and arms the overlay so reads in $0000-$00FF and
+        // $0200-$08FF subsequently return BIOS bytes instead of cartridge
+        // bank 0.  The $0100-$01FF window stays mapped to the cart so the
+        // CGB BIOS can read the header it boots into for logo check and
+        // DMG-cart colorization.  A nonzero write to $FF50 disarms the
+        // overlay (one-shot until reset).
         void load_bios(std::span<const std::uint8_t> data);
         bool bios_active() const { return bios_accessible_; }
         std::size_t bios_size() const { return bios_.size(); }
@@ -168,8 +173,13 @@ namespace gbemu {
         // closer to a real power cycle than one that skips it).
         bool bios_loaded_{false};
 
-        // bios code 0x0000 -> 0x00FF
-        ram_t<0x0100> bios_{};
+        // bios code.  Sized for the CGB boot ROM ($0000-$08FF, 2304 bytes,
+        // with a "hole" at $0100-$01FF where the cartridge header shows
+        // through during BIOS execution); the DMG boot ROM ($0000-$00FF,
+        // 256 bytes) loads into the same buffer via std::min in load_bios
+        // and disarms itself via BOOT_OFF before any read past $00FF, so
+        // the trailing bytes staying zero is harmless.
+        ram_t<0x0900> bios_{};
         // cartridge (ROM + external RAM); owns its own bytes and handles
         // banking.  Installed by core::load(rom_file&) via attach_cartridge.
         std::unique_ptr<mbc> cart_{};
