@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include <cfg.h>
+#include <user_state.h>
 
 namespace gbemu {
     struct core;
@@ -59,4 +60,12 @@ private:
     // ROM is loaded so the first dirty period after a swap flushes
     // promptly.
     std::uint64_t last_battery_flush_ms_{0};
+
+    // Session state persisted under <base>/<user_dir>/user.conf.
+    // Loaded at the top of run(), saved at shutdown (window pose) and
+    // on-demand when the UI flags `save_user_state_requested` (e.g.
+    // after a Recent ROMs mutation).  `user_conf_path_` is resolved
+    // once in run() and reused for both load and save sites.
+    gbemu::user_state user_state_{};
+    std::string user_conf_path_{};
 };

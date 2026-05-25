@@ -35,34 +35,10 @@ namespace gbemu {
 
 namespace {
     // Initial SDL window dimensions used the first time the app runs (no
-    // gbemu_window.state on disk yet).  Subsequent launches restore the
-    // user's last size from gbemu_window.state.
+    // user.conf on disk yet).  Subsequent launches restore the user's
+    // last size from `user_state.window_w / window_h`.
     constexpr int DEFAULT_WINDOW_WIDTH = 1280;
     constexpr int DEFAULT_WINDOW_HEIGHT = 720;
-
-    // Small persistent window-state file kept next to imgui.ini in CWD.  SDL
-    // owns the platform window outside ImGui, so the window size is not
-    // covered by imgui.ini; without this file the window would snap back to
-    // the hard-coded default at every launch.  Format is a single line
-    // "WIDTH HEIGHT".
-    constexpr const char* WINDOW_STATE_FILE = "gbemu_window.state";
-
-    bool load_window_state(int& w, int& h) {
-        std::ifstream f(WINDOW_STATE_FILE);
-        int rw = 0, rh = 0;
-        if (f >> rw >> rh && rw > 0 && rh > 0) {
-            w = rw;
-            h = rh;
-            return true;
-        }
-        return false;
-    }
-
-    void save_window_state(int w, int h) {
-        std::ofstream f(WINDOW_STATE_FILE);
-        if (f)
-            f << w << ' ' << h << '\n';
-    }
 
     // SDL audio callback — invoked on the SDL audio thread when the device
     // wants more samples.  Drains stereo float frames out of the APU's ring
@@ -428,11 +404,29 @@ void Application::run() {
         SDL_PauseAudioDevice(audio_dev, 0); // start the audio thread
     }
 
+    // Load persisted session state.  user.conf lives under
+    // <base>/<user_dir>/ alongside imgui.ini so all interactive-mode
+    // state stays self-contained in the portable layout (no more CWD-
+    // relative gbemu_window.state / gbemu_recent.txt).  Missing file on
+    // first run is normal: load() leaves user_state_ at its defaults.
+    // Ensure the directory exists up front so ImGui's first
+    // SaveIniSettingsToDisk doesn't silently no-op on a fresh install
+    // (CMake materialises user/ at configure time in the dev tree, but a
+    // packaged release running from a fresh layout might not have it).
+    user_conf_path_ = gbemu::paths::resolve_data_path(base_, cfg.paths.user_dir, "user.conf");
+    const auto imgui_ini_path = gbemu::paths::resolve_data_path(base_, cfg.paths.user_dir, "imgui.ini");
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(gbemu::paths::resolve_under(base_, cfg.paths.user_dir), ec);
+    }
+    user_state_.load(user_conf_path_);
+
     // Restore last-used SDL window dimensions if available; otherwise fall
-    // back to the hard-coded default (first launch on this machine).
-    int win_w = DEFAULT_WINDOW_WIDTH;
-    int win_h = DEFAULT_WINDOW_HEIGHT;
-    load_window_state(win_w, win_h);
+    // back to the hard-coded default (first launch on this machine).  A
+    // zero in either dimension is treated as "no saved value" — covers
+    // both a fresh user.conf and a partial/corrupt write.
+    int win_w = (user_state_.window_w > 0) ? user_state_.window_w : DEFAULT_WINDOW_WIDTH;
+    int win_h = (user_state_.window_h > 0) ? user_state_.window_h : DEFAULT_WINDOW_HEIGHT;
 
     auto window = SDL_CreateWindow("GbEmu", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h,
                                    SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
@@ -454,7 +448,7 @@ void Application::run() {
     if (!gfx_backend)
         throw gbemu::gbemu_exception{"gfx backend creation failed!"};
 
-    auto* ui_ctx = gbemu::ui::init(window, renderer, gfx_backend, debugger, core);
+    auto* ui_ctx = gbemu::ui::init(window, renderer, gfx_backend, debugger, core, user_state_, imgui_ini_path);
 
     // Apply display config (frame blending mode + active palette) and
     // scan the palettes directory for any user .sbp files.  Has to run
@@ -621,6 +615,15 @@ void Application::run() {
                 LOG_ERROR(gbemu::log::root(), "Load ROM failed ({}): {}", path, e.what());
             }
         }
+        // Persist user.conf if the UI mutated user_state during this
+        // frame (recents add/clear today, palette / panel-state in the
+        // future).  Drained last so a successful ROM load above also
+        // catches its add_recent_rom in this same frame instead of
+        // waiting for the next.
+        if (acts.save_user_state_requested) {
+            acts.save_user_state_requested = false;
+            user_state_.save(user_conf_path_);
+        }
 
         // Periodic battery save flush.  Every ~2 s we check whether the
         // cart's SRAM has been written to and, if so, persist it.  RTC
@@ -649,12 +652,17 @@ void Application::run() {
     // the user next boots.  No-op when no cart was loaded.
     flush_battery_save_(core);
 
-    // Snapshot final window dimensions before teardown so the next launch
-    // re-opens at the same size.
+    // Snapshot final window dimensions and persist the whole user_state
+    // blob before teardown so the next launch re-opens at the same size
+    // (and with the same recents list, palette, etc).  Failure is logged
+    // by user_state::save and otherwise swallowed — we'd rather start
+    // fresh than block shutdown on a disk error.
     {
         int final_w = 0, final_h = 0;
         SDL_GetWindowSize(window, &final_w, &final_h);
-        save_window_state(final_w, final_h);
+        user_state_.window_w = final_w;
+        user_state_.window_h = final_h;
+        user_state_.save(user_conf_path_);
     }
 
     // Close the audio device before the core (and the ring buffer it owns)

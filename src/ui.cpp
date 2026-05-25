@@ -11,7 +11,6 @@
 #include <cfloat>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -32,6 +31,7 @@
 #include <pixel_pipeline.h>
 #include <third_party/imgui_memory_editor.h>
 #include <ui.h>
+#include <user_state.h>
 
 namespace gbemu::ui {
 
@@ -43,8 +43,9 @@ namespace gbemu::ui {
             std::uint16_t base;
         };
 
-        // Persistent state files kept next to imgui.ini in CWD.
-        constexpr const char* RECENT_ROMS_FILE = "gbemu_recent.txt";
+        // Cap on the Recent ROMs MRU list.  Storage lives in user_state
+        // (persisted to <base>/<user_dir>/user.conf); this only bounds
+        // how many entries we keep in memory and serialise back out.
         constexpr std::size_t MAX_RECENT_ROMS = 8;
 
     } // namespace
@@ -97,7 +98,16 @@ namespace gbemu::ui {
 
         // Menu-bar / popup state.
         host_actions actions{};
-        std::vector<std::string> recent_roms{};
+        // Session state owned by the host Application.  Source of truth
+        // for `recent_roms` (and future palette / panel-state prefs);
+        // mutations raise host_actions::save_user_state_requested so the
+        // host writes the file back to disk after the frame.
+        gbemu::user_state* user{nullptr};
+        // Long-lived backing for ImGui::GetIO().IniFilename — ImGui
+        // stores the pointer verbatim and does not copy.  Set in init()
+        // right after CreateContext so the first NewFrame loads the
+        // right path.
+        std::string imgui_ini_path{};
         bool show_about_popup{false};
 
         // Display post-processing — frame blending (LCD ghosting) and the
@@ -112,30 +122,6 @@ namespace gbemu::ui {
         // radio checkmarks without re-walking the registry to identify it.
         std::string active_palette_name{"grey"};
     };
-
-    namespace {
-
-        // Recents persistence: one path per line, MRU first. Missing file is
-        // not an error (first launch). Save is best-effort.
-        void load_recent_roms(context& c) {
-            c.recent_roms.clear();
-            std::ifstream f(RECENT_ROMS_FILE);
-            std::string line;
-            while (std::getline(f, line) && c.recent_roms.size() < MAX_RECENT_ROMS) {
-                if (!line.empty())
-                    c.recent_roms.push_back(line);
-            }
-        }
-
-        void save_recent_roms(const context& c) {
-            std::ofstream f(RECENT_ROMS_FILE);
-            if (!f)
-                return;
-            for (const auto& p : c.recent_roms)
-                f << p << '\n';
-        }
-
-    } // namespace
 
     namespace {
 
@@ -203,19 +189,20 @@ namespace gbemu::ui {
                 // Recent ROMs submenu — disabled (and shows "(none)") when
                 // the MRU list is empty so the user gets the feedback that
                 // it exists but has nothing to offer yet.
-                if (ImGui::BeginMenu("Recent ROMs", !c.recent_roms.empty())) {
-                    for (std::size_t i = 0; i < c.recent_roms.size(); ++i) {
+                auto& recents = c.user->recent_roms;
+                if (ImGui::BeginMenu("Recent ROMs", !recents.empty())) {
+                    for (std::size_t i = 0; i < recents.size(); ++i) {
                         // PushID guards against duplicate basenames showing
                         // up in the list (rare but possible across folders).
                         ImGui::PushID(static_cast<int>(i));
-                        if (ImGui::MenuItem(c.recent_roms[i].c_str()))
-                            c.actions.pending_rom_load = c.recent_roms[i];
+                        if (ImGui::MenuItem(recents[i].c_str()))
+                            c.actions.pending_rom_load = recents[i];
                         ImGui::PopID();
                     }
                     ImGui::Separator();
                     if (ImGui::MenuItem("Clear list")) {
-                        c.recent_roms.clear();
-                        save_recent_roms(c);
+                        recents.clear();
+                        c.actions.save_user_state_requested = true;
                     }
                     ImGui::EndMenu();
                 }
@@ -1008,7 +995,8 @@ namespace gbemu::ui {
 
     } // namespace
 
-    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, gbemu::core& c) {
+    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, gbemu::core& c,
+                  gbemu::user_state& user, std::string const& imgui_ini_path) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
@@ -1030,8 +1018,16 @@ namespace gbemu::ui {
         ctx->backend = backend;
         ctx->dbg = &dbg;
         ctx->core = &c;
+        ctx->user = &user;
+        // ImGui::GetIO().IniFilename stores the pointer verbatim and does
+        // not copy, so the backing string must outlive ImGui itself —
+        // park it on the context which lives for the whole frontend
+        // lifetime.  Setting it between CreateContext and the first
+        // NewFrame is supported (ImGui::Initialize, which loads the ini,
+        // runs lazily inside NewFrame).
+        ctx->imgui_ini_path = imgui_ini_path;
+        io.IniFilename = ctx->imgui_ini_path.empty() ? nullptr : ctx->imgui_ini_path.c_str();
         ctx->display_present = gbemu::gfx::presenter_create(backend, gb::LCD_WIDTH, gb::LCD_HEIGHT);
-        load_recent_roms(*ctx);
         return ctx;
     }
 
@@ -1040,15 +1036,19 @@ namespace gbemu::ui {
     }
 
     void add_recent_rom(context* ctx, const std::string& path) {
-        if (!ctx || path.empty())
+        if (!ctx || !ctx->user || path.empty())
             return;
-        auto& rec = ctx->recent_roms;
+        auto& rec = ctx->user->recent_roms;
         // Dedup first so the moved-to-front entry doesn't leave a duplicate.
         rec.erase(std::remove(rec.begin(), rec.end(), path), rec.end());
         rec.insert(rec.begin(), path);
         if (rec.size() > MAX_RECENT_ROMS)
             rec.resize(MAX_RECENT_ROMS);
-        save_recent_roms(*ctx);
+        // The actual disk write happens on the next frame's host-side
+        // drain (Application reads save_user_state_requested and calls
+        // user_state::save).  Keeps libconfig I/O out of the menu-bar
+        // callback path.
+        ctx->actions.save_user_state_requested = true;
     }
 
     void apply_display_config(context* ctx, const config& cfg, const std::string& palettes_dir) {

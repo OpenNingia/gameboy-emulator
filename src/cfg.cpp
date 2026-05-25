@@ -28,6 +28,7 @@ config::config(std::string const& file_path) {
         app_paths.lookupValue("savs_dir", paths.savs_dir);
         app_paths.lookupValue("sslots_dir", paths.sslots_dir);
         app_paths.lookupValue("palettes_dir", paths.palettes_dir);
+        app_paths.lookupValue("user_dir", paths.user_dir);
     }
 
     // Optional `display` block. Same shape as `paths` — every field has a

@@ -108,7 +108,7 @@ del canale alpha attraverso i pass 1-3, Y-flip delle texcoord).
 
 ---
 
-## 5. MBC2 / MBC3 / MBC5 — **fatto (RTC live, persistence aperta)**
+## 5. MBC2 / MBC3 / MBC5 — **fatto**
 
 `src/mbc.cpp` ora implementa `no_mbc`, `mbc1`, `mbc2`, `mbc3`, `mbc5`. Tutti i
 cartridge type 0x00-0x1E mappati nel factory `make_mbc`. Pokémon Red/Blue
@@ -137,87 +137,94 @@ ignorato (no haptics).
 selezionare fino a bank 511. UI / debugger `dump mbc` già castano a
 `unsigned` quindi nessun consumer rotto.
 
-**Cosa resta:**
-- Battery save persistente → sezione 6 (essenziale per giocare seriamente a
-  Pokémon).
-- Serializzazione RTC su disco per sopravvivere ai restart → sezione 6.
+Battery save + RTC persistence → chiusi in §6 (formato BESS).
 
 ---
 
-## 6. Battery save (SRAM persistente su cartuccia)
+## 6. Battery save (SRAM persistente su cartuccia) — **fatto**
 
 Giochi come Zelda: Link's Awakening (MBC1+RAM+BATTERY, type `0x03`), Pokémon
 (MBC3+RAM+BATTERY+RTC) e in generale tutti i titoli con salvataggio interno
 scrivono il progresso in RAM esterna mantenuta da una batteria sulla cartuccia.
-Oggi `src/mbc.cpp` distingue già nei commenti i tipi BATTERY (0x03, 0x06, 0x09,
-0x0F, 0x10, 0x13, 0x1B, 0x1E) ma la RAM è solo allocata in memoria e muore al
-process exit.
+Implementato in formato **BESS** (Best Effort Save State, SameBoy spec:
+<https://github.com/LIJI32/SameBoy/blob/master/BESS.md>) — un solo file `.sav`
+per cartuccia contenente SRAM raw + footer BESS opzionale con blocco RTC.
 
-**Cosa serve:**
+**Layout `.sav`:**
 
-- Rilevamento header: tipi battery-backed sono `0x03`, `0x06`, `0x09`, `0x0F`,
-  `0x10`, `0x13`, `0x1B`, `0x1E`. Tutti gli MBC necessari (MBC1/2/3/5) sono già
-  implementati — vedi §5.
-- API sull'`mbc`: `ram_load(span<const uint8_t>)`, `ram_data() const`,
-  `ram_dirty() const` (flag settato da ogni write a `$A000-$BFFF`),
-  `ram_clear_dirty()`. Già virtuali sulla base in modo che no_mbc/mbc1/…
-  possano fare override.
-- All'avvio (`core::load(rom_file)`): se l'MBC è battery, cercare il file
-  `.sav` sotto `<base>/savs/` e caricarlo via `ram_load`. Dimensione attesa =
-  quella decodificata da `ram_size_code`; mismatch → log warning + ignore.
-- Persistenza: flush a chiusura applicazione (sempre) + flush periodico
-  (~2 s se `ram_dirty`) per sopravvivere ai crash. Scrittura atomica
-  (`.sav.tmp` + rename).
-- Path: lo schema è già definito dal **portable layout**
-  (`<base>/savs/<fnv1a>.sav` — vedi `CLAUDE.md` § Portable layout). La
-  chiave FNV1a sull'intero ROM rende il salvataggio rename-stable
-  (rinominare `zelda.gb` non rompe il `.sav`). `paths::resolve_data_path` +
-  `cfg.paths.savs_dir` sono già pronti — basta agganciare il caricamento /
-  flush nel ciclo di vita di `core::load`.
+```
+[ SRAM raw, byte-per-byte ]                  ← prefix interop-compatibile
+[ NAME block ]   id="NAME", payload "GbEmu vX.Y"
+[ RTC  block ]   id="RTC ", payload 48 byte (solo MBC3+TIMER, type 0x0F/0x10)
+[ END  block ]   id="END ", size = 0
+[ u32 LE: offset al primo blocco ]
+[ "BESS" 4 byte ASCII ]                      ← ultimi 8 byte del file
+```
 
-**Formato**: `.sav` = dump raw della SRAM, byte-per-byte. Compatibile con
-BGB, mGBA, SameBoy, VBA-M, ecc. dal punto di vista del *contenuto*; il
-*nome file* è specifico (FNV1a invece di `<basename>.sav`), quindi
-l'import/export richiede un rename manuale. Decisione consapevole — il
-rename-stable degli FNV1a vale la perdita di drop-in compatibility.
+Il footer probe è all'estremità del file, quindi un emulatore che non
+conosce BESS (BGB/mGBA/VBA-M) legge il `.sav` come SRAM raw e ignora la
+coda. Analogamente noi accettiamo `.sav` di altri emulatori: se il footer
+magic manca o l'offset è bogus, `bess::parse_sav` fa fallback a
+"tutto-il-file-è-SRAM".
 
-**RTC (MBC3)**: lo stato live esiste già in `mbc3` (sezione 5) — manca solo
-la serializzazione. Schema concreto:
+**File:**
 
-- File `.rtc` separato accanto al `.sav` (stesso FNV1a key:
-  `<base>/savs/<fnv1a>.rtc`). Tenerli separati semplifica l'import/export e
-  permette di azzerare la RTC senza toccare la SRAM.
-- Payload: `rtc_total_secs_` (int64 LE), `last_real_unix_` (int64 LE),
-  `rtc_halted_` (uint8), `rtc_day_carry_` (uint8), `latched_*` (5 byte
-  S/M/H/DL/DH). 24 byte totali — formato fisso, niente versioning per ora
-  (è un file privato dell'emulatore).
-- API sull'`mbc3` (e nulla sugli altri MBC): `rtc_load(span<const uint8_t>)`,
-  `rtc_data() const -> array<uint8_t,24>`, oppure rendere virtuale sulla
-  base `mbc::rtc_data() const -> std::optional<...>` che ritorna `nullopt`
-  per chi non ha RTC.
-- Su `rtc_load`: dopo aver letto i campi serializzati, calcolare
-  `wall_gap = now_unix() - saved_last_real_unix` e — se non halted —
-  sommarlo in `rtc_total_secs_` prima di resettare l'anchor a `now_unix()`.
-  Così i giorni accumulati sopravvivono al restart e l'orologio "ha
-  continuato a girare" mentre il processo era spento. Halted → `rtc_total_secs_`
-  resta congelato.
-- Persistenza: stessa cadenza del `.sav` (flush a chiusura + ogni ~2 s se
-  qualcosa è cambiato). La RTC cambia ogni secondo quindi conviene gating
-  su "ultimo dump > N secondi fa" invece di un dirty bit.
-- Formato compatibility: il layout sopra **non** è interoperabile con BGB /
-  VBA / SameBoy (ognuno usa un proprio formato `.rtc`). Decisione
-  consapevole — la complessità non vale per la v1, l'utente può ricalibrare
-  la RTC in-game al primo boot dopo un import.
+- `inc/bess.h` + `src/bess.cpp` — modulo BESS minimale (NAME / RTC / END).
+- API estesa su `inc/mbc.h`: `has_battery()`, `ram_data()`, `ram_load()`,
+  `ram_dirty()`, `ram_clear_dirty()`, e per MBC3+TIMER: `rtc_blob() ->
+  optional<array<uint8_t, 48>>`, `rtc_load_blob()`. Le ultime due tornano
+  `nullopt` / no-op sugli altri MBC.
+- `Application::load_rom_` (in `src/app.cpp`) calcola FNV1a sul ROM
+  *prima* di `core::load()` (che fa `std::move(rf.data)` in `make_mbc`),
+  risolve `<base>/<savs_dir>/<fnv1a>.sav`, fa parse_sav e applica
+  `ram_load` + `rtc_load_blob`.
+- `Application::flush_battery_save_` scrive il blob via `bess::write_sav`
+  in modo atomico (`.sav.tmp` + `std::filesystem::rename`).
+- Trigger flush:
+  - ogni ~2 s nel main loop se `ram_dirty()` (gated su SDL_GetTicks64);
+  - sempre a shutdown (anche se non dirty — sposta l'anchor `saved_unix`
+    della RTC al momento di uscita);
+  - in headless mode prima del return da `Application::run`;
+  - prima di un hot-swap ROM (per scrivere il vecchio cart prima di
+    sostituirlo).
 
-Senza questo file, la RTC riparte all'epoch del `system_clock` corrente ad
-ogni avvio: i secondi/minuti/ore puntano all'ora reale di sistema, ma il
-counter "giorni dall'inizio della partita" si azzera ad ogni restart →
-day/night funziona per la sessione corrente, non sopravvive ai riavvii.
+**RTC blob (48 byte, layout BESS)**:
+
+- 0x00, 0x04, 0x08, 0x0C, 0x10: S/M/H/DL/DH live (1 byte + 3 padding ciascuno).
+- 0x14, 0x18, 0x1C, 0x20, 0x24: S/M/H/DL/DH latched.
+- 0x28: int64 LE = `last_real_unix_` (timestamp UNIX al momento del dump).
+
+Al load (`rtc_load_blob`): si ricostruisce `rtc_total_secs_` dai
+S/M/H/DL/DH live, si ripristinano i `latched_*`, si legge `saved_unix` e
+si calcola `wall_gap = now - saved_unix`. Se la RTC non era halted al
+momento del dump, il gap viene foldato nel total — così l'orologio ha
+"continuato a girare" mentre il processo era spento. Halted → time
+congelato. **Comportamento simmetrico fra pausa overnight e shutdown
+overnight**: in entrambi i casi il gioco vede l'ora corretta al resume.
+
+**Edit collaterale**: `mbc3::reset()` non azzera più `latched_*` —
+nell'hardware reale lo shadow è battery-backed sul chip RTC del cart e
+sopravvive a un soft reset CPU. Necessario perché l'hot-swap path è
+`load_rom_` (che chiama `rtc_load_blob`) → `core::reset()` (che chiama
+`mbc::reset()`), e se quest'ultimo azzerasse i latched perderemmo i
+valori appena caricati. Nessun gioco osserva la differenza perché tutti
+fanno una sequenza di latch prima di leggere.
+
+**Interop**:
+
+- Contenuto SRAM compatibile con BGB / mGBA / VBA-M / SameBoy.
+- Nome file specifico (`<fnv1a>.sav` invece di `<rom_basename>.sav`) →
+  l'import/export richiede un rename manuale. Decisione consapevole: il
+  rename-stable di FNV1a vale la perdita di drop-in compat sul nome.
+- L'RTC block in formato BESS è leggibile da SameBoy. BGB/mGBA usano
+  formati proprietari → l'orologio non si trasferisce automaticamente
+  ma SRAM sì.
 
 **Distinzione da Save State (sezione 2)**: il battery save è solo la SRAM
 del cart, è il salvataggio *del gioco* (il giocatore lo crea via menu
-in-game, "Save and continue"). Save state = snapshot completo dell'emulatore
-(hotkey). Le due feature coesistono.
+in-game). Save state = snapshot completo dell'emulatore (hotkey). Le due
+feature coesistono e §2 può riusare lo stesso reader/writer BESS aggiungendo
+i blocchi CORE/MBC/IORG.
 
 ---
 
@@ -365,9 +372,12 @@ rewrite della pipeline.
 - `mem_timing-2.gb` ✅
 - `halt_bug.gb` ✅
 - `oam_bug.gb` ❌ — quirk DMG indipendente dall'M-cycle, vedi §7.
-- `interrupt_time/interrupt_time.gb` ❌ — `REQUIRE_CGB 1`, indipendente.
+- `interrupt_time/interrupt_time.gb` ✅ (richiede CGB; passa ora che il branch `gbc` ha attivato il path CGB).
 - `dmg_sound` 09:01 / 10:01 / 12:01 ❌ — wave RAM access bug del CH3,
   indipendente dall'M-cycle, vedi §8.
+- `cgb_sound` 08:01 / 09:01 / 11:04 / 12:02 ❌ — quirk APU CGB-specifici
+  (length counters azzerati a power-off, wave RAM read mirroring, NRx1
+  bloccato a power-off, wave behavior su trigger). Dettaglio in §16.
 
 ---
 
@@ -651,79 +661,86 @@ dedicati). Va chiuso prima di queste tre.
 
 ---
 
-## 14. Cartella `user/` per i file di sessione
+## 14. Cartella `user/` per i file di sessione — **fatto**
 
-Oggi i file di stato della sessione vivono sparsi nel **CWD** del processo
-(non sotto la base portable):
+Prima di questo intervento i file di stato della sessione vivevano nel
+**CWD** del processo: `gbemu_window.state` (window pose) e
+`gbemu_recent.txt` (MRU recents) come bare filenames, `imgui.ini` per
+default sempre relativo al CWD. Conseguenza: lanciando l'eseguibile da una
+directory diversa, finestra/recents/layout si "perdevano". Incoerente col
+portable layout già in piedi per `cfg/`, `bios/`, `roms/`, `savs/`,
+`sslots/`, `palettes/`.
 
-- `gbemu_window.state` — `src/app.cpp:45` (`WINDOW_STATE_FILE`), aperto come
-  bare filename → finisce in `build/src/` quando si lancia da lì.
-- `gbemu_recent.txt` — `src/ui.cpp:47` (`RECENT_ROMS_FILE`), stessa storia.
-- `imgui.ini` — default di ImGui, sempre relativo al CWD.
-- Palette attiva (`feature/palette`) — `ui::context.active_palette_name` non è
-  ancora persistita; quando lo sarà, va nello stesso posto.
-
-Conseguenza: cambiando CWD si "perdono" finestre, recents, layout, palette.
-Non è coerente col portable layout di `cfg/`, `bios/`, `roms/`, `savs/`,
-`sslots/`, `palettes/` che invece risolvono via
-`gbemu::paths::resolve_base_dir()`.
-
-**Cosa serve:**
-
-- Aggiungere `cfg.paths.user_dir` con default `"user"` (in `inc/cfg.h` e
-  `src/cfg.cpp`), creato da CMake accanto agli altri (`MAKE_DIRECTORY`).
-- Helper `paths::user_file(base, cfg, name)` che restituisce
-  `<base>/<user_dir>/<name>` (riusa `resolve_data_path`).
-
-**Un solo `user/user.conf` invece di N parser**: tutto quello che è
-serializzabile come chiave/valore (o lista di stringhe) finisce in un
-unico file libconfig — riusa lo stesso `Config` / `Setting` machinery già
-in piedi per `cfg/gbemu.conf`. Schema iniziale:
+**Layout finale:**
 
 ```
-window:
-{
-  width = 1280;
-  height = 720;
-  x = 100;
-  y = 100;
-  maximized = false;
-};
-
-recent_roms = ( "C:/roms/zelda.gb", "C:/roms/pokemon_red.gb", ... );
-
-display:
-{
-  active_palette = "dmg-green";
-};
+<base>/user/
+  user.conf      # libconfig — window pose + recent_roms + display.active_palette
+  imgui.ini      # ImGui dock/window layout (formato proprietario ImGui)
 ```
 
-- API: `user_state` class in `inc/user_state.h` / `src/user_state.cpp`
-  con `load(path)`, `save(path)`, getter/setter tipati. Save atomico
-  (`.tmp` + rename), salvataggio on-change o a chiusura.
-- Migrare i siti d'uso:
-  - `src/app.cpp`: blocco `gbemu_window.state` → `user_state.window_*`.
-  - `src/ui.cpp`: load/save di `gbemu_recent.txt` → `user_state.recent_roms`.
-  - Palette attiva: `user_state.active_palette` — niente nuovo file.
-- File futuri (§12 Player/Debugger UI split): aggiungere
-  `window_player`/`window_debugger` come sub-block, **non** nuovi file.
+**File:**
 
-**Eccezione: `imgui.ini`**. Formato proprietario di ImGui, lo gestisce lui;
-non si può fondere in `user.conf`. Va però spostato sotto `user/` settando
-`ImGui::GetIO().IniFilename` a una stringa owned (path assoluto risolto
-via `paths::user_file`). Nello split §12: `user/imgui_player.ini` /
-`user/imgui_debug.ini`.
+- `inc/cfg.h` + `src/cfg.cpp`: nuovo `cfg.paths.user_dir{"user"}`, parsato
+  nel blocco `paths` (default kicks in se mancante). `cfg/gbemu.conf`
+  espone la riga `user_dir = "user"`.
+- `src/CMakeLists.txt`: aggiunto `${CMAKE_CURRENT_BINARY_DIR}/user` al
+  `file(MAKE_DIRECTORY ...)`.
+- `inc/user_state.h` + `src/user_state.cpp`: nuovo modulo `gbemu::user_state`
+  con `window_w`, `window_h`, `recent_roms`, `active_palette`. `load(path)`
+  swallows missing-file/parse errors (ritorna false, lascia defaults).
+  `save(path)` scrive atomicamente via libconfig `.tmp` +
+  `std::filesystem::rename`, best-effort (logga e ritorna false su failure
+  — niente throw).
+- `Application` (in `inc/app.h` + `src/app.cpp`): nuovo membro
+  `user_state_` + `user_conf_path_` risolto in `run()` via
+  `paths::resolve_data_path(base_, cfg.paths.user_dir, "user.conf")`. Load
+  all'avvio (prima della `SDL_CreateWindow`), save a shutdown con
+  `SDL_GetWindowSize` → `user_state_.window_*`. `WINDOW_STATE_FILE`,
+  `load_window_state`, `save_window_state` rimossi.
+- `gbemu::ui::init` ora prende `user_state&` + `std::string const& imgui_ini_path`.
+  `context::user` punta a `Application::user_state_`. Il path imgui.ini è
+  stoccato in `context::imgui_ini_path` (string owned, ImGui salva il
+  puntatore) e applicato a `ImGui::GetIO().IniFilename` subito dopo
+  `ImGui::CreateContext()`. `RECENT_ROMS_FILE`, `load_recent_roms`,
+  `save_recent_roms` rimossi; il menu "Recent ROMs" ora opera su
+  `c.user->recent_roms`.
+
+**Trigger di salvataggio:**
+
+- Window pose: solo a shutdown (`Application::run` snapshotta `SDL_GetWindowSize`
+  e chiama `user_state_.save`).
+- Recents: `ui::add_recent_rom` muta `user->recent_roms` e setta
+  `host_actions::save_user_state_requested`. Application drena il flag
+  dopo il blocco `pending_rom_load` (così un add_recent_rom triggerato
+  da un ROM hot-swap nel frame corrente persiste nello stesso frame
+  invece di aspettare il successivo).
+- Active palette: schema esposto ma non ancora wirato — il futuro palette
+  switcher setterà `user_state_.active_palette` e alzerà lo stesso flag.
+
+**Eccezione `imgui.ini`**: formato proprietario di ImGui, non foldable in
+`user.conf`. Spostato sotto `user/` settando `io.IniFilename =
+ctx->imgui_ini_path.c_str()` dopo `CreateContext` ma prima del primo
+`NewFrame` (ImGui carica le settings lazily da `Initialize()` dentro
+`NewFrame`). Il backing `std::string` vive sul `context` per outliveare
+ImGui stesso.
 
 **Migrazione**: rottura compat accettata (è v0.x). Niente fallback / move
-automatico — chi aveva i file in CWD li ricrea al primo avvio. Documentare
-in `CLAUDE.md` § Portable layout aggiungendo `user/` alla lista delle
-sotto-directory.
+automatico — chi aveva `gbemu_window.state` / `gbemu_recent.txt` /
+`imgui.ini` in CWD li ricrea al primo avvio. Documentato in `CLAUDE.md`
+§ Portable layout.
 
 **Distinzione da `cfg/`**: `cfg/gbemu.conf` è la **configurazione** editata
 dall'utente (preferenze esplicite). `user/` è **stato di sessione**
-generato e gestito dall'app (window pose, MRU, dock layout, ultima palette
-selezionata). Tenerli separati evita di mescolare "cose che l'utente edita"
-con "cose che l'app riscrive in continuazione".
+generato e gestito dall'app (window pose, MRU, dock layout, palette
+selezionata). Tenerli separati evita di mescolare "cose che l'utente
+edita" con "cose che l'app riscrive in continuazione".
+
+**Estensione futura §12 (Player/Debugger UI split)**: il sub-block
+`window` di `user.conf` può crescere in `window_player` / `window_debugger`
+senza migrazione (sub-block mancante → default). `imgui.ini` si splitterà
+in `user/imgui_player.ini` / `user/imgui_debug.ini` passando la stringa
+giusta a `ui::init` in base al flag CLI `--debug`.
 
 ---
 
@@ -769,6 +786,98 @@ la scelta esplicita dell'utente.
 **Costo stimato**: ~1-2 ore per Mute+hotkey; il volume slider + per-channel
 toggles aggiungono altre 2-3 ore se si vogliono fare bene (curva di volume
 log, non lineare).
+
+---
+
+## 16. CGB APU quirks — `cgb_sound` 08:01 / 09:01 / 11:04 / 12:02
+
+Sul branch `gbc` il bring-up CGB ha lasciato l'APU come copia 1:1 della DMG.
+Blargg `cgb_sound` esercita quattro divergenze hardware DMG → CGB che oggi non
+modelliamo. Tutte risolvibili interrogando `mmu_.cgb_mode()` (già usato in
+PPU/HDMA): la knob esiste, manca solo applicarla nei posti giusti dentro
+`src/apu.cpp`.
+
+**08-len_ctr_during_power:01 — length counters azzerati a power-off**
+
+- Su DMG i length counters dei 4 canali sopravvivono al clear di NR52 bit 7 e
+  continuano a contare; su CGB vengono **azzerati**.
+- Oggi `apu::power_off()` (`src/apu.cpp:624`) preserva tutti e quattro i
+  `length` esplicitamente — commento "DMG quirk" già presente, semplicemente
+  non gated su modello.
+- Fix: `if (!mmu_.cgb_mode()) { preserva } else { ch1_sq_.length =
+  ch2_.length = ch3_.length = ch4_.length = 0; }`.
+
+**09-wave_read_while_on:01 — wave RAM read while CH3 active**
+
+- Su DMG la read di `$FF30-$FF3F` mentre CH3 è on restituisce `0xFF` salvo
+  durante la finestra di 2 T-cycle del prossimo fetch CH3 (cfr. §8 per la
+  versione DMG, ancora aperta).
+- Su CGB la read **redirige sempre** al byte che CH3 sta correntemente
+  leggendo, cioè `wave_ram[wave_pos >> 1]`, indipendentemente dall'indirizzo
+  richiesto. Non c'è la finestra di blackout DMG.
+- Oggi nessun gating: `mmu::read_u8($FF30..$FF3F)` ritorna sempre il byte
+  raw → match con DMG-in-finestra (sbagliato fuori finestra) e con CGB solo
+  quando per caso `wave_pos >> 1 == addr - $FF30` (raramente).
+- **Pre-requisito**: l'MMU oggi espone solo `add_mmio_write_handler`
+  (`src/mmu.cpp`); per ridirigere una read serve aggiungere il simmetrico
+  `add_mmio_read_handler(addr, fn)` (o `add_mmio_read_redirect`), e
+  consultarlo in `read_u8`. Pochi altri use-case ne hanno bisogno
+  (joypad/STAT live-read già passano per accessor diretti) → cambio
+  contenuto: un `absl::InlinedVector<read_redirect_fn, 1>` per byte.
+- Fix APU: in CGB-mode su `$FF30-$FF3F`, se `ch3_.channel_enabled`,
+  ritorna `wave_ram[ch3_.wave_pos >> 1]`. Stesso slot di entrypoint
+  utilizzabile poi anche per chiudere `dmg_sound` 09:01 (sezione §8) con
+  un branch sul modello.
+
+**11-regs_after_power:04 — NRx1 ignorato a power-off su CGB**
+
+- Su DMG le scritture *solo della length* a `NR11`/`NR21`/`NR31`/`NR41`
+  sono accettate anche con APU spenta (Pan Docs / Blargg note "length is
+  unaffected by power"). Su CGB **anche** NRx1 è ignorata mentre la APU è
+  off.
+- Oggi `on_nr11`/`on_nr21`/`on_nr31`/`on_nr41` hanno il ramo `if
+  (!powered_) { length-only write; return; }` (`src/apu.cpp:451,487,523,
+  554`) — corretto per DMG, sbagliato per CGB.
+- Fix: nel branch `!powered_`, ulteriormente discriminare su
+  `mmu_.cgb_mode()`: se CGB, applicare `apply_read_mask(addr, 0); return;`
+  senza toccare `length`.
+
+**12-wave:02 — wave channel su trigger (ipotesi da verificare)**
+
+- Sub-test `:02` del gruppo wave: l'oracolo Blargg verifica un aspetto del
+  comportamento di CH3 alla trigger che differisce fra DMG e CGB.
+- Ipotesi più probabili (in ordine decrescente di confidenza):
+  1. **`sample_buffer` azzerato su trigger CGB**. Oggi
+     `wave_channel::trigger()` (`src/apu.cpp:304`) preserva
+     `sample_buffer` (commento: "matches DMG behavior where the first
+     sample after a trigger is the previously buffered nibble"). Su CGB
+     il buffer è azzerato → il primo sample post-trigger è 0, non il
+     vecchio nibble.
+  2. **`wave_pos` inizializzato a un valore diverso da 0 su CGB**.
+     Plausibile ma meno documentato.
+  3. **Wave RAM init pattern diverso a power-on CGB vs DMG**. La RAM
+     wave nasce con un pattern noto su DMG (`00 FF 00 FF ...` o simile)
+     e con pattern diverso/azzerato su CGB. Se il test legge wave RAM
+     prima di scriverla, l'init state cambia la baseline. Oggi la
+     nostra wave RAM nasce a `OPEN_BUS` da `mmu::initialize_registers`;
+     verificare se serve un pattern CGB specifico.
+- Va investigato con `dump_mem ff30 10` ai vari step del sub-test contro
+  un riferimento (SameBoy) prima di scegliere il fix.
+
+**Costo stimato (escluso §8 DMG)**: 08:01 e 11:04 sono one-liner (~10 min
+ciascuno una volta toccata `apu::power_off` / i quattro `on_nrX1`). 09:01
+costa il piccolo refactor MMU read-handler (~1 h, semplice). 12:02 è
+diagnostica-driven (~mezza giornata se l'ipotesi 1 regge, di più se va
+inseguito il pattern wave RAM init).
+
+**Priorità**: media. Nessun gioco CGB commerciale dipende noticeably da
+queste sequenze (come per §8: tutti i ROM ben scritti scrivono wave RAM
+con CH3 disabilitato). Si chiude solo per "CGB accurate al 100%" sul
+piano audio.
+
+**Interazione con §8**: una volta aggiunto il read-handler MMU per
+$FF30-$FF3F, gli stessi handler chiudono entrambi i lati (DMG: 0xFF +
+finestra di 2T; CGB: redirect sempre attivo). Conviene chiudere insieme.
 
 ---
 

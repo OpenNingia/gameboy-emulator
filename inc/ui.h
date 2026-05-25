@@ -8,6 +8,7 @@ namespace gbemu {
     struct core;
     struct config;
     struct debugger;
+    struct user_state;
     namespace gfx {
         struct backend;
     }
@@ -36,6 +37,13 @@ namespace gbemu::ui {
         // File -> Exit clicked (or any other path the UI wants to trigger
         // a clean shutdown).
         bool quit_requested{false};
+        // The UI has mutated `user_state` and wants the host to persist
+        // it.  Set by add_recent_rom (and future palette / panel-state
+        // mutations); drained by Application after each frame, which
+        // calls user_state::save(user_conf_path_).  A single boolean is
+        // enough — multiple mutations within one frame collapse into one
+        // disk write.
+        bool save_user_state_requested{false};
     };
 
     // Initialise ImGui (docking branch) bound to the given SDL2 window +
@@ -46,7 +54,8 @@ namespace gbemu::ui {
     // Returns a handle to be passed to subsequent calls; the caller owns
     // lifetime and must invoke shutdown() before destroying the SDL
     // renderer/window/gfx backend.
-    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, core& c);
+    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, core& c,
+                  user_state& user, std::string const& imgui_ini_path);
 
     // Tear down ImGui in reverse order.  Safe to call with nullptr.
     void shutdown(context* ctx);
@@ -67,9 +76,10 @@ namespace gbemu::ui {
     // context.
     host_actions& actions(context* ctx);
 
-    // Push `path` onto the Recent ROMs MRU list.  Dedup, cap at 8 entries,
-    // persist to gbemu_recent.txt next to imgui.ini.  Called by Application
-    // after a successful ROM load.
+    // Push `path` onto the Recent ROMs MRU list (held in user_state).
+    // Dedup, cap at 8 entries, then raise host_actions::save_user_state_requested
+    // so the host writes user.conf to disk on this frame's drain pass.
+    // Called by Application after a successful ROM load.
     void add_recent_rom(context* ctx, const std::string& path);
 
     // Install the built-in palettes, scan `palettes_dir` for user *.sbp

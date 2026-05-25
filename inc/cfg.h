@@ -23,6 +23,7 @@ namespace gbemu {
             std::string savs_dir{"savs"};
             std::string sslots_dir{"sslots"};
             std::string palettes_dir{"palettes"};
+            std::string user_dir{"user"};
         } paths;
 
         // Display post-processing: frame blending (LCD response simulation)
