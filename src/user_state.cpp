@@ -54,6 +54,13 @@ namespace gbemu {
             a.lookupValue("highpass", audio_highpass);
         }
 
+        if (root.exists("emulation")) {
+            const auto& em = root["emulation"];
+            double spd_d = static_cast<double>(speed_multiplier);
+            if (em.lookupValue("speed", spd_d))
+                speed_multiplier = static_cast<float>(spd_d);
+        }
+
         return true;
     }
 
@@ -80,6 +87,9 @@ namespace gbemu {
         audio.add("muted", libconfig::Setting::TypeBoolean) = audio_muted;
         audio.add("volume", libconfig::Setting::TypeFloat) = static_cast<double>(audio_volume);
         audio.add("highpass", libconfig::Setting::TypeString) = audio_highpass.c_str();
+
+        auto& emulation = root.add("emulation", libconfig::Setting::TypeGroup);
+        emulation.add("speed", libconfig::Setting::TypeFloat) = static_cast<double>(speed_multiplier);
 
         try {
             std::filesystem::path p{path};

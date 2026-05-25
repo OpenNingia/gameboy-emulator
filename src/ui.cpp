@@ -236,13 +236,45 @@ namespace gbemu::ui {
                 }
                 ImGui::EndDisabled();
 
-                // Speed and Save/Load State live behind TODO §3 and §2
-                // respectively.  Surfaced as disabled submenus so users see
-                // the placeholder rather than wondering where these features
-                // will land.
-                if (ImGui::BeginMenu("Speed", false)) {
+                // Speed presets. Kept in sync with Application::SPEED_PRESETS
+                // (app.h) — the duplication is intentional: ui.cpp does not
+                // include app.h, and the list is short enough that a future
+                // edit is trivially mirrored.  The current value is read from
+                // user_state (the single source of truth, mutated by hotkeys
+                // and by these menu items alike); Application's main loop
+                // watches user_state.speed_multiplier and re-applies the
+                // title / apu mute side-effects on change.
+                if (ImGui::BeginMenu("Speed")) {
+                    struct preset {
+                        const char* label;
+                        const char* shortcut;
+                        float value;
+                    };
+                    static constexpr preset presets[] = {
+                        {"0.25x", nullptr, 0.25f}, {"0.5x", nullptr, 0.5f}, {"1.0x", "0", 1.0f},
+                        {"1.5x", nullptr, 1.5f},   {"2.0x", "+", 2.0f},     {"4.0x", nullptr, 4.0f},
+                    };
+                    const float cur = c.user->speed_multiplier;
+                    for (const auto& p : presets) {
+                        const bool selected = (cur == p.value);
+                        if (ImGui::MenuItem(p.label, p.shortcut, selected)) {
+                            c.user->speed_multiplier = p.value;
+                            c.actions.save_user_state_requested = true;
+                        }
+                    }
+                    ImGui::Separator();
+                    // Informational only — Tab is captured by the SDL event
+                    // loop in Application::run, not by ImGui (the hotkey
+                    // path is gated on !imgui_captured).  Disabled so the
+                    // menu doesn't pretend it's clickable.
+                    ImGui::BeginDisabled();
+                    ImGui::MenuItem("Fast-forward (hold Tab)", "Tab");
+                    ImGui::EndDisabled();
                     ImGui::EndMenu();
                 }
+                // Save/Load State live behind TODO §2.  Surfaced as disabled
+                // submenus so users see the placeholder rather than wondering
+                // where the feature will land.
                 if (ImGui::BeginMenu("Save State", false)) {
                     ImGui::EndMenu();
                 }
@@ -272,7 +304,13 @@ namespace gbemu::ui {
                             c.post.set_mode(blend_mode::accurate);
                         ImGui::EndMenu();
                     }
-                    if (ImGui::BeginMenu("Palette")) {
+                    // In CGB mode (CGB-only and CGB-compat carts both) the PPU
+                    // routes through resolve_cgb() and reads colors from CGB
+                    // palette RAM — the 4-shade DMG palette is ignored, so
+                    // disable the submenu rather than letting the user click
+                    // through entries that do nothing.
+                    const bool cgb_active = c.core->mmu.cgb_mode();
+                    if (ImGui::BeginMenu("Palette", !cgb_active)) {
                         // Built-ins are inserted first by install_builtins()
                         // and any user .sbp files follow.  A separator marks
                         // the boundary so users can tell at a glance what is
@@ -289,6 +327,10 @@ namespace gbemu::ui {
                             }
                         }
                         ImGui::EndMenu();
+                    }
+                    if (cgb_active && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip("Palette swap applies only to DMG titles.\n"
+                                          "CGB and CGB-compatible cartridges drive the PPU through CGB palette RAM.");
                     }
                     ImGui::EndMenu();
                 }

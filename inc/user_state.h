@@ -33,6 +33,16 @@ namespace gbemu {
         // ui::apply_display_config does for unknown palettes.
         std::string audio_highpass{"accurate"};
 
+        // Emulation speed multiplier (the persisted "speed slot" the user
+        // picked from Emulation -> Speed or the +/-/0 hotkeys).  Stored
+        // under an `emulation` sub-group; out-of-range values on load are
+        // clamped to the [0.25, 4.0] preset window by Application before
+        // being applied to the main loop budget.  Fast-forward (Tab hold)
+        // is transient — see Application::fast_forward_active_ — and
+        // deliberately does NOT update this field, so a crash mid-FF does
+        // not bake the setting into user.conf.
+        float speed_multiplier{1.0f};
+
         // Read libconfig from `path`.  Missing file (first run) or parse
         // error -> fields stay at construction defaults and returns false.
         // Never throws.

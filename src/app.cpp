@@ -331,6 +331,91 @@ void Application::set_rom_file(std::string_view path) {
     rom_path_ = path;
 }
 
+void Application::apply_effective_mute_(gbemu::core& core) {
+    // Speed-driven mute fires for any non-1.0 user preset AND while Tab
+    // is held.  ORed with the user's explicit `audio_muted` so toggling
+    // Mute mid-fast-forward sticks once FF releases.  v1 keeps it simple:
+    // resampling at off-rates is a separate effort (mentioned in §3).
+    const bool off_rate = fast_forward_active_ || (user_state_.speed_multiplier != 1.0f);
+    core.apu.set_muted(user_state_.audio_muted || off_rate);
+
+    // At off-rate playback we must ALSO skip the ring push, not just
+    // zero the samples — otherwise the APU keeps feeding the ring at
+    // CPU_HZ * speed samples per second while the SDL audio callback
+    // drains at exactly SAMPLE_RATE per second.  At speed > 1.0 the
+    // ring fills, audio_ring_buffer::push starts yielding inside
+    // emit_sample, and the audio thread becomes the wall-clock pacer:
+    // the emulator caps at 1.0x and the symptom is "more choppy" with
+    // no actual speedup.  enable_output(false) skips the push entirely
+    // (existing semantics — also how headless mode keeps the ring from
+    // deadlocking); audio underruns into silence via the callback's
+    // pop-returning-false path until 1.0x is restored.
+    core.apu.enable_output(!off_rate);
+}
+
+void Application::apply_speed_state_(gbemu::core& core) {
+    apply_effective_mute_(core);
+    last_applied_speed_ = user_state_.speed_multiplier;
+
+    // Toggle renderer vsync on the FF edge.  SDL_RenderSetVSync returns
+    // <0 on drivers that don't support runtime vsync flips (older
+    // Direct3D9 builds, software renderer); we still update the cached
+    // flag so we don't keep hammering the call.
+    if (renderer_) {
+        const bool want_disabled = fast_forward_active_;
+        if (want_disabled != vsync_disabled_) {
+            SDL_RenderSetVSync(renderer_, want_disabled ? 0 : 1);
+            vsync_disabled_ = want_disabled;
+        }
+    }
+
+    // Titlebar indicator. Plain "GbEmu" at 1.0x (no FF), otherwise append
+    // the effective multiplier so the user can see the current state at
+    // a glance — useful when the menu is closed.
+    if (window_) {
+        if (fast_forward_active_) {
+            SDL_SetWindowTitle(window_, "GbEmu - FF");
+        } else if (user_state_.speed_multiplier != 1.0f) {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "GbEmu - %.2gx", user_state_.speed_multiplier);
+            SDL_SetWindowTitle(window_, buf);
+        } else {
+            SDL_SetWindowTitle(window_, "GbEmu");
+        }
+    }
+}
+
+void Application::bump_speed_up_(gbemu::core& core) {
+    const float cur = user_state_.speed_multiplier;
+    // Strictly-greater so repeated presses always move forward even if
+    // the current value sits exactly on a preset.  Clamps at the top end
+    // (no roll-around — accidentally jumping from 4x to 0.25x would be
+    // jarring and easy to do with a held key).
+    for (int i = 0; i < SPEED_PRESET_COUNT; ++i) {
+        if (SPEED_PRESETS[i] > cur + 1e-4f) {
+            user_state_.speed_multiplier = SPEED_PRESETS[i];
+            apply_speed_state_(core);
+            return;
+        }
+    }
+}
+
+void Application::bump_speed_down_(gbemu::core& core) {
+    const float cur = user_state_.speed_multiplier;
+    for (int i = SPEED_PRESET_COUNT - 1; i >= 0; --i) {
+        if (SPEED_PRESETS[i] < cur - 1e-4f) {
+            user_state_.speed_multiplier = SPEED_PRESETS[i];
+            apply_speed_state_(core);
+            return;
+        }
+    }
+}
+
+void Application::reset_speed_(gbemu::core& core) {
+    user_state_.speed_multiplier = 1.0f;
+    apply_speed_state_(core);
+}
+
 void Application::run() {
     gbemu::core core;
     gbemu::debugger debugger{core};
@@ -460,6 +545,27 @@ void Application::run() {
     if (!renderer)
         throw gbemu::gbemu_exception{"SDL Renderer creation failed!"};
 
+    // Stash SDL handles so the speed helpers (which may be invoked from
+    // hotkeys, the UI menu drain pass, or apply_speed_state_ on init)
+    // can update the window title and renderer vsync without threading
+    // arguments through every site.
+    window_ = window;
+    renderer_ = renderer;
+
+    // Clamp persisted speed onto the preset window before the first
+    // frame burns a budget derived from a bogus value.  An out-of-range
+    // user.conf (hand-edited, or from a future schema with extra
+    // presets) snaps to the nearest preset; sub-preset values round to
+    // 1.0x rather than silently picking 0.25x.
+    {
+        float& s = user_state_.speed_multiplier;
+        const float lo = SPEED_PRESETS[0];
+        const float hi = SPEED_PRESETS[SPEED_PRESET_COUNT - 1];
+        if (!(s == s) || s < lo - 1e-4f || s > hi + 1e-4f)
+            s = 1.0f;
+    }
+    apply_speed_state_(core);
+
     // gfx::backend wraps the SDL_Renderer so the UI can spawn presenters
     // for the GB display and the PPU panel's tile/map viewers without
     // depending on SDL_Texture directly.  When/if an OpenGL3 backend lands,
@@ -532,11 +638,13 @@ void Application::run() {
                     } else if (ctrl && k == SDLK_o) {
                         gbemu::ui::actions(ui_ctx).load_rom_dialog_requested = true;
                     } else if (k == SDLK_m && !ctrl) {
-                        // Mute toggle. Mirror the menu path: flip
-                        // user_state, propagate to APU, raise the save
-                        // flag so user.conf persists the change.
+                        // Mute toggle. Flip the user-facing flag and route
+                        // through apply_effective_mute_ so the APU sees
+                        // the OR of user_muted with the speed-driven mute
+                        // gate — un-muting at 2x speed keeps audio off
+                        // until 1.0x is restored.
                         user_state_.audio_muted = !user_state_.audio_muted;
-                        core.apu.set_muted(user_state_.audio_muted);
+                        apply_effective_mute_(core);
                         gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
                     } else if (ctrl && (k == SDLK_UP || k == SDLK_DOWN)) {
                         // Volume nudge: snap to the next 10% bucket strictly
@@ -552,12 +660,40 @@ void Application::run() {
                         user_state_.audio_volume = static_cast<float>(pct) / 100.0f;
                         core.apu.set_master_gain(user_state_.audio_volume * user_state_.audio_volume);
                         gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+                    } else if (!ctrl && (k == SDLK_EQUALS || k == SDLK_KP_PLUS)) {
+                        // Speed up to the next preset. '=' on US layouts is
+                        // unshifted '+'; the keypad path catches numeric-pad
+                        // users.  Persist via save flag so the new speed
+                        // survives the next launch.
+                        bump_speed_up_(core);
+                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+                    } else if (!ctrl && (k == SDLK_MINUS || k == SDLK_KP_MINUS)) {
+                        bump_speed_down_(core);
+                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+                    } else if (!ctrl && (k == SDLK_0 || k == SDLK_KP_0)) {
+                        reset_speed_(core);
+                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+                    } else if (k == SDLK_TAB && !fast_forward_active_) {
+                        // Fast-forward: hold to engage, release to drop
+                        // back to the persisted preset.  Transient flag,
+                        // NOT persisted (a stuck Tab key on shutdown must
+                        // not boot at FF next time).
+                        fast_forward_active_ = true;
+                        apply_speed_state_(core);
                     }
                 }
                 gbemu::joypad::button btn;
                 if (!e.key.repeat && map_keycode_to_button(e.key.keysym.sym, btn))
                     core.joypad.set_button(btn, true);
             } else if (e.type == SDL_KEYUP && !imgui_captured) {
+                // Tab release ends fast-forward.  Checked here (not
+                // KEYDOWN) so the natural keyboard auto-repeat doesn't
+                // matter — the engage happens on the first KEYDOWN,
+                // release happens on the lone KEYUP at the end.
+                if (e.key.keysym.sym == SDLK_TAB && fast_forward_active_) {
+                    fast_forward_active_ = false;
+                    apply_speed_state_(core);
+                }
                 gbemu::joypad::button btn;
                 if (map_keycode_to_button(e.key.keysym.sym, btn))
                     core.joypad.set_button(btn, false);
@@ -602,10 +738,52 @@ void Application::run() {
             // total_cycles).  In CGB double-speed the CPU emits twice as
             // many T-cycles per wall-clock frame, so the per-frame budget
             // doubles to keep the PPU stepping at the same 60 Hz rate.
-            const std::uint64_t budget = gb::CYCLES_PER_FRAME * (core.cpu.double_speed ? 2 : 1);
-            const auto rr = debugger.run_until(cond, budget);
-            if (rr.outcome == gbemu::run_outcome::breakpoint || rr.outcome == gbemu::run_outcome::watchpoint) {
-                debugger.pause();
+            const std::uint64_t base_budget = gb::CYCLES_PER_FRAME * (core.cpu.double_speed ? 2 : 1);
+
+            auto run_one_chunk = [&](std::uint64_t b) -> bool {
+                const auto rr = debugger.run_until(cond, b);
+                if (rr.outcome == gbemu::run_outcome::breakpoint || rr.outcome == gbemu::run_outcome::watchpoint) {
+                    debugger.pause();
+                    return false;
+                }
+                return true;
+            };
+
+            if (fast_forward_active_) {
+                // Wall-clock-budgeted multi-frame burst with vsync off.
+                // Each iteration runs one nominal frame, so the achieved
+                // speedup tops out at host throughput.  The 10 ms ceiling
+                // leaves room for the actual render + present that
+                // follows below; the iteration cap is a belt-and-braces
+                // against pathological hosts where the deadline check is
+                // slow.
+                const std::uint64_t deadline = SDL_GetTicks64() + 10;
+                for (int i = 0; i < 64; ++i) {
+                    if (!run_one_chunk(base_budget))
+                        break;
+                    if (SDL_GetTicks64() >= deadline)
+                        break;
+                }
+            } else {
+                const float spd = user_state_.speed_multiplier;
+                std::uint64_t budget = base_budget;
+                if (spd > 1.0f) {
+                    // Scale up the budget: more emulation per wall-clock
+                    // frame, vsync still pacing real time.
+                    budget =
+                        static_cast<std::uint64_t>(static_cast<double>(base_budget) * static_cast<double>(spd) + 0.5);
+                }
+                run_one_chunk(budget);
+                if (spd < 1.0f && spd > 0.0f) {
+                    // Slow down by adding wall-clock delay on top of the
+                    // vsynced ~16.67 ms frame so the effective frame
+                    // length matches (1/spd) * 16.67 ms.  SDL_Delay's
+                    // millisecond granularity is good enough for the UX
+                    // bucket we expose (slowest is 0.25x = ~50 ms extra).
+                    const float extra_ms = (1.0f / spd - 1.0f) * 16.667f;
+                    if (extra_ms > 0.5f)
+                        SDL_Delay(static_cast<std::uint32_t>(extra_ms));
+                }
             }
         }
 
@@ -665,6 +843,21 @@ void Application::run() {
         if (acts.save_user_state_requested) {
             acts.save_user_state_requested = false;
             user_state_.save(user_conf_path_);
+            // The Audio -> Mute menu writes apu.set_muted directly with
+            // the raw user_state_.audio_muted value; re-apply the
+            // effective mute here so the speed-mute OR gate isn't
+            // bypassed when the user toggles mute mid-fast-forward.
+            apply_effective_mute_(core);
+        }
+
+        // Pick up external speed mutations (UI Speed submenu writes
+        // directly to user_state_).  Hotkeys already call
+        // apply_speed_state_ inline, so this is a one-frame-lag fallback
+        // for the menu path — and the early-out keeps it free in the
+        // common case.  Comparison is exact (preset list values are
+        // representable in float without drift).
+        if (user_state_.speed_multiplier != last_applied_speed_) {
+            apply_speed_state_(core);
         }
 
         // Periodic battery save flush.  Every ~2 s we check whether the

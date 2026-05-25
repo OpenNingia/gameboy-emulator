@@ -7,6 +7,9 @@
 #include <cfg.h>
 #include <user_state.h>
 
+struct SDL_Window;
+struct SDL_Renderer;
+
 namespace gbemu {
     struct core;
 }
@@ -36,6 +39,31 @@ private:
     // No-op when there is no cart attached, no battery, or no hash.
     // Writes are atomic (.sav.tmp → rename).
     void flush_battery_save_(gbemu::core& core);
+
+    // Discrete speed presets surfaced by the Emulation -> Speed menu and
+    // the +/- hotkeys. Kept in monotonically increasing order so
+    // bump_speed_up_ / bump_speed_down_ can do a linear lookup.
+    static constexpr float SPEED_PRESETS[] = {0.25f, 0.5f, 1.0f, 1.5f, 2.0f, 4.0f};
+    static constexpr int SPEED_PRESET_COUNT = sizeof(SPEED_PRESETS) / sizeof(float);
+
+    // Bump user_state_.speed_multiplier to the next/previous preset (or
+    // snap to 1.0x). Re-applies the effective audio mute and updates the
+    // SDL window title via apply_speed_state_.
+    void bump_speed_up_(gbemu::core& core);
+    void bump_speed_down_(gbemu::core& core);
+    void reset_speed_(gbemu::core& core);
+
+    // Re-apply speed-derived side effects (window title, APU mute gate,
+    // renderer vsync flip for fast-forward).  Called whenever
+    // speed_multiplier_ or fast_forward_active_ flips, and at startup
+    // once the window exists.  Also updates last_applied_speed_ so the
+    // main loop's UI-mutation watcher stays consistent.
+    void apply_speed_state_(gbemu::core& core);
+
+    // Compute the effective APU mute = user_muted OR speed-driven mute
+    // and push it into the APU.  Called from apply_speed_state_, the M
+    // hotkey, and the save_user_state_requested drain pass.
+    void apply_effective_mute_(gbemu::core& core);
 
     // Resolved at construction time from $GBEMU_HOME / SDL_GetBasePath
     // — see gbemu::paths::resolve_base_dir. Anchors all data paths
@@ -68,4 +96,21 @@ private:
     // once in run() and reused for both load and save sites.
     gbemu::user_state user_state_{};
     std::string user_conf_path_{};
+
+    // Transient frame-pacing state.  `fast_forward_active_` is the Tab
+    // key's hold state: while true the main loop swaps to a wall-clock
+    // budgeted multi-frame burst with vsync disabled.  Not persisted —
+    // a crash mid-FF must not leave user.conf in a "boot stuck at 8x"
+    // state.  `vsync_disabled_` mirrors what we last set on the
+    // renderer so we only call SDL_RenderSetVSync on edges.
+    bool fast_forward_active_{false};
+    bool vsync_disabled_{false};
+    SDL_Window* window_{nullptr};
+    SDL_Renderer* renderer_{nullptr};
+
+    // Last speed multiplier we pushed into apply_speed_state_.  Used by
+    // the main loop to detect external mutations (UI menu writes to
+    // user_state_ directly) so the title / apu mute / vsync stay
+    // coherent without requiring every mutator to call a setter.
+    float last_applied_speed_{1.0f};
 };

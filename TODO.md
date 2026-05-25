@@ -39,36 +39,51 @@ Rispettare la specifica BESS: https://github.com/LIJI32/SameBoy/blob/master/BESS
 
 ---
 
-## 3. Moltiplicatore di velocità
+## 3. Moltiplicatore di velocità — **fatto**
 
-Feature UX: x0.25, x0.5, x1.0, x1.5, x2.0, x4.0. Più fast-forward uncapped
-"tieni premuto" come modalità separata.
+Sei preset discreti (0.25 / 0.5 / 1.0 / 1.5 / 2.0 / 4.0) selezionabili da
+`Emulation → Speed`, hotkey `+` / `-` per step e `0` per snap a 1.0x; il
+moltiplicatore corrente è persistito in `<base>/user/user.conf` sotto un
+nuovo sub-block `emulation.speed`. **Fast-forward** legato a `Tab` (held):
+flag transitorio su `Application::fast_forward_active_`, non persistito
+(uno shutdown con Tab "stuck" non boot-pa a 8x al riavvio).
 
-**Stato**: vive sull'`Application` (è frame-pacing, non emulation state).
-Hotkey suggerite: `+` / `-` per step discreti, `Tab` (tieni premuto) per
-fast-forward uncapped. Entry esposta anche come combo nel menu ImGui
-("Emulation → Speed") + indicatore corrente in titlebar.
+**Pacing** (in `Application::run`):
+- `speed > 1.0` → `budget = round(CYCLES_PER_FRAME * speed)` passato a
+  `debugger.run_until` (più emulazione per frame vsynced reale).
+- `speed < 1.0` → `budget = CYCLES_PER_FRAME` e `SDL_Delay((1/speed - 1) *
+  16.667 ms)` post run_until (cap del millisecondo OK per i bucket esposti).
+- `fast_forward_active_` → `SDL_RenderSetVSync(renderer, 0)` (toggle solo
+  sull'edge), poi loop interno che esegue fino a 64 frame nominali o
+  10 ms wall-clock per iterazione del main loop, quale dei due arriva
+  prima.  Il "cap" effettivo è la throughput dell'host.
 
-**Implementazione**:
-- Il main loop oggi esegue `frame_cycles = 70224` T-cycle per VSync tick.
-  Per `multiplier > 1.0` → `frame_cycles = round(70224 * multiplier)` (più
-  emulazione per frame reale). Per `multiplier < 1.0` → si lascia
-  `frame_cycles = 70224` e si introduce un `SDL_Delay` di
-  `(1/multiplier - 1) * frame_time_ms` (meno emulazione per frame reale).
-- Fast-forward uncapped: scollegare dal VSync (`SDL_RenderSetVSync(0)` o
-  swap-interval 0) e iterare quante volte possibile entro un budget wall-clock
-  (es. 16 ms).
+**Audio**: auto-mute quando `speed != 1.0 || fast_forward_active_`. Pattern
+"due flag": `user_state_.audio_muted` (preferenza dell'utente, persistita) e
+il flag derivato in `apply_effective_mute_(core)` che ORizza i due e pusha
+nel APU.  Un Mute attivo a 2x rimane attivo dopo il ritorno a 1x.
 
-**Audio**: a velocità ≠ 1.0 il pitch cambia se non si resample. Scelta v1 =
-mute automatico quando `multiplier != 1.0` (semplice e accettata). Resampling
-(SoundTouch o simile) resta come follow-up.
+**UI**:
+- `Emulation → Speed` con 6 voci radio + voce informativa
+  "Fast-forward (hold Tab)" disabilitata (Tab è catturato dal SDL event loop,
+  non da ImGui, quindi cliccarla non avrebbe senso).
+- Titlebar dinamica: `GbEmu` (a 1.0x, no FF), `GbEmu - 2.0x` (preset != 1),
+  `GbEmu - FF` (fast-forward attivo).  Aggiornata in `apply_speed_state_`.
 
-**Interazione con il debugger**: in modalità Paused il moltiplicatore non ha
-effetto (lo step è manuale). Su `Step` singolo idem. Il moltiplicatore si
-applica solo nel ramo `run_until(stop_kind::none, frame_cycles)` del main loop.
+**Watcher di coerenza UI/main-loop**: il submenu Speed scrive direttamente
+`user_state_.speed_multiplier`; il main loop confronta con
+`last_applied_speed_` ogni iterazione e richiama `apply_speed_state_` se
+diverso (one-frame-lag per il menu, zero-lag per le hotkey che già chiamano
+il helper inline).
 
-**Headless**: non si applica — `script_runner` gira sempre full-speed (è il
-suo punto).
+**Headless**: non toccato — `script_runner` gira sempre alla velocità
+naturale, il branch fast-path nel main loop non si attiva.
+
+**Out of scope (follow-up)**:
+- Resampling audio a multiplier ≠ 1.0 (SoundTouch o simile).  Today il mute
+  evita la sgradevole pitch-shift.
+- Persistenza dello stato fast-forward su shutdown — deliberatamente
+  *non* persistito.
 
 ---
 
@@ -448,7 +463,8 @@ boundary UI→host via `ui::host_actions` (drained ogni frame dopo
 
 **Cosa resta:**
 
-- Popolare `Speed ▸` con le radio entries (`0.25x`…`4.0x`) — dipende §3.
+- ~~Popolare `Speed ▸` con le radio entries (`0.25x`…`4.0x`) — dipende §3.~~
+  **fatto** insieme a §3 (vedi sopra).
 - Popolare `Save State ▸` / `Load State ▸` con slot 0..9 + timestamp /
   "empty" — dipende §2. Hotkey suggerite: `F5` save / `F9` load sullo
   slot corrente; `Shift+0..9` per cambiare slot.
