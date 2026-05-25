@@ -459,9 +459,11 @@ void apu::on_nr10(std::uint8_t v) {
 void apu::on_nr11(std::uint8_t v) {
     // DMG quirk: even when powered off, the length portion of NRx1 writes
     // is accepted (duty and other bits stay zero). The mmio byte is still
-    // forced to its read-mask since duty isn't updated.
+    // forced to its read-mask since duty isn't updated. On CGB the write
+    // is fully ignored while powered off (Blargg cgb_sound 11:04).
     if (!powered_) {
-        ch1_sq_.length = 64 - (v & 0x3F);
+        if (!mmu_.cgb_mode())
+            ch1_sq_.length = 64 - (v & 0x3F);
         apply_read_mask(gb::io::NR11, 0);
         return;
     }
@@ -494,7 +496,8 @@ void apu::on_nr14(std::uint8_t v) {
 
 void apu::on_nr21(std::uint8_t v) {
     if (!powered_) {
-        ch2_.length = 64 - (v & 0x3F);
+        if (!mmu_.cgb_mode())
+            ch2_.length = 64 - (v & 0x3F);
         apply_read_mask(gb::io::NR21, 0);
         return;
     }
@@ -530,8 +533,10 @@ void apu::on_nr30(std::uint8_t v) {
 
 void apu::on_nr31(std::uint8_t v) {
     // DMG: NR31 is fully length on DMG, and accepted even while off.
+    // On CGB the write is ignored while powered off (cgb_sound 11:04).
     if (!powered_) {
-        ch3_.load_nr31(v);
+        if (!mmu_.cgb_mode())
+            ch3_.load_nr31(v);
         apply_read_mask(gb::io::NR31, 0);
         return;
     }
@@ -561,7 +566,8 @@ void apu::on_nr34(std::uint8_t v) {
 
 void apu::on_nr41(std::uint8_t v) {
     if (!powered_) {
-        ch4_.load_nr41(v);
+        if (!mmu_.cgb_mode())
+            ch4_.load_nr41(v);
         apply_read_mask(gb::io::NR41, 0);
         return;
     }
@@ -636,6 +642,9 @@ void apu::power_off() {
     // clocking lengths across the powered-on window between power-off and
     // the next NRx4 write, decimating preserved length values before
     // tests could trigger and measure them.
+    // On CGB the length counters are also cleared at power-off (Blargg
+    // cgb_sound 08:01).
+    const bool preserve_lengths = !mmu_.cgb_mode();
     const std::uint8_t ch1_len = ch1_sq_.length;
     const std::uint8_t ch2_len = ch2_.length;
     const std::uint16_t ch3_len = ch3_.length;
@@ -647,10 +656,12 @@ void apu::power_off() {
     ch3_ = wave_channel{};
     ch4_ = noise_channel{};
 
-    ch1_sq_.length = ch1_len;
-    ch2_.length = ch2_len;
-    ch3_.length = ch3_len;
-    ch4_.length = ch4_len;
+    if (preserve_lengths) {
+        ch1_sq_.length = ch1_len;
+        ch2_.length = ch2_len;
+        ch3_.length = ch3_len;
+        ch4_.length = ch4_len;
+    }
 
     // Wipe NR10..NR51 (logical value = 0) but leave the read-mask bits set
     // so reads after power-off still return the canonical "mostly 1s" byte

@@ -390,9 +390,9 @@ rewrite della pipeline.
 - `interrupt_time/interrupt_time.gb` ✅ (richiede CGB; passa ora che il branch `gbc` ha attivato il path CGB).
 - `dmg_sound` 09:01 / 10:01 / 12:01 ❌ — wave RAM access bug del CH3,
   indipendente dall'M-cycle, vedi §8.
-- `cgb_sound` 08:01 / 09:01 / 11:04 / 12:02 ❌ — quirk APU CGB-specifici
-  (length counters azzerati a power-off, wave RAM read mirroring, NRx1
-  bloccato a power-off, wave behavior su trigger). Dettaglio in §16.
+- `cgb_sound` 09:01 / 12:02 ❌ — quirk APU CGB-specifici residui (wave RAM
+  read mirroring, wave behavior su trigger). 08:01 e 11:04 chiusi dal
+  branch CGB-gate su `power_off` / `on_nrX1`. Dettaglio in §16.
 
 ---
 
@@ -801,7 +801,7 @@ di modalità (il decadimento naturale assorbe il salto di α senza pop).
 
 ---
 
-## 16. CGB APU quirks — `cgb_sound` 08:01 / 09:01 / 11:04 / 12:02
+## 16. CGB APU quirks — `cgb_sound` 09:01 / 12:02 (08:01 / 11:04 fatti)
 
 Sul branch `gbc` il bring-up CGB ha lasciato l'APU come copia 1:1 della DMG.
 Blargg `cgb_sound` esercita quattro divergenze hardware DMG → CGB che oggi non
@@ -809,15 +809,13 @@ modelliamo. Tutte risolvibili interrogando `mmu_.cgb_mode()` (già usato in
 PPU/HDMA): la knob esiste, manca solo applicarla nei posti giusti dentro
 `src/apu.cpp`.
 
-**08-len_ctr_during_power:01 — length counters azzerati a power-off**
+**08-len_ctr_during_power:01 — length counters azzerati a power-off — fatto**
 
 - Su DMG i length counters dei 4 canali sopravvivono al clear di NR52 bit 7 e
   continuano a contare; su CGB vengono **azzerati**.
-- Oggi `apu::power_off()` (`src/apu.cpp:624`) preserva tutti e quattro i
-  `length` esplicitamente — commento "DMG quirk" già presente, semplicemente
-  non gated su modello.
-- Fix: `if (!mmu_.cgb_mode()) { preserva } else { ch1_sq_.length =
-  ch2_.length = ch3_.length = ch4_.length = 0; }`.
+- `apu::power_off()` ora calcola `preserve_lengths = !mmu_.cgb_mode()` e
+  reinietta i quattro `length` solo nel ramo DMG; su CGB cadono a zero con
+  il resto dello stato di canale.
 
 **09-wave_read_while_on:01 — wave RAM read while CH3 active**
 
@@ -841,18 +839,15 @@ PPU/HDMA): la knob esiste, manca solo applicarla nei posti giusti dentro
   utilizzabile poi anche per chiudere `dmg_sound` 09:01 (sezione §8) con
   un branch sul modello.
 
-**11-regs_after_power:04 — NRx1 ignorato a power-off su CGB**
+**11-regs_after_power:04 — NRx1 ignorato a power-off su CGB — fatto**
 
 - Su DMG le scritture *solo della length* a `NR11`/`NR21`/`NR31`/`NR41`
   sono accettate anche con APU spenta (Pan Docs / Blargg note "length is
   unaffected by power"). Su CGB **anche** NRx1 è ignorata mentre la APU è
   off.
-- Oggi `on_nr11`/`on_nr21`/`on_nr31`/`on_nr41` hanno il ramo `if
-  (!powered_) { length-only write; return; }` (`src/apu.cpp:451,487,523,
-  554`) — corretto per DMG, sbagliato per CGB.
-- Fix: nel branch `!powered_`, ulteriormente discriminare su
-  `mmu_.cgb_mode()`: se CGB, applicare `apply_read_mask(addr, 0); return;`
-  senza toccare `length`.
+- I quattro `on_nrX1` ora skippano la length write nel ramo `!powered_`
+  quando `mmu_.cgb_mode()`: il valore di `length` non viene toccato e
+  l'mmio byte resta forzato al suo read-mask come prima.
 
 **12-wave:02 — wave channel su trigger (ipotesi da verificare)**
 
