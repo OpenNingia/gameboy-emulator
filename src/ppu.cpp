@@ -160,9 +160,14 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
     const auto scy = mmu_.hwr_scy();
     const auto scx = mmu_.hwr_scx();
 
-    // LCDC.0 = BG enable. If off, fill scanline with shade 0 of BGP and treat
-    // BG as transparent (color 0) for sprite priority so OBJs always show through.
-    if (!(lcdc & gb::lcdc::bg_enable)) {
+    // LCDC.0 has different semantics across models:
+    //   DMG: BG enable.  When 0, the BG layer is blanked to shade 0 of BGP
+    //        and presented as transparent (color_index 0) so OBJs show through.
+    //   CGB: BG/window master priority. When 0, BG and window are still
+    //        drawn normally — they just lose their priority gate against
+    //        OBJs (the sprite-stage gating below keys off LCDC.0 directly).
+    // So only the DMG path takes the blank-and-return shortcut.
+    if (!mmu_.cgb_mode() && !(lcdc & gb::lcdc::bg_enable)) {
         const std::uint32_t bg_off = resolve_pixel(palette_id::bg, 0);
         for (int px = 0; px < gb::LCD_WIDTH; ++px) {
             fb[ly * gb::LCD_WIDTH + px] = bg_off;
@@ -216,8 +221,13 @@ void ppu::render_window_scanline(std::uint8_t ly) {
         window_triggered = true;
 
     const auto lcdc = mmu_.hwr_lcdc();
-    // DMG: LCDC.0 gates BG *and* window. LCDC.5 enables the window itself.
-    if (!(lcdc & gb::lcdc::bg_enable) || !(lcdc & gb::lcdc::window_enable))
+    // LCDC.5 enables the window itself on both models. LCDC.0 also gates the
+    // window on DMG (it's the unified BG/window enable there); on CGB LCDC.0
+    // is the master-priority bit and does not disable rendering — the window
+    // keeps drawing, just without priority over OBJs.
+    if (!(lcdc & gb::lcdc::window_enable))
+        return;
+    if (!mmu_.cgb_mode() && !(lcdc & gb::lcdc::bg_enable))
         return;
     if (!window_triggered)
         return;
@@ -289,15 +299,29 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
         }
     }
 
-    // DMG sprite priority: smaller X wins; ties go to the earlier OAM entry.
-    // stable_sort preserves the OAM order for equal X.
-    std::stable_sort(visible.begin(), visible.begin() + n_visible,
-                     [](const sprite_entry& a, const sprite_entry& b) { return a.x < b.x; });
+    // Sprite priority depends on the hardware model:
+    //   DMG: smaller X wins; equal X falls back to the earlier OAM entry
+    //        (stable_sort preserves OAM order for equal keys).
+    //   CGB: lower OAM index always wins, X is not part of the comparison.
+    // The visible[] array was filled in OAM-index order during the scan, so
+    // skipping the sort on CGB leaves it in the priority order the loop below
+    // wants (highest priority first).
+    if (!mmu_.cgb_mode()) {
+        std::stable_sort(visible.begin(), visible.begin() + n_visible,
+                         [](const sprite_entry& a, const sprite_entry& b) { return a.x < b.x; });
+    }
 
     // Draw in priority order with a per-pixel "claimed" mask so lower-priority
     // sprites cannot poke through a higher-priority sprite's opaque pixels —
     // even when that pixel lost to BG via the BG-priority bit.
     std::array<bool, gb::LCD_WIDTH> claimed{};
+
+    const bool cgb = mmu_.cgb_mode();
+    // CGB master-priority bit: when LCDC.0 == 0 the BG/window priority gate
+    // is bypassed entirely and sprites always win against opaque BG pixels.
+    // The bit has no meaning on DMG here — sprite vs. BG arbitration there
+    // is governed solely by the per-sprite bg_priority attribute.
+    const bool bg_master_priority = (lcdc & gb::lcdc::bg_enable) != 0;
 
     for (std::size_t s = 0; s < n_visible; ++s) {
         const auto& sp = visible[s];
@@ -307,7 +331,13 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
         const bool y_flip = (sp.attr & gb::oam_attr::y_flip) != 0;
         const bool x_flip = (sp.attr & gb::oam_attr::x_flip) != 0;
         const bool bg_priority = (sp.attr & gb::oam_attr::bg_priority) != 0;
-        const palette_id pal = (sp.attr & gb::oam_attr::dmg_palette_obp1) ? palette_id::obj1 : palette_id::obj0;
+        // DMG picks between OBP0/OBP1 via bit 4. CGB ignores bit 4 and selects
+        // one of the eight OBJ palettes (OCPS-indexed) via bits 0-2 instead.
+        const palette_id pal = cgb ? static_cast<palette_id>(static_cast<std::uint8_t>(palette_id::cgb_obj0) +
+                                                             (sp.attr & gb::oam_attr::cgb_palette_mask))
+                                   : ((sp.attr & gb::oam_attr::dmg_palette_obp1) ? palette_id::obj1 : palette_id::obj0);
+        // CGB-only: bit 3 picks which VRAM bank holds the sprite's tile data.
+        const std::uint8_t tile_bank = (cgb && (sp.attr & gb::oam_attr::cgb_vram_bank)) ? 1 : 0;
 
         int row = static_cast<int>(ly) - sprite_top;
         if (y_flip)
@@ -323,8 +353,8 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
         // Sprites always use $8000-unsigned addressing regardless of LCDC.4.
         const std::uint16_t data_addr =
             static_cast<std::uint16_t>(gb::TILE_DATA_UNSIGNED_BASE + tile_index * gb::TILE_BYTES + row * 2);
-        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE));
-        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
+        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE), tile_bank);
+        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1), tile_bank);
 
         for (int px = 0; px < gb::TILE_PIXELS; ++px) {
             const int screen_x = sprite_left + px;
@@ -339,8 +369,20 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
                 continue; // sprite color 0 = transparent (no claim)
 
             claimed[screen_x] = true;
-            if (bg_priority && bg_attr_line[screen_x].color_index != 0)
-                continue; // OBJ behind BG colors 1-3
+            // BG-over-OBJ arbitration:
+            //   DMG: sprite goes behind BG when its own bg_priority bit is set
+            //        and the BG pixel is non-transparent (color_index != 0).
+            //   CGB: the BG wins when LCDC.0 master priority is on AND the BG
+            //        pixel is non-transparent AND either the sprite carries
+            //        bg_priority OR the BG tile attribute's own priority bit
+            //        is set.  With master priority off (LCDC.0=0) sprites
+            //        always win regardless of either priority bit.
+            const auto& bgp = bg_attr_line[screen_x];
+            const bool bg_wins =
+                cgb ? (bg_master_priority && bgp.color_index != 0 && (bg_priority || bgp.attr.priority))
+                    : (bg_priority && bgp.color_index != 0);
+            if (bg_wins)
+                continue;
 
             fb[ly * gb::LCD_WIDTH + screen_x] = resolve_pixel(pal, ci);
         }

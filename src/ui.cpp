@@ -492,8 +492,8 @@ namespace gbemu::ui {
 
             ImGui::Text("Z %d   N %d   H %d   C %d", regs.z_flag() ? 1 : 0, regs.n_flag() ? 1 : 0,
                         regs.h_flag() ? 1 : 0, regs.c_flag() ? 1 : 0);
-            ImGui::Text("IME %d   HALT %d   STOP %d", cpu.interrupt_enabled ? 1 : 0, cpu.halted ? 1 : 0,
-                        cpu.stopped ? 1 : 0);
+            ImGui::Text("IME %d   HALT %d   STOP %d   2x %d", cpu.interrupt_enabled ? 1 : 0, cpu.halted ? 1 : 0,
+                        cpu.stopped ? 1 : 0, cpu.double_speed ? 1 : 0);
 
             ImGui::Separator();
 

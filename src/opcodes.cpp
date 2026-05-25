@@ -3583,9 +3583,23 @@ IMPL_INSTR(stop) {
     // runtime.s) so dumping that byte tells us whether cpu_fast should have
     // returned early on DMG.
     //
-    // TODO(CGB): on CGB, STOP with KEY1 bit 0 set must perform a speed switch
-    // (clear bit 0, toggle bit 7) instead of halting the CPU.  The current
-    // body is DMG-only behaviour.
+    // CGB speed switch: STOP with KEY1 ($FF4D) bit 0 set flips the CPU
+    // clock between 1x and 2x, clears the prepare bit, and mirrors the
+    // new speed into bit 7.  The CPU does NOT enter stopped state in
+    // this case — execution continues with the padding byte consumed.
+    // io_read/io_store bypass the bus so we don't fan out the BCPD-style
+    // write handlers; the read masks in mmu_read_masked translate the
+    // raw byte to the 0x7E top-bit-only view games see.
+    if (cpu.mmu.cgb_mode()) {
+        const std::uint8_t key1 = cpu.mmu.io_read(gb::io::KEY1);
+        if (key1 & 0x01) {
+            cpu.double_speed = !cpu.double_speed;
+            cpu.mmu.io_store(gb::io::KEY1, cpu.double_speed ? std::uint8_t{0x80} : std::uint8_t{0x00});
+            cpu.regs.pc++; // skip the padding byte
+            return;
+        }
+    }
+
     std::uint16_t stop_pc = static_cast<std::uint16_t>(cpu.regs.pc - 1);
     LOG_DEBUG(gbemu::log::root(),
               "STOP @ {:04x}  next={:02x}  A={:02x} BC={:04x} DE={:04x} HL={:04x} SP={:04x}  gb_id=[D800]={:02x}  "

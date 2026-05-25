@@ -55,8 +55,19 @@ namespace gbemu {
             cpu.tick_ctx = this;
             cpu.tick_fn = [](void* ctx, std::uint8_t t) {
                 auto* c = static_cast<core*>(ctx);
-                c->pending_ppu_t += t;
-                c->apu.step(t);
+                // CGB double-speed: the CPU clock doubles, so each cpu-clock
+                // T forwarded here is half a base-clock T.  PPU and APU stay
+                // at the original 4.19 MHz (their work per frame is constant
+                // regardless of the CPU mode), so we halve `t` for them.
+                // Timer follows the CPU clock — DIV / TIMA on real hardware
+                // also count 2x faster in double-speed — so it keeps the
+                // full t.  total_cycles is reported in CPU-clock T-cycles
+                // and is what the dispatch-table cycle counts use, so it
+                // also receives the full t.  Bus accesses always tick in
+                // multiples of 4, so the /2 stays integer.
+                const std::uint8_t base_t = c->cpu.double_speed ? static_cast<std::uint8_t>(t >> 1) : t;
+                c->pending_ppu_t += base_t;
+                c->apu.step(base_t);
                 c->timer.step(t);
                 c->total_cycles += t;
             };

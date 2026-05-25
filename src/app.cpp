@@ -450,7 +450,12 @@ void Application::run() {
         if (!debugger.is_paused()) {
             gbemu::stop_condition cond{};
             cond.kind = gbemu::stop_kind::none;
-            const auto rr = debugger.run_until(cond, gb::CYCLES_PER_FRAME);
+            // run_until budget is in CPU-clock T-cycles (same domain as
+            // total_cycles).  In CGB double-speed the CPU emits twice as
+            // many T-cycles per wall-clock frame, so the per-frame budget
+            // doubles to keep the PPU stepping at the same 60 Hz rate.
+            const std::uint64_t budget = gb::CYCLES_PER_FRAME * (core.cpu.double_speed ? 2 : 1);
+            const auto rr = debugger.run_until(cond, budget);
             if (rr.outcome == gbemu::run_outcome::breakpoint || rr.outcome == gbemu::run_outcome::watchpoint) {
                 debugger.pause();
             }

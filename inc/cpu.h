@@ -25,6 +25,13 @@ namespace gbemu {
         // The next fetch must read PC without incrementing it, so the byte
         // after HALT gets executed twice.
         bool halt_bug{false};
+        // CGB double-speed latch.  Flipped by STOP when KEY1 ($FF4D) bit 0 is
+        // armed and cgb_mode is on; mirrored back into KEY1 bit 7 for the
+        // game to read.  In this mode the CPU clock (and therefore DIV/TIMA)
+        // doubles, while PPU and APU stay at the original 4.19 MHz — the
+        // tick callback in core::core() halves the t it forwards to PPU/APU
+        // and passes the full t to timer / total_cycles to express this.
+        bool double_speed{false};
         // Signal from conditional-branch bodies: set to the (cycles_taken -
         // cycles) delta when the branch is taken. cpu::step() uses it to
         // top up the trailing tick so the total cycles charged match the
@@ -64,6 +71,7 @@ namespace gbemu {
             halt_bug = false;
             extra_cycles = 0;
             step_cycles = 0;
+            double_speed = false;
         }
 
         // execute an instruction and returns total cycles
