@@ -8,6 +8,7 @@
 namespace gbemu {
     namespace {
 
+        constexpr std::uint16_t header_cgb_flag_addr = 0x0143;
         constexpr std::uint16_t header_type_addr = 0x0147;
         constexpr std::uint16_t header_rom_size_addr = 0x0148;
         constexpr std::uint16_t header_ram_size_addr = 0x0149;
@@ -67,8 +68,8 @@ namespace gbemu {
         // ----------------------------------------------------------------
         class no_mbc final : public mbc {
         public:
-            no_mbc(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type)
-                : rom_(std::move(rom)), ram_(ram_bytes, 0u), type_(type) {}
+            no_mbc(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type, std::uint8_t cgb_flag)
+                : rom_(std::move(rom)), ram_(ram_bytes, 0u), type_(type), cgb_flag_(cgb_flag) {}
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x8000) {
@@ -100,10 +101,13 @@ namespace gbemu {
                                        /*mode*/ 0};
             }
 
+            std::uint8_t cgb_flag() const override { return cgb_flag_; }
+
         private:
             std::vector<std::uint8_t> rom_;
             std::vector<std::uint8_t> ram_;
             std::uint8_t type_{0};
+            std::uint8_t cgb_flag_{0};
         };
 
         // ----------------------------------------------------------------
@@ -127,11 +131,12 @@ namespace gbemu {
         // ----------------------------------------------------------------
         class mbc1 final : public mbc {
         public:
-            mbc1(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type)
+            mbc1(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type, std::uint8_t cgb_flag)
                 : rom_(std::move(rom)),
                   ram_(ram_bytes, 0u),
                   rom_bank_mask_(rom_bank_mask_for(rom_.size())),
-                  type_(type) {}
+                  type_(type),
+                  cgb_flag_(cgb_flag) {}
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x4000) {
@@ -184,6 +189,8 @@ namespace gbemu {
                 ram_enabled_ = false;
             }
 
+            std::uint8_t cgb_flag() const override { return cgb_flag_; }
+
         private:
             std::uint8_t rom_byte(std::size_t offset) const {
                 return offset < rom_.size() ? rom_[offset] : std::uint8_t{0xFF};
@@ -205,6 +212,7 @@ namespace gbemu {
             bool ram_enabled_{false};
             std::uint8_t rom_bank_mask_{0};
             std::uint8_t type_{0};
+            std::uint8_t cgb_flag_{0};
         };
 
         // ----------------------------------------------------------------
@@ -221,11 +229,12 @@ namespace gbemu {
         // ----------------------------------------------------------------
         class mbc2 final : public mbc {
         public:
-            mbc2(std::vector<std::uint8_t> rom, std::uint8_t type)
+            mbc2(std::vector<std::uint8_t> rom, std::uint8_t type, std::uint8_t cgb_flag)
                 : rom_(std::move(rom)),
                   ram_(512, 0u), // built-in 512 nibbles, low 4 bits used
                   rom_bank_mask_(rom_bank_mask_for(rom_.size())),
-                  type_(type) {}
+                  type_(type),
+                  cgb_flag_(cgb_flag) {}
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x4000) {
@@ -279,6 +288,8 @@ namespace gbemu {
                 ram_enabled_ = false;
             }
 
+            std::uint8_t cgb_flag() const override { return cgb_flag_; }
+
         private:
             std::uint8_t rom_byte(std::size_t offset) const {
                 return offset < rom_.size() ? rom_[offset] : std::uint8_t{0xFF};
@@ -290,6 +301,7 @@ namespace gbemu {
             bool ram_enabled_{false};
             std::uint8_t rom_bank_mask_{0};
             std::uint8_t type_{0};
+            std::uint8_t cgb_flag_{0};
         };
 
         // ----------------------------------------------------------------
@@ -316,11 +328,12 @@ namespace gbemu {
         // ----------------------------------------------------------------
         class mbc3 final : public mbc {
         public:
-            mbc3(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type)
+            mbc3(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type, std::uint8_t cgb_flag)
                 : rom_(std::move(rom)),
                   ram_(ram_bytes, 0u),
                   rom_bank_mask_(rom_bank_mask_for_u16(rom_.size())),
-                  type_(type) {}
+                  type_(type),
+                  cgb_flag_(cgb_flag) {}
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x4000) {
@@ -386,6 +399,8 @@ namespace gbemu {
                 ram_enabled_ = false;
             }
 
+            std::uint8_t cgb_flag() const override { return cgb_flag_; }
+
         private:
             std::uint8_t rom_byte(std::size_t offset) const {
                 return offset < rom_.size() ? rom_[offset] : std::uint8_t{0xFF};
@@ -406,6 +421,7 @@ namespace gbemu {
             bool ram_enabled_{false};
             std::uint16_t rom_bank_mask_{0};
             std::uint8_t type_{0};
+            std::uint8_t cgb_flag_{0};
         };
 
         // ----------------------------------------------------------------
@@ -424,11 +440,12 @@ namespace gbemu {
         // ----------------------------------------------------------------
         class mbc5 final : public mbc {
         public:
-            mbc5(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type)
+            mbc5(std::vector<std::uint8_t> rom, std::size_t ram_bytes, std::uint8_t type, std::uint8_t cgb_flag)
                 : rom_(std::move(rom)),
                   ram_(ram_bytes, 0u),
                   rom_bank_mask_(rom_bank_mask_for_u16(rom_.size())),
-                  type_(type) {}
+                  type_(type),
+                  cgb_flag_(cgb_flag) {}
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x4000) {
@@ -473,6 +490,8 @@ namespace gbemu {
                 ram_enabled_ = false;
             }
 
+            std::uint8_t cgb_flag() const override { return cgb_flag_; }
+
         private:
             std::uint8_t rom_byte(std::size_t offset) const {
                 return offset < rom_.size() ? rom_[offset] : std::uint8_t{0xFF};
@@ -491,6 +510,7 @@ namespace gbemu {
             bool ram_enabled_{false};
             std::uint16_t rom_bank_mask_{0};
             std::uint8_t type_{0};
+            std::uint8_t cgb_flag_{0};
         };
 
     } // namespace
@@ -502,41 +522,54 @@ namespace gbemu {
         std::uint8_t type = rom[header_type_addr];
         std::uint8_t rom_size_code = rom[header_rom_size_addr];
         std::uint8_t ram_size_code = rom[header_ram_size_addr];
+        std::uint8_t cgb_flag = rom[header_cgb_flag_addr];
 
         std::size_t expected_rom_size = std::size_t{32 * 1024} << rom_size_code;
         std::size_t ram_size = decode_ram_size(ram_size_code);
 
-        LOG_INFO(log::root(), "Cartridge: type=0x{:02x} rom_size=0x{:02x} ({} KB) ram_size=0x{:02x} ({} KB)", type,
-                 rom_size_code, expected_rom_size / 1024, ram_size_code, ram_size / 1024);
+        const char* cgb_label = "DMG";
+        switch (classify_cgb_flag(cgb_flag)) {
+            case cgb_support::compat:
+                cgb_label = "CGB-compat";
+                break;
+            case cgb_support::cgb_only:
+                cgb_label = "CGB-only";
+                break;
+            case cgb_support::none:
+                break;
+        }
+        LOG_INFO(log::root(),
+                 "Cartridge: type=0x{:02x} rom_size=0x{:02x} ({} KB) ram_size=0x{:02x} ({} KB) cgb_flag=0x{:02x} ({})",
+                 type, rom_size_code, expected_rom_size / 1024, ram_size_code, ram_size / 1024, cgb_flag, cgb_label);
 
         switch (static_cast<cartridge_type>(type)) {
             case cartridge_type::rom_only:
-                return std::make_unique<no_mbc>(std::move(rom), 0, type);
+                return std::make_unique<no_mbc>(std::move(rom), 0, type, cgb_flag);
             case cartridge_type::rom_ram:
             case cartridge_type::rom_ram_battery:
-                return std::make_unique<no_mbc>(std::move(rom), ram_size, type);
+                return std::make_unique<no_mbc>(std::move(rom), ram_size, type, cgb_flag);
             case cartridge_type::mbc1:
             case cartridge_type::mbc1_ram:
             case cartridge_type::mbc1_ram_battery:
-                return std::make_unique<mbc1>(std::move(rom), ram_size, type);
+                return std::make_unique<mbc1>(std::move(rom), ram_size, type, cgb_flag);
             case cartridge_type::mbc2:
             case cartridge_type::mbc2_battery:
                 // MBC2 has built-in 512 nibbles — the header RAM size code is
                 // typically 0x00 and we ignore `ram_size` here on purpose.
-                return std::make_unique<mbc2>(std::move(rom), type);
+                return std::make_unique<mbc2>(std::move(rom), type, cgb_flag);
             case cartridge_type::mbc3_timer_battery:
             case cartridge_type::mbc3_timer_ram_battery:
             case cartridge_type::mbc3:
             case cartridge_type::mbc3_ram:
             case cartridge_type::mbc3_ram_battery:
-                return std::make_unique<mbc3>(std::move(rom), ram_size, type);
+                return std::make_unique<mbc3>(std::move(rom), ram_size, type, cgb_flag);
             case cartridge_type::mbc5:
             case cartridge_type::mbc5_ram:
             case cartridge_type::mbc5_ram_battery:
             case cartridge_type::mbc5_rumble:
             case cartridge_type::mbc5_rumble_ram:
             case cartridge_type::mbc5_rumble_ram_battery:
-                return std::make_unique<mbc5>(std::move(rom), ram_size, type);
+                return std::make_unique<mbc5>(std::move(rom), ram_size, type, cgb_flag);
             default:
                 throw gbemu_exception{"Unsupported cartridge type"};
         }

@@ -76,6 +76,13 @@ namespace gbemu {
         std::array<std::uint16_t, 256> pc_ring;
         std::size_t pc_idx;
         std::uint64_t total_cycles{0};
+        // Selected hardware model. Captured in core::load() from the
+        // cartridge's CGB flag ($0143): true when the cart wants CGB
+        // enhancements (flag & 0x80 != 0). Stays false on a DMG-only cart.
+        // Property of the loaded cartridge, not of the run — core::reset()
+        // does NOT clear it (a Reset re-runs the same game on the same
+        // hardware model).
+        bool cgb_mode{false};
         // PPU tick accumulator: bumped from the tick callback during
         // cpu.step() / irq.dispatch(), drained by a single ppu.step() at the
         // end of core::step().  See the tick-callback comment in the ctor

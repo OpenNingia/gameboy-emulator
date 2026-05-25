@@ -334,7 +334,20 @@ void debugger::dump_mbc(std::ostream& os) const {
     char buf[160];
     if (const auto* cart = core_.mmu.cart()) {
         const auto st = cart->debug_state();
-        std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X\n", st.type, rom_size, ram_size);
+        const auto cgb_flag = cart->cgb_flag();
+        const char* cgb_label = "DMG";
+        switch (classify_cgb_flag(cgb_flag)) {
+            case cgb_support::compat:
+                cgb_label = "CGB-compat";
+                break;
+            case cgb_support::cgb_only:
+                cgb_label = "CGB-only";
+                break;
+            case cgb_support::none:
+                break;
+        }
+        std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X cgb_flag=$%02X(%s)\n", st.type,
+                      rom_size, ram_size, cgb_flag, cgb_label);
         os << buf;
         std::snprintf(buf, sizeof(buf), "rom_bank=%u ram_bank=%u ram_enabled=%d mode=%u\n",
                       static_cast<unsigned>(st.rom_bank), static_cast<unsigned>(st.ram_bank), st.ram_enabled ? 1 : 0,

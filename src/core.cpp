@@ -12,7 +12,12 @@ using namespace gbemu;
 void core::load(rom_file& c) {
     // Hand the ROM bytes off to a freshly-built MBC; the MMU keeps the
     // owning pointer and routes cartridge accesses through it.
-    mmu.attach_cartridge(make_mbc(std::move(c.data)));
+    auto cart = make_mbc(std::move(c.data));
+    // Latch the hardware-model selection from the cartridge's CGB flag
+    // ($0143) before the MBC moves into the MMU. Foothold for the upcoming
+    // CGB refactors — no consumer reads cgb_mode yet on DMG-only carts.
+    cgb_mode = classify_cgb_flag(cart->cgb_flag()) != cgb_support::none;
+    mmu.attach_cartridge(std::move(cart));
 
     // reset registers
     memset(&regs, 0, sizeof(regs));

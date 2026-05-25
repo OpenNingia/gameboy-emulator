@@ -47,6 +47,28 @@ namespace gbemu {
         std::uint8_t mode;      // MBC1 advanced-banking mode bit (0 = ROM banking, 1 = RAM/upper-bits)
     };
 
+    // CGB compatibility classification derived from the header byte at $0143.
+    // The flag reflects the cartridge developer's intent, not what the
+    // machine is doing — see classify_cgb_flag() for the bit pattern.
+    enum class cgb_support : std::uint8_t {
+        none,     // DMG cartridge (bit 7 clear). On real CGB hardware the boot
+                  // ROM may auto-assign a colorization palette; we do not.
+        compat,   // 0x80: CGB-enhanced, also runs on DMG with a fallback path.
+        cgb_only, // 0xC0: CGB-only; a real DMG cannot run it.
+    };
+
+    // Classify the raw header byte at $0143. Only bit 7 distinguishes
+    // DMG-only from CGB-aware; bit 6 (combined with bit 7) is what tags a
+    // cartridge "CGB-only". Pan Docs notes the legacy values 0x84/0x88
+    // (PGB mode) — they have bit 7 clear and we treat them as DMG.
+    inline cgb_support classify_cgb_flag(std::uint8_t flag) {
+        if ((flag & 0xC0) == 0xC0)
+            return cgb_support::cgb_only;
+        if (flag & 0x80)
+            return cgb_support::compat;
+        return cgb_support::none;
+    }
+
     // Memory Bank Controller interface.
     //
     // Owns the cartridge ROM bytes and any cartridge RAM.  The MMU forwards
@@ -68,6 +90,11 @@ namespace gbemu {
         // (`dump mbc`) and by the ImGui MBC panel.  Pure introspection;
         // implementations must not mutate state here.
         virtual mbc_debug_state debug_state() const = 0;
+
+        // CGB compatibility flag from header $0143. Static per cartridge —
+        // captured at construction time. Drives the DMG-vs-CGB model
+        // selection in core::load(); also surfaced in the MBC panel.
+        virtual std::uint8_t cgb_flag() const = 0;
 
         // Restore banking state to power-on defaults.  Cartridge ROM bytes
         // are preserved (they're the immutable game data); RAM contents are

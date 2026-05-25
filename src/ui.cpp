@@ -918,6 +918,19 @@ namespace gbemu::ui {
             ImGui::Text("Mode        %u", static_cast<unsigned>(st.mode));
 
             ImGui::Separator();
+            const std::uint8_t cgb_flag = cart->cgb_flag();
+            const char* cgb_label = "DMG";
+            switch (classify_cgb_flag(cgb_flag)) {
+                case cgb_support::compat:
+                    cgb_label = "CGB-compat";
+                    break;
+                case cgb_support::cgb_only:
+                    cgb_label = "CGB-only";
+                    break;
+                case cgb_support::none:
+                    break;
+            }
+            ImGui::Text("CGB flag    $%02X (%s)", cgb_flag, cgb_label);
             // Header bytes are stable, but surfacing them next to the live
             // banking state saves a trip to the Memory panel.
             ImGui::Text("Header  ROM size $%02X   RAM size $%02X", c.core->mmu.read_u8(0x0148),
