@@ -40,6 +40,32 @@ gbemu::mmu::mmu() {
             slot = static_cast<std::uint8_t>((slot & 0x80) | (v & 0x01));
         }
     });
+
+    // BCPS / BCPD ($FF68 / $FF69) — CGB BG palette index / data.
+    // BCPD stores the byte into bg_palette_ram_[BCPS & 0x3F]; if BCPS bit 7
+    // is set, the index (bits 0-5) post-increments with wrap at 64. The byte
+    // ends up in mmio_[BCPD] too (write_u8 already stored it), but the
+    // mmio slot is never read — BCPD reads route through mmio_read_masked
+    // back to bg_palette_ram_.  Both registers are inert on DMG.
+    add_mmio_write_handler(gb::io::BCPD, [this](std::uint8_t v) {
+        if (!cgb_mode_)
+            return;
+        auto& bcps = mmio_[gb::io_offset(gb::io::BCPS)];
+        bg_palette_ram_[bcps & 0x3F] = v;
+        if (bcps & 0x80)
+            bcps = static_cast<std::uint8_t>(0x80 | ((bcps + 1) & 0x3F));
+    });
+
+    // OCPS / OCPD ($FF6A / $FF6B) — CGB OBJ palette index / data.  Same
+    // shape as BCPS/BCPD, just over obj_palette_ram_.
+    add_mmio_write_handler(gb::io::OCPD, [this](std::uint8_t v) {
+        if (!cgb_mode_)
+            return;
+        auto& ocps = mmio_[gb::io_offset(gb::io::OCPS)];
+        obj_palette_ram_[ocps & 0x3F] = v;
+        if (ocps & 0x80)
+            ocps = static_cast<std::uint8_t>(0x80 | ((ocps + 1) & 0x3F));
+    });
 }
 
 void gbemu::mmu::add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
@@ -149,9 +175,8 @@ std::uint8_t gbemu::mmu::mmio_read_masked(std::uint16_t addr) const {
     }
 
     // CGB read masks for registers with unimplemented bits that pull to 1.
-    // BCPS/BCPD/OCPS/OCPD (palette index/data) wait on step 5; HDMA1-5 wait
-    // on the HDMA new-code subsystem — until then they return raw storage,
-    // which Blargg's CGB suites tolerate (0 after reset for the lot).
+    // HDMA1-5 still wait on the HDMA new-code subsystem — until then they
+    // return raw storage, which Blargg's CGB suites tolerate (0 after reset).
     switch (addr) {
         case gb::io::KEY1:
             // bits 0 (prepare) and 7 (current speed) live in storage; 1-6 pull-up.
@@ -162,6 +187,14 @@ std::uint8_t gbemu::mmu::mmio_read_masked(std::uint16_t addr) const {
         case gb::io::SVBK:
             // Pan Docs: read returns the raw write ANDed with 0x07; bits 3-7 pull.
             return static_cast<std::uint8_t>(0xF8 | (v & 0x07));
+        case gb::io::BCPS:
+        case gb::io::OCPS:
+            // bit 7 (auto-increment) + bits 0-5 (index) are real; bit 6 pulls high.
+            return static_cast<std::uint8_t>(0x40 | (v & 0xBF));
+        case gb::io::BCPD:
+            return bg_palette_ram_[mmio_[gb::io_offset(gb::io::BCPS)] & 0x3F];
+        case gb::io::OCPD:
+            return obj_palette_ram_[mmio_[gb::io_offset(gb::io::OCPS)] & 0x3F];
     }
     return v;
 }
@@ -286,6 +319,8 @@ void gbemu::mmu::reset() {
     oam_.fill(0);
     mmio_.fill(0);
     hram_.fill(0);
+    bg_palette_ram_.fill(0);
+    obj_palette_ram_.fill(0);
     // KEY1 (and the rest of the CGB I/O block) no longer needs a 0xFF reseed
     // here: mmio_read_masked() returns OPEN_BUS on DMG and the 0x7E mask on
     // CGB regardless of the underlying mmio_ storage.  cgb_mode_ is a

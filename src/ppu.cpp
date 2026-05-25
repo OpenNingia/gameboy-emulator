@@ -90,7 +90,7 @@ void ppu::enter_hblank() {
     // Drawing just finished — push the line to the framebuffer.
     const auto ly = mmu_.hwr_ly();
     render_bg_scanline(ly);
-    render_window_scanline(ly); // overlays BG and updates bg_color_line for sprite priority
+    render_window_scanline(ly); // overlays BG and updates bg_attr_line for sprite priority
     render_sprites_scanline(ly);
     set_stat_mode(mode_e::HBLANK);
     if (mmu_.hwr_stat() & gb::stat::mode0_irq_enable)
@@ -148,10 +148,10 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
     // LCDC.0 = BG enable. If off, fill scanline with shade 0 of BGP and treat
     // BG as transparent (color 0) for sprite priority so OBJs always show through.
     if (!(lcdc & gb::lcdc::bg_enable)) {
-        const std::uint32_t bg_off = resolver_.resolve(palette_id::bg, 0);
+        const std::uint32_t bg_off = resolve_pixel(palette_id::bg, 0);
         for (int px = 0; px < gb::LCD_WIDTH; ++px) {
             fb[ly * gb::LCD_WIDTH + px] = bg_off;
-            bg_color_line[px] = 0;
+            bg_attr_line[px] = {0, DMG_BG_ATTR};
         }
         return;
     }
@@ -161,26 +161,36 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
 
     const std::uint8_t y = static_cast<std::uint8_t>(ly + scy);
     const std::uint8_t tile_y = y >> 3;
-    const std::uint8_t row = y & 7;
 
     for (int px = 0; px < gb::LCD_WIDTH; ++px) {
         const std::uint8_t x = static_cast<std::uint8_t>(px + scx);
         const std::uint8_t tile_x = x >> 3;
-        const std::uint8_t col = 7 - (x & 7);
 
-        const std::uint8_t idx = mmu_.vram_read(
-            static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x));
+        const std::uint16_t map_off =
+            static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x);
+        const std::uint8_t idx = mmu_.vram_read(map_off);
+
+        // DMG: every BG/window tile uses the same default attribute. CGB will
+        // read the attribute byte from the same map_off in VRAM bank 1 and
+        // decode bit 7 (priority), bit 6 (y-flip), bit 5 (x-flip), bit 3
+        // (tile-data bank), bits 0-2 (palette 0-7).
+        const pixel_attr attr = DMG_BG_ATTR;
+
+        const std::uint8_t row =
+            attr.y_flip ? static_cast<std::uint8_t>(7 - (y & 7)) : static_cast<std::uint8_t>(y & 7);
+        const std::uint8_t col =
+            attr.x_flip ? static_cast<std::uint8_t>(x & 7) : static_cast<std::uint8_t>(7 - (x & 7));
 
         const std::uint16_t data_addr = bg_tile_row_addr(idx, row, data_8000);
-        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE));
-        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
+        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE), attr.bank);
+        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1), attr.bank);
 
-        // (color_index, palette_id) is the pipeline intermediate; the resolver
-        // turns it into the final ARGB shade. On CGB the palette_id will come
-        // from the tile's attribute byte in VRAM bank 1 instead of being fixed.
+        // (color_index, attr) is the pipeline intermediate; resolve_pixel
+        // dispatches attr.id + color_index through the DMG or CGB resolver
+        // based on the cartridge model.
         const std::uint8_t ci = tile_color_index(lo, hi, col);
-        fb[ly * gb::LCD_WIDTH + px] = resolver_.resolve(palette_id::bg, ci);
-        bg_color_line[px] = ci;
+        fb[ly * gb::LCD_WIDTH + px] = resolve_pixel(attr.id, ci);
+        bg_attr_line[px] = {ci, attr};
     }
 }
 
@@ -207,24 +217,30 @@ void ppu::render_window_scanline(std::uint8_t ly) {
 
     const std::uint8_t y = window_line;
     const std::uint8_t tile_y = y >> 3;
-    const std::uint8_t row = y & 7;
 
     const int px_start = (xstart < 0) ? 0 : xstart;
     for (int px = px_start; px < gb::LCD_WIDTH; ++px) {
         const int win_x = px - xstart; // window-space X (always >= 0 here)
         const std::uint8_t tile_x = static_cast<std::uint8_t>(win_x >> 3);
-        const std::uint8_t col = 7 - (win_x & 7);
 
-        const std::uint8_t idx = mmu_.vram_read(
-            static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x));
+        const std::uint16_t map_off =
+            static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x);
+        const std::uint8_t idx = mmu_.vram_read(map_off);
+
+        const pixel_attr attr = DMG_BG_ATTR; // CGB: read attribute byte from bank 1 at map_off
+
+        const std::uint8_t row =
+            attr.y_flip ? static_cast<std::uint8_t>(7 - (y & 7)) : static_cast<std::uint8_t>(y & 7);
+        const std::uint8_t col =
+            attr.x_flip ? static_cast<std::uint8_t>(win_x & 7) : static_cast<std::uint8_t>(7 - (win_x & 7));
 
         const std::uint16_t data_addr = bg_tile_row_addr(idx, row, data_8000);
-        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE));
-        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1));
+        const std::uint8_t lo = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE), attr.bank);
+        const std::uint8_t hi = mmu_.vram_read(static_cast<std::uint16_t>(data_addr - gb::VRAM_BASE + 1), attr.bank);
 
         const std::uint8_t ci = tile_color_index(lo, hi, col);
-        fb[ly * gb::LCD_WIDTH + px] = resolver_.resolve(palette_id::bg, ci);
-        bg_color_line[px] = ci; // sprites use this for the BG-priority bit
+        fb[ly * gb::LCD_WIDTH + px] = resolve_pixel(attr.id, ci);
+        bg_attr_line[px] = {ci, attr};
     }
 
     // At least one window pixel was emitted this scanline → advance the latch.
@@ -306,10 +322,10 @@ void ppu::render_sprites_scanline(std::uint8_t ly) {
                 continue; // sprite color 0 = transparent (no claim)
 
             claimed[screen_x] = true;
-            if (bg_priority && bg_color_line[screen_x] != 0)
+            if (bg_priority && bg_attr_line[screen_x].color_index != 0)
                 continue; // OBJ behind BG colors 1-3
 
-            fb[ly * gb::LCD_WIDTH + screen_x] = resolver_.resolve(pal, ci);
+            fb[ly * gb::LCD_WIDTH + screen_x] = resolve_pixel(pal, ci);
         }
     }
 }
@@ -335,5 +351,5 @@ void ppu::reset() {
     window_triggered = false;
     window_line = 0;
     fb.fill(0);
-    bg_color_line.fill(0);
+    bg_attr_line.fill({0, DMG_BG_ATTR});
 }

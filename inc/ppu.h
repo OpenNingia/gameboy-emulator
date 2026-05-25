@@ -45,16 +45,29 @@ namespace gbemu {
         bool frame_ready{false};
         bool lcd_was_off{true};
         std::array<std::uint32_t, gb::LCD_WIDTH * gb::LCD_HEIGHT> fb{};
-        // BG color indices (pre-palette, 0..3) for the line currently being drawn.
-        // render_bg_scanline writes it; render_sprites_scanline reads it to honor
-        // the per-sprite BG-priority bit (OBJ behind BG colors 1-3).
-        std::array<std::uint8_t, gb::LCD_WIDTH> bg_color_line{};
+        // BG / window pixels (color index + fetch-time attribute) for the line
+        // currently being drawn. render_bg_scanline + render_window_scanline
+        // write it; render_sprites_scanline reads color_index to honor the OBJ
+        // BG-priority bit (OBJ behind BG colors 1-3) and will eventually read
+        // attr.priority for the CGB BG-over-OBJ master override. On DMG every
+        // entry's attr is the DMG_BG_ATTR default — color_index is the only
+        // varying field today.
+        std::array<bg_pixel, gb::LCD_WIDTH> bg_attr_line{};
         // Window per-frame latch: once LY hits WY in a frame the window is armed
         // until the next frame boundary, even if LCDC.5 toggles in between.
         bool window_triggered{false};
         // Window's own line counter: advances only on scanlines where at least
         // one window pixel was actually drawn. Not the same as LY-WY.
         std::uint8_t window_line{0};
+
+        // Single dispatch point between the DMG and CGB palette paths. The
+        // PPU owns this choice (per ROAD_TO_GBC.md step 5) so the resolver
+        // can keep `resolve()` and `resolve_cgb()` as two distinct entrypoints
+        // and the BG / window / OBJ scanline code does not have to thread
+        // cgb_mode through every call site.
+        std::uint32_t resolve_pixel(palette_id id, std::uint8_t color_index) const {
+            return mmu_.cgb_mode() ? resolver_.resolve_cgb(id, color_index) : resolver_.resolve(id, color_index);
+        }
 
         // State machine
         void advance(std::uint32_t t_cycles);
