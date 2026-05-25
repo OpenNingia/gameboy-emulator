@@ -129,6 +129,14 @@ namespace gbemu {
         DEF_HWREG(wx, 0xFF4B);
         DEF_HWREG_NP(hwr_ie, 0xFFFF);
 
+        // Hardware-model selection.  Set from core::load() once the cartridge
+        // CGB flag has been classified; gates CGB-only MMIO behavior (VBK/SVBK
+        // actually mutate the bank latches, KEY1 reads under the 0x7E mask,
+        // the rest of the CGB I/O block reads open-bus on DMG).  Property of
+        // the loaded cartridge, not of the run — mmu::reset() preserves it.
+        void set_cgb_mode(bool m) { cgb_mode_ = m; }
+        bool cgb_mode() const { return cgb_mode_; }
+
         // boot sequence
         void initialize_registers();
 
@@ -141,6 +149,12 @@ namespace gbemu {
         void reset();
 
     private:
+        // Apply per-register read masks for $FF00-$FF7F: IF unimplemented-high
+        // bits on both models, plus the CGB-only block (KEY1, VBK, SVBK, HDMA,
+        // BCPS/BCPD/OCPS/OCPD) which reads open-bus on DMG and under register-
+        // specific masks on CGB.
+        std::uint8_t mmio_read_masked(std::uint16_t addr) const;
+
         bool bios_accessible_{false};
         // True once a BIOS image has been load_bios()'d. Reset uses it to
         // decide whether to re-arm the overlay (a Reset that re-runs BIOS is
@@ -161,8 +175,8 @@ namespace gbemu {
         // and selects bank 1-7 at $D000-$DFFF via SVBK ($FF70).
         std::array<ram_t<0x1000>, 8> wram_{};
         // VBK ($FF4F) latch — current VRAM bank for CPU accesses to
-        // $8000-$9FFF.  Always 0 on DMG (no handler updates it); on CGB the
-        // VBK write handler (step 3) flips it between 0 and 1.
+        // $8000-$9FFF.  Always 0 on DMG (the VBK write handler short-circuits
+        // when cgb_mode_ is false); on CGB it flips between 0 and 1.
         std::uint8_t vram_bank_{0};
         // SVBK ($FF70) latch — current WRAM bank for CPU accesses to
         // $D000-$DFFF (and the corresponding echo-RAM window).  Defaults to
@@ -170,6 +184,8 @@ namespace gbemu {
         // updates this so it stays at 1, giving the same flat layout the
         // single-bank implementation had.
         std::uint8_t wram_bank_{1};
+        // Cartridge-driven hardware-model selection — see set_cgb_mode().
+        bool cgb_mode_{false};
         // sprite ram (OAM) 0xFE00 -> 0xFE9F
         ram_t<0x00A0> oam_{};
         // memory-mapped I/O region 0xFF00 -> 0xFF7F

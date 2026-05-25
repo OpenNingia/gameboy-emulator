@@ -18,6 +18,9 @@ void core::load(rom_file& c) {
     // CGB refactors — no consumer reads cgb_mode yet on DMG-only carts.
     cgb_mode = classify_cgb_flag(cart->cgb_flag()) != cgb_support::none;
     mmu.attach_cartridge(std::move(cart));
+    // Mirror the model selection onto the MMU so its MMIO read masks and the
+    // VBK/SVBK/KEY1 write handlers know whether to act as DMG or CGB hardware.
+    mmu.set_cgb_mode(cgb_mode);
 
     // reset registers
     memset(&regs, 0, sizeof(regs));

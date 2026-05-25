@@ -11,14 +11,35 @@ gbemu::mmu::mmu() {
             bios_accessible_ = false;
     });
 
-    // CGB-only registers — on DMG these read back as open-bus 0xFF.  Blargg's
-    // cpu_instrs runtime probes KEY1 in cpu_fast to decide whether the CPU is
-    // already in double-speed mode; without 0xFF here the probe falls through
-    // to a STOP that would otherwise lock up the test on DMG.
-    // TODO(CGB): when CGB support is added this must become 0x7E on CGB, and
-    // KEY1 writes must respect bit 0 (prepare speed switch) being the only
-    // writable bit.
-    mmio_[gb::io_offset(gb::io::KEY1)] = gb::OPEN_BUS;
+    // VBK ($FF4F) — VRAM bank select.  CGB only; on DMG the write is ignored
+    // and the bank stays at 0.  Only bit 0 is writable.
+    add_mmio_write_handler(gb::io::VBK, [this](std::uint8_t v) {
+        if (cgb_mode_)
+            vram_bank_ = static_cast<std::uint8_t>(v & 0x01);
+    });
+
+    // SVBK ($FF70) — WRAM bank select for $D000-$DFFF (and the corresponding
+    // echo-RAM window).  CGB only; on DMG the write is ignored.  Three bits
+    // are writable; raw=0 maps to bank 1 in hardware, banks 1-7 map to 1-7.
+    add_mmio_write_handler(gb::io::SVBK, [this](std::uint8_t v) {
+        if (cgb_mode_) {
+            const std::uint8_t b = static_cast<std::uint8_t>(v & 0x07);
+            wram_bank_ = (b == 0) ? std::uint8_t{1} : b;
+        }
+    });
+
+    // KEY1 ($FF4D) — double-speed control.  CGB only; on DMG the write is
+    // ignored.  Only bit 0 (prepare speed switch) is software-writable; bit 7
+    // (current speed) is hardware-driven by a successful STOP transition,
+    // which we don't model yet (step 8) — preserving its current value keeps
+    // the slot ready for that work.  write_u8 already stored the raw byte in
+    // mmio_[KEY1]; rewrite it here to keep only the legal bits.
+    add_mmio_write_handler(gb::io::KEY1, [this](std::uint8_t v) {
+        if (cgb_mode_) {
+            auto& slot = mmio_[gb::io_offset(gb::io::KEY1)];
+            slot = static_cast<std::uint8_t>((slot & 0x80) | (v & 0x01));
+        }
+    });
 }
 
 void gbemu::mmu::add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
@@ -81,18 +102,9 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
             // black hole
             if (addr < gb::io::BASE)
                 return 0;
-            // memory mapped i/o
-            if (addr < gb::HRAM_BASE) {
-                auto v = mmio_[gb::io_offset(addr)];
-                // IF ($FF0F) bits 5-7 are unimplemented in hardware and read
-                // back as 1 (open-bus / pull-up). Blargg's halt_bug.gb depends
-                // on this: it prints IF after the test and the CRC includes
-                // those high bits. Without the mask we'd produce e.g.
-                // "01 10 11 ..." where a real DMG shows "01 10 F1 ...".
-                if (addr == gb::io::IF)
-                    return static_cast<std::uint8_t>(v | gb::irq_bit::if_unimpl_high);
-                return v;
-            }
+            // memory mapped i/o (IF mask + CGB-only register masks)
+            if (addr < gb::HRAM_BASE)
+                return mmio_read_masked(addr);
             // hram (zero-page)
             return hram_[addr - gb::HRAM_BASE];
         default:
@@ -102,6 +114,56 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
 
 std::int8_t gbemu::mmu::read_i8(std::uint16_t addr) const {
     return static_cast<std::int8_t>(read_u8(addr));
+}
+
+std::uint8_t gbemu::mmu::mmio_read_masked(std::uint16_t addr) const {
+    const auto off = gb::io_offset(addr);
+    const auto v = mmio_[off];
+
+    // IF ($FF0F) bits 5-7 are unimplemented in hardware and read back as 1
+    // (open-bus / pull-up). Blargg's halt_bug.gb checksums them.
+    if (addr == gb::io::IF)
+        return static_cast<std::uint8_t>(v | gb::irq_bit::if_unimpl_high);
+
+    // CGB-only registers — on DMG the whole block reads open-bus.  This is
+    // load-bearing for KEY1 specifically: Blargg cpu_fast probes it to skip
+    // the double-speed path, and a write earlier in the run would otherwise
+    // leak back through this read (see project_blargg_runtime memory).
+    if (!cgb_mode_) {
+        switch (addr) {
+            case gb::io::KEY1:
+            case gb::io::VBK:
+            case gb::io::HDMA1:
+            case gb::io::HDMA2:
+            case gb::io::HDMA3:
+            case gb::io::HDMA4:
+            case gb::io::HDMA5:
+            case gb::io::BCPS:
+            case gb::io::BCPD:
+            case gb::io::OCPS:
+            case gb::io::OCPD:
+            case gb::io::SVBK:
+                return gb::OPEN_BUS;
+        }
+        return v;
+    }
+
+    // CGB read masks for registers with unimplemented bits that pull to 1.
+    // BCPS/BCPD/OCPS/OCPD (palette index/data) wait on step 5; HDMA1-5 wait
+    // on the HDMA new-code subsystem — until then they return raw storage,
+    // which Blargg's CGB suites tolerate (0 after reset for the lot).
+    switch (addr) {
+        case gb::io::KEY1:
+            // bits 0 (prepare) and 7 (current speed) live in storage; 1-6 pull-up.
+            return static_cast<std::uint8_t>(0x7E | (v & 0x81));
+        case gb::io::VBK:
+            // only bit 0 carries the bank; the rest of the byte pulls to 1.
+            return static_cast<std::uint8_t>(0xFE | vram_bank_);
+        case gb::io::SVBK:
+            // Pan Docs: read returns the raw write ANDed with 0x07; bits 3-7 pull.
+            return static_cast<std::uint8_t>(0xF8 | (v & 0x07));
+    }
+    return v;
 }
 
 void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
@@ -224,10 +286,11 @@ void gbemu::mmu::reset() {
     oam_.fill(0);
     mmio_.fill(0);
     hram_.fill(0);
-    // Repaint the KEY1 open-bus byte the ctor wrote — without this Blargg
-    // cpu_fast's probe at PC=0x0150 would see 0x00 after a Reset and try a
-    // STOP that locks up the test.
-    mmio_[gb::io_offset(gb::io::KEY1)] = gb::OPEN_BUS;
+    // KEY1 (and the rest of the CGB I/O block) no longer needs a 0xFF reseed
+    // here: mmio_read_masked() returns OPEN_BUS on DMG and the 0x7E mask on
+    // CGB regardless of the underlying mmio_ storage.  cgb_mode_ is a
+    // cartridge property and survives the reset; the VRAM/WRAM bank latches
+    // and bios_accessible_ are re-armed below.
     bios_accessible_ = bios_loaded_;
     if (cart_)
         cart_->reset();
