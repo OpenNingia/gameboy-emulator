@@ -12,6 +12,9 @@ namespace gbemu {
     namespace gfx {
         struct backend;
     }
+    namespace input {
+        class manager;
+    }
 } // namespace gbemu
 
 namespace gbemu::ui {
@@ -55,7 +58,7 @@ namespace gbemu::ui {
     // lifetime and must invoke shutdown() before destroying the SDL
     // renderer/window/gfx backend.
     context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, core& c,
-                  user_state& user, std::string const& imgui_ini_path);
+                  user_state& user, input::manager const& input, std::string const& imgui_ini_path);
 
     // Tear down ImGui in reverse order.  Safe to call with nullptr.
     void shutdown(context* ctx);

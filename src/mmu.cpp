@@ -379,7 +379,6 @@ void gbemu::mmu::initialize_registers() {
     hwr_tma(0x00);
     hwr_tac(0xF8);
     hwr_if(0xE1);
-    // TODO NR10-52
 
     hwr_lcdc(0x91);
     hwr_stat(0x85);

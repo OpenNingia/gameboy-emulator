@@ -14,6 +14,7 @@
 #include <exc.hpp>
 #include <gb_layout.h>
 #include <gfx.h>
+#include <input.h>
 #include <joypad.h>
 #include <log.h>
 #include <mbc.h>
@@ -115,82 +116,6 @@ namespace {
         // Non-Windows builds: TODO when nfd / tinyfiledialogs lands in vcpkg.json.
         return {};
 #endif
-    }
-} // namespace
-
-namespace {
-    // Hard-coded keyboard bindings. Arrow keys drive the D-pad; Z/X are A/B
-    // (typical fceux/SameBoy convention so the player's right hand sits
-    // naturally over them); Backspace = Select, Enter = Start. Returns
-    // false for unmapped keys so the caller can early-out.
-    bool map_keycode_to_button(SDL_Keycode k, gbemu::joypad::button& out) {
-        using b = gbemu::joypad::button;
-        switch (k) {
-            case SDLK_UP:
-                out = b::up;
-                return true;
-            case SDLK_DOWN:
-                out = b::down;
-                return true;
-            case SDLK_LEFT:
-                out = b::left;
-                return true;
-            case SDLK_RIGHT:
-                out = b::right;
-                return true;
-            case SDLK_z:
-                out = b::a;
-                return true;
-            case SDLK_x:
-                out = b::b;
-                return true;
-            case SDLK_BACKSPACE:
-                out = b::select;
-                return true;
-            case SDLK_RETURN:
-                out = b::start;
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    // Gamepad bindings. SDL_GameController normalizes vendor layouts (Xbox,
-    // PlayStation, Switch Pro, generic) onto a single virtual layout, so we
-    // can hard-code SDL's symbolic buttons here. GB-A maps to gamepad-A
-    // (south on Xbox-style pads), GB-B maps to gamepad-X (west) — the
-    // industry-standard mapping that keeps the "B" button as the secondary
-    // action under the thumb's resting position.
-    bool map_controller_button_to_button(Uint8 sdl_btn, gbemu::joypad::button& out) {
-        using b = gbemu::joypad::button;
-        switch (sdl_btn) {
-            case SDL_CONTROLLER_BUTTON_DPAD_UP:
-                out = b::up;
-                return true;
-            case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-                out = b::down;
-                return true;
-            case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-                out = b::left;
-                return true;
-            case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-                out = b::right;
-                return true;
-            case SDL_CONTROLLER_BUTTON_A:
-                out = b::a;
-                return true;
-            case SDL_CONTROLLER_BUTTON_X:
-                out = b::b;
-                return true;
-            case SDL_CONTROLLER_BUTTON_BACK:
-                out = b::select;
-                return true;
-            case SDL_CONTROLLER_BUTTON_START:
-                out = b::start;
-                return true;
-            default:
-                return false;
-        }
     }
 } // namespace
 
@@ -416,6 +341,77 @@ void Application::reset_speed_(gbemu::core& core) {
     apply_speed_state_(core);
 }
 
+void Application::handle_action_(gbemu::input::hotkey_event ev, gbemu::core& core, gbemu::debugger& dbg,
+                                 gbemu::ui::context* ui_ctx) {
+    using a = gbemu::input::action;
+    // `pressed` distinguishes the hold-binding press edge from the
+    // release edge.  Oneshot bindings always arrive with pressed=true;
+    // only fast_forward currently observes the release.
+    const bool pressed = ev.hold_pressed;
+    switch (ev.act) {
+        case a::load_rom:
+            gbemu::ui::actions(ui_ctx).load_rom_dialog_requested = true;
+            break;
+        case a::toggle_pause:
+            // ROM gate enforced by the binding's gate::rom_only — by the
+            // time we land here, a cart is attached.
+            dbg.toggle_running();
+            break;
+        case a::reset:
+            dbg.reset();
+            gbemu::ui::reset_display_post(ui_ctx);
+            break;
+        case a::toggle_fullscreen: {
+            const bool is_fs = (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+            SDL_SetWindowFullscreen(window_, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            break;
+        }
+        case a::speed_up:
+            bump_speed_up_(core);
+            gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+            break;
+        case a::speed_down:
+            bump_speed_down_(core);
+            gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+            break;
+        case a::speed_reset:
+            reset_speed_(core);
+            gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+            break;
+        case a::fast_forward:
+            // Hold semantics: pressed→engage, released→drop back to the
+            // persisted preset.  apply_speed_state_ updates the title
+            // and flips renderer vsync on the FF edge.
+            if (pressed && !fast_forward_active_) {
+                fast_forward_active_ = true;
+                apply_speed_state_(core);
+            } else if (!pressed && fast_forward_active_) {
+                fast_forward_active_ = false;
+                apply_speed_state_(core);
+            }
+            break;
+        case a::toggle_mute:
+            user_state_.audio_muted = !user_state_.audio_muted;
+            apply_effective_mute_(core);
+            gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+            break;
+        case a::volume_up:
+        case a::volume_down: {
+            // Snap to the next 10% bucket strictly above (or below) the
+            // current value, clamped to [0,100].  Repeated presses
+            // converge on round numbers regardless of where the slider
+            // started — 47% + UP → 50%, not 57%.
+            const int cur = static_cast<int>(user_state_.audio_volume * 100.0f + 0.5f);
+            int pct = (ev.act == a::volume_up) ? ((cur / 10) + 1) * 10 : ((cur > 0) ? ((cur - 1) / 10) * 10 : 0);
+            pct = std::clamp(pct, 0, 100);
+            user_state_.audio_volume = static_cast<float>(pct) / 100.0f;
+            core.apu.set_master_gain(user_state_.audio_volume * user_state_.audio_volume);
+            gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+            break;
+        }
+    }
+}
+
 void Application::run() {
     gbemu::core core;
     gbemu::debugger debugger{core};
@@ -575,7 +571,7 @@ void Application::run() {
     if (!gfx_backend)
         throw gbemu::gbemu_exception{"gfx backend creation failed!"};
 
-    auto* ui_ctx = gbemu::ui::init(window, renderer, gfx_backend, debugger, core, user_state_, imgui_ini_path);
+    auto* ui_ctx = gbemu::ui::init(window, renderer, gfx_backend, debugger, core, user_state_, input_, imgui_ini_path);
 
     // Apply display config (frame blending mode + active palette) and
     // scan the palettes directory for any user .sbp files.  Has to run
@@ -609,101 +605,45 @@ void Application::run() {
             if (e.type == SDL_QUIT) {
                 quit = true;
                 break;
-            } else if (e.type == SDL_KEYDOWN && !imgui_captured) {
-                // Menu-bar hotkeys.  Mirror the shortcut hints rendered in
-                // ui.cpp's draw_menu_bar — keep them in sync if either side
-                // changes.  Repeat-gated because they are one-shot toggles;
-                // joypad mapping below is also repeat-gated for the same
-                // reason.  None of the bound keys overlap with the joypad
-                // bindings (arrows / Z / X / Backspace / Enter), so the
-                // joypad pass-through below stays correct.
-                if (!e.key.repeat) {
-                    const auto k = e.key.keysym.sym;
-                    const bool ctrl = (e.key.keysym.mod & KMOD_CTRL) != 0;
-                    // Emulation hotkeys (Space / Ctrl+R) are gated on a
-                    // cartridge being attached — mirrors the menu and CPU
-                    // panel buttons, which BeginDisabled when no cart, so
-                    // accidental Space presses on the fresh-launch "no ROM"
-                    // screen don't kick the BIOS into rendering 0xFF bytes
-                    // as a Nintendo logo (i.e. the black rectangle).
-                    const bool rom_loaded = core.mmu.cart() != nullptr;
-                    if (k == SDLK_F11) {
-                        const bool is_fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
-                        SDL_SetWindowFullscreen(window, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-                    } else if (k == SDLK_SPACE && rom_loaded) {
-                        debugger.toggle_running();
-                    } else if (ctrl && k == SDLK_r && rom_loaded) {
-                        debugger.reset();
-                        gbemu::ui::reset_display_post(ui_ctx);
-                    } else if (ctrl && k == SDLK_o) {
-                        gbemu::ui::actions(ui_ctx).load_rom_dialog_requested = true;
-                    } else if (k == SDLK_m && !ctrl) {
-                        // Mute toggle. Flip the user-facing flag and route
-                        // through apply_effective_mute_ so the APU sees
-                        // the OR of user_muted with the speed-driven mute
-                        // gate — un-muting at 2x speed keeps audio off
-                        // until 1.0x is restored.
-                        user_state_.audio_muted = !user_state_.audio_muted;
-                        apply_effective_mute_(core);
-                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
-                    } else if (ctrl && (k == SDLK_UP || k == SDLK_DOWN)) {
-                        // Volume nudge: snap to the next 10% bucket strictly
-                        // above (or below) the current value, clamped to
-                        // [0,100]. Snap-to-bucket means repeated presses
-                        // converge on round numbers regardless of where the
-                        // slider sat before — 47% + UP -> 50%, not 57%; and
-                        // 50% + UP still advances to 60% so a held key keeps
-                        // moving.
-                        const int cur = static_cast<int>(user_state_.audio_volume * 100.0f + 0.5f);
-                        int pct = (k == SDLK_UP) ? ((cur / 10) + 1) * 10 : ((cur > 0) ? ((cur - 1) / 10) * 10 : 0);
-                        pct = std::clamp(pct, 0, 100);
-                        user_state_.audio_volume = static_cast<float>(pct) / 100.0f;
-                        core.apu.set_master_gain(user_state_.audio_volume * user_state_.audio_volume);
-                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
-                    } else if (!ctrl && (k == SDLK_EQUALS || k == SDLK_KP_PLUS)) {
-                        // Speed up to the next preset. '=' on US layouts is
-                        // unshifted '+'; the keypad path catches numeric-pad
-                        // users.  Persist via save flag so the new speed
-                        // survives the next launch.
-                        bump_speed_up_(core);
-                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
-                    } else if (!ctrl && (k == SDLK_MINUS || k == SDLK_KP_MINUS)) {
-                        bump_speed_down_(core);
-                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
-                    } else if (!ctrl && (k == SDLK_0 || k == SDLK_KP_0)) {
-                        reset_speed_(core);
-                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
-                    } else if (k == SDLK_TAB && !fast_forward_active_) {
-                        // Fast-forward: hold to engage, release to drop
-                        // back to the persisted preset.  Transient flag,
-                        // NOT persisted (a stuck Tab key on shutdown must
-                        // not boot at FF next time).
-                        fast_forward_active_ = true;
-                        apply_speed_state_(core);
-                    }
+            } else if (e.type == SDL_KEYDOWN) {
+                // Hotkey dispatch.  Application-level shortcuts (Space,
+                // Ctrl+R, F11, …) come back from input_ as a semantic
+                // `action` and route through handle_action_; the joypad
+                // pass-through is a second, independent sweep on the
+                // same key event.  Both sides are gated on
+                // !imgui_captured today to preserve historical behavior
+                // (the §17 spec calls out the joypad-no-gate variant as
+                // a future tweak — see input::manager docstring).
+                const bool rom_loaded = core.mmu.cart() != nullptr;
+                if (auto ev = input_.on_key_down(e.key.keysym.sym, e.key.keysym.mod, e.key.repeat, imgui_captured,
+                                                 rom_loaded)) {
+                    handle_action_(*ev, core, debugger, ui_ctx);
                 }
-                gbemu::joypad::button btn;
-                if (!e.key.repeat && map_keycode_to_button(e.key.keysym.sym, btn))
-                    core.joypad.set_button(btn, true);
-            } else if (e.type == SDL_KEYUP && !imgui_captured) {
-                // Tab release ends fast-forward.  Checked here (not
-                // KEYDOWN) so the natural keyboard auto-repeat doesn't
-                // matter — the engage happens on the first KEYDOWN,
-                // release happens on the lone KEYUP at the end.
-                if (e.key.keysym.sym == SDLK_TAB && fast_forward_active_) {
-                    fast_forward_active_ = false;
-                    apply_speed_state_(core);
+                if (!imgui_captured && !e.key.repeat) {
+                    gbemu::joypad::button btn;
+                    if (input_.on_key_for_joypad(e.key.keysym.sym, btn))
+                        core.joypad.set_button(btn, true);
                 }
-                gbemu::joypad::button btn;
-                if (map_keycode_to_button(e.key.keysym.sym, btn))
-                    core.joypad.set_button(btn, false);
+            } else if (e.type == SDL_KEYUP) {
+                // Hold-kind hotkey release (Tab → fast-forward off).
+                // imgui_captured does NOT gate the release: a held key
+                // whose release lands inside an ImGui text field must
+                // still produce its release event or fast-forward
+                // sticks indefinitely.
+                if (auto ev = input_.on_key_up(e.key.keysym.sym))
+                    handle_action_(*ev, core, debugger, ui_ctx);
+                if (!imgui_captured) {
+                    gbemu::joypad::button btn;
+                    if (input_.on_key_for_joypad(e.key.keysym.sym, btn))
+                        core.joypad.set_button(btn, false);
+                }
             } else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
                 gbemu::joypad::button btn;
-                if (map_controller_button_to_button(e.cbutton.button, btn))
+                if (input_.on_controller_button(e.cbutton.button, btn))
                     core.joypad.set_button(btn, true);
             } else if (e.type == SDL_CONTROLLERBUTTONUP) {
                 gbemu::joypad::button btn;
-                if (map_controller_button_to_button(e.cbutton.button, btn))
+                if (input_.on_controller_button(e.cbutton.button, btn))
                     core.joypad.set_button(btn, false);
             } else if (e.type == SDL_CONTROLLERDEVICEADDED) {
                 // Hot-plug: claim the new pad only if we don't already

@@ -885,7 +885,41 @@ modello dentro la stessa lambda (window di 2 T-cycle + blackout 0xFF).
 
 ---
 
-## 17. Input refactor — hotkey manager + bindings configurabili
+## 17. Input refactor — hotkey manager + bindings configurabili — **step 1-2 fatti**
+
+**Stato**: il refactor del dispatcher è chiuso (passi 1 e 2 della sezione
+"Ordine consigliato" sotto). `inc/input.h` + `src/input.cpp` ospitano il
+modulo `gbemu::input::manager` con `action` enum, `key_binding` (con
+`kind::oneshot|hold` e `gate::always|rom_only`) e `joypad_binding`.
+`Application::run` ora delega ogni `SDL_KEYDOWN/KEYUP/CONTROLLER*` al
+manager e instrada il risultato attraverso `Application::handle_action_`,
+sostituendo le ~90 righe inline che mescolavano hotkey applicativi e
+joypad mapping. Le voci della menu bar (`src/ui.cpp::draw_menu_bar`)
+leggono le shortcut label da `input::manager::shortcut_label(action)`
+invece che da stringhe hardcoded, così un rebinding aggiorna le hint
+senza un edit parallelo. Modifier mask ora è **strict** (`Ctrl+Shift+R`
+non triggera `reset` — comportamento intenzionale, diverso dal vecchio
+loose match).
+
+**Cosa resta:**
+
+- **Step 3** — persistenza in `user_state_.input` (libconfig sub-block
+  `input`). Default kicks in se mancante; binding invalidi → log + skip.
+  `SDL_GetKeyFromName` / `SDL_GetKeyName` chiudono la conversione
+  testo↔keycode. Stima ~2-3 ore.
+- **Step 4** — UI di rebinding (modal "Press a key…"). Deferita a §12
+  così la Player UI può decidere dove vive il menu Settings.
+
+**Discrepanza spec/codice trovata durante l'implementazione**: §17 spec
+originale diceva "joypad ignora ImGui focus", ma il codice precedente
+gating-eva il joypad su `!imgui_captured` esattamente come gli hotkey.
+La versione refactorata preserva il comportamento attuale (joypad
+gated su `!imgui_captured`). Riconciliare in un follow-up se il
+"joypad pass-through senza gate" è il comportamento desiderato.
+
+---
+
+## 17-archived (specs originali, mantenute per memoria storica)
 
 `Application::run` oggi mescola in un unico `while (SDL_PollEvent)` (~90 righe
 in `src/app.cpp:498-592`) **quattro responsabilità diverse**:

@@ -27,6 +27,7 @@
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include <imgui_internal.h>
+#include <input.h>
 #include <log.h>
 #include <mbc.h>
 #include <pixel_pipeline.h>
@@ -57,6 +58,11 @@ namespace gbemu::ui {
         gbemu::gfx::backend* backend{nullptr};
         gbemu::debugger* dbg{nullptr};
         gbemu::core* core{nullptr};
+        // Read-only pointer to the host's input manager — used by the
+        // menu bar to label MenuItem shortcuts from the live binding
+        // config rather than hardcoded strings, so a future rebinding
+        // UI lands without a parallel edit.
+        gbemu::input::manager const* input{nullptr};
 
         // Streaming presenter for the GB framebuffer shown in the Display
         // panel.  Created eagerly in ui::init; uploaded each time the PPU
@@ -182,9 +188,26 @@ namespace gbemu::ui {
 
         void draw_menu_bar(context& c) {
             auto& dbg = *c.dbg;
+            // Resolve shortcut labels once per frame from the live input
+            // config so a rebinding (today: hardcoded defaults; tomorrow:
+            // user.conf or a Settings panel) automatically refreshes the
+            // menu hints without a parallel edit here.  Empty string is
+            // a legal value: MenuItem(label, "") just hides the shortcut
+            // column.  Cached on the stack — the std::string returned
+            // from shortcut_label has full-expression lifetime so c_str()
+            // is safe to pass into ImGui::MenuItem.
+            using a = gbemu::input::action;
+            const std::string sc_load_rom = c.input ? c.input->shortcut_label(a::load_rom) : "";
+            const std::string sc_pause = c.input ? c.input->shortcut_label(a::toggle_pause) : "";
+            const std::string sc_reset = c.input ? c.input->shortcut_label(a::reset) : "";
+            const std::string sc_fullscreen = c.input ? c.input->shortcut_label(a::toggle_fullscreen) : "";
+            const std::string sc_speed_reset = c.input ? c.input->shortcut_label(a::speed_reset) : "";
+            const std::string sc_speed_up = c.input ? c.input->shortcut_label(a::speed_up) : "";
+            const std::string sc_fast_fwd = c.input ? c.input->shortcut_label(a::fast_forward) : "";
+            const std::string sc_mute = c.input ? c.input->shortcut_label(a::toggle_mute) : "";
 
             if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("Load ROM...", "Ctrl+O"))
+                if (ImGui::MenuItem("Load ROM...", sc_load_rom.c_str()))
                     c.actions.load_rom_dialog_requested = true;
 
                 // Recent ROMs submenu — disabled (and shows "(none)") when
@@ -221,13 +244,13 @@ namespace gbemu::ui {
                 const bool rom_loaded = has_rom(c);
                 ImGui::BeginDisabled(!rom_loaded);
                 if (paused) {
-                    if (ImGui::MenuItem("Resume", "Space"))
+                    if (ImGui::MenuItem("Resume", sc_pause.c_str()))
                         dbg.resume();
                 } else {
-                    if (ImGui::MenuItem("Pause", "Space"))
+                    if (ImGui::MenuItem("Pause", sc_pause.c_str()))
                         dbg.pause();
                 }
-                if (ImGui::MenuItem("Reset", "Ctrl+R")) {
+                if (ImGui::MenuItem("Reset", sc_reset.c_str())) {
                     dbg.reset();
                     // Clear the blender history so the first post-reset frame
                     // is shown un-ghosted (matches the user's mental model of
@@ -250,25 +273,38 @@ namespace gbemu::ui {
                         const char* shortcut;
                         float value;
                     };
+                    // Shortcuts pulled from the input config: only the
+                    // 1.0x preset and the 2.0x preset have natural one-key
+                    // bindings (speed_reset / speed_up).  The rest are
+                    // reached via the menu or repeated +/− presses, so
+                    // they show no shortcut column.
                     static constexpr preset presets[] = {
-                        {"0.25x", nullptr, 0.25f}, {"0.5x", nullptr, 0.5f}, {"1.0x", "0", 1.0f},
-                        {"1.5x", nullptr, 1.5f},   {"2.0x", "+", 2.0f},     {"4.0x", nullptr, 4.0f},
+                        {"0.25x", "", 0.25f}, {"0.5x", "", 0.5f}, {"1.0x", "", 1.0f},
+                        {"1.5x", "", 1.5f},   {"2.0x", "", 2.0f}, {"4.0x", "", 4.0f},
                     };
                     const float cur = c.user->speed_multiplier;
                     for (const auto& p : presets) {
+                        const char* sc = nullptr;
+                        if (p.value == 1.0f && !sc_speed_reset.empty())
+                            sc = sc_speed_reset.c_str();
+                        else if (p.value == 2.0f && !sc_speed_up.empty())
+                            sc = sc_speed_up.c_str();
                         const bool selected = (cur == p.value);
-                        if (ImGui::MenuItem(p.label, p.shortcut, selected)) {
+                        if (ImGui::MenuItem(p.label, sc, selected)) {
                             c.user->speed_multiplier = p.value;
                             c.actions.save_user_state_requested = true;
                         }
                     }
                     ImGui::Separator();
-                    // Informational only — Tab is captured by the SDL event
-                    // loop in Application::run, not by ImGui (the hotkey
-                    // path is gated on !imgui_captured).  Disabled so the
-                    // menu doesn't pretend it's clickable.
+                    // Informational only — fast-forward is hold-only and
+                    // captured by the SDL event loop, not by ImGui (the
+                    // hotkey path is gated on !imgui_captured).  Disabled
+                    // so the menu doesn't pretend the row is clickable.
                     ImGui::BeginDisabled();
-                    ImGui::MenuItem("Fast-forward (hold Tab)", "Tab");
+                    std::string ff_label = "Fast-forward (hold ";
+                    ff_label += sc_fast_fwd.empty() ? "Tab" : sc_fast_fwd;
+                    ff_label += ")";
+                    ImGui::MenuItem(ff_label.c_str(), sc_fast_fwd.c_str());
                     ImGui::EndDisabled();
                     ImGui::EndMenu();
                 }
@@ -285,7 +321,7 @@ namespace gbemu::ui {
                 ImGui::Separator();
 
                 const bool is_fs = c.window && (SDL_GetWindowFlags(c.window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
-                if (ImGui::MenuItem("Toggle Fullscreen", "F11", is_fs)) {
+                if (ImGui::MenuItem("Toggle Fullscreen", sc_fullscreen.c_str(), is_fs)) {
                     SDL_SetWindowFullscreen(c.window, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
                 }
 
@@ -346,7 +382,7 @@ namespace gbemu::ui {
                 // instead of plumbing a watcher — Application::run does the
                 // same after a hotkey toggle. The save flag is raised so
                 // user.conf reflects the new state on next frame drain.
-                if (ImGui::MenuItem("Mute", "M", u.audio_muted)) {
+                if (ImGui::MenuItem("Mute", sc_mute.c_str(), u.audio_muted)) {
                     u.audio_muted = !u.audio_muted;
                     apu.set_muted(u.audio_muted);
                     c.actions.save_user_state_requested = true;
@@ -1109,7 +1145,7 @@ namespace gbemu::ui {
     } // namespace
 
     context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, gbemu::core& c,
-                  gbemu::user_state& user, std::string const& imgui_ini_path) {
+                  gbemu::user_state& user, gbemu::input::manager const& input, std::string const& imgui_ini_path) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
@@ -1132,6 +1168,7 @@ namespace gbemu::ui {
         ctx->dbg = &dbg;
         ctx->core = &c;
         ctx->user = &user;
+        ctx->input = &input;
         // ImGui::GetIO().IniFilename stores the pointer verbatim and does
         // not copy, so the backing string must outlive ImGui itself —
         // park it on the context which lives for the whole frontend

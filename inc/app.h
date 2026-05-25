@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include <cfg.h>
+#include <input.h>
 #include <user_state.h>
 
 struct SDL_Window;
@@ -12,7 +13,11 @@ struct SDL_Renderer;
 
 namespace gbemu {
     struct core;
-}
+    struct debugger;
+    namespace ui {
+        struct context;
+    }
+} // namespace gbemu
 
 class Application {
 public:
@@ -113,4 +118,18 @@ private:
     // user_state_ directly) so the title / apu mute / vsync stay
     // coherent without requiring every mutator to call a setter.
     float last_applied_speed_{1.0f};
+
+    // Input dispatcher — maps SDL key chords to semantic actions and
+    // maps both keyboard and game-controller buttons to GB joypad
+    // buttons.  Owned here so handle_action_ can read the live config
+    // (and, post §17 step 3, the UI rebinding panel can mutate it).
+    gbemu::input::manager input_{gbemu::input::config::defaults()};
+
+    // Dispatcher for hotkey actions surfaced by `input_`.  Threaded
+    // with the UI context because some actions (Load ROM, Mute, +/-/0)
+    // ask the UI to raise a host_actions flag so user.conf persists in
+    // the same frame, and with the debugger because toggle_pause /
+    // reset live on it (not on Application).
+    void handle_action_(gbemu::input::hotkey_event ev, gbemu::core& core, gbemu::debugger& dbg,
+                        gbemu::ui::context* ui_ctx);
 };
