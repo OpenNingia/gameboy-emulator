@@ -513,6 +513,8 @@ namespace gbemu::ui {
                     // ignore parse failure — user can retry
                 }
             }
+            ImGui::SameLine();
+            const bool copy_pressed = ImGui::Button("Copy");
             ImGui::Separator();
 
             if (c.disasm_follow_pc)
@@ -523,6 +525,10 @@ namespace gbemu::ui {
             const float line_h = ImGui::GetTextLineHeightWithSpacing();
             const float avail_h = ImGui::GetContentRegionAvail().y;
             const int n = std::clamp(static_cast<int>(avail_h / line_h) + 2, 8, 64);
+
+            std::string copy_buffer;
+            if (copy_pressed)
+                copy_buffer.reserve(static_cast<std::size_t>(n) * 40);
 
             std::uint16_t cur = c.disasm_view_addr;
             for (int i = 0; i < n; ++i) {
@@ -562,10 +568,18 @@ namespace gbemu::ui {
 
                 ImGui::PopID();
 
+                if (copy_pressed) {
+                    copy_buffer.append(buf);
+                    copy_buffer.push_back('\n');
+                }
+
                 if (r.length == 0)
                     break; // safety: malformed table entry
                 cur = static_cast<std::uint16_t>(cur + r.length);
             }
+
+            if (copy_pressed && !copy_buffer.empty())
+                ImGui::SetClipboardText(copy_buffer.c_str());
 
             ImGui::EndChild();
             ImGui::End();

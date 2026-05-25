@@ -755,8 +755,11 @@ controllo utente. Manca un toggle UI per silenziare l'output (use-case classico:
 
 - `Mute` (checkable) — toggle stato muted. Hotkey suggerita `M` (gated su
   `!imgui_captured`, non collide con joypad bindings).
-- (Follow-up, non bloccanti per la v1) `Volume ▸` submenu con slider 0-100%,
-  toggle per-canale `Channel 1/2/3/4` (utile per debug APU).
+- `Volume ▸` — slider 0-100% (master gain applicato in uscita dal mixer APU).
+- `Highpass Filter ▸` — radio fra `Off` / `Accurate` / `Preserve waveform`
+  (DC-blocking filter, vedi sotto).
+- (Follow-up, non bloccante per la v1) toggle per-canale `Channel 1/2/3/4`
+  (utile per debug APU).
 
 **Implementazione mute:**
 
@@ -780,12 +783,65 @@ quando `multiplier != 1.0`". Tenere i due flag separati (`user_muted` vs
 `speed_muted`, OR per il gating effettivo) così la velocità non sovrascrive
 la scelta esplicita dell'utente.
 
+**Implementazione volume:**
+
+- Slider `Volume` 0-100% nel submenu, default 100%. Stato vive su
+  `Application` (output-side, come `muted_`); persistito in `user_state`
+  sotto `audio.volume` quando §14 è chiusa.
+- Curva di mappatura: lineare 0..1 sul gain è percettivamente sbagliato
+  (il -6 dB sta a metà fisica ma "molto basso" all'orecchio). Usare curva
+  pseudo-log: `gain = (pct/100)^2`, oppure log "pulito" `gain = 10^(-(1-pct/100)*2)`
+  (=> 0 dB a 100%, -40 dB a 0%, con muting esatto a 0). La quadratica è più
+  semplice e visivamente lineare nello slider, accettabile in v1.
+- Applicazione: dentro `apu::mix_sample` (o subito a valle del mixer, in
+  `src/apu.cpp` dove i 4 canali vengono sommati e divisi per 4 — vedi
+  `src/apu.cpp:792`), moltiplicare il sample finale per `master_gain_` prima
+  della scrittura sul ring buffer. Nessun overhead percepibile, è una
+  moltiplicazione per sample.
+- Hotkey suggerite: `Ctrl+Up` / `Ctrl+Down` per step di 10% (non collide con
+  joypad bindings; `+`/`-` resta libero per §3 speed step).
+- UI: oltre allo slider nel menu, mostrare la percentuale a destra dello
+  slider stesso (`%.0f%%`). Niente OSD per il cambio volume in v1 — il menu
+  è transient e basta come feedback visivo.
+
+**Implementazione highpass filter:**
+
+L'hardware Game Boy applica un DC-blocking filter analogico (high-pass) in
+uscita: ~60 Hz su DMG, leggermente diverso su CGB. Senza, l'output del
+mixer è "DC-shifted" — i canali con duty cycle ≠ 50% (square con duty 12.5%
+o 75%) hanno una componente DC non trascurabile che produce un "thump"
+all'inizio/fine di ogni nota. SameBoy lo implementa esattamente — riferimento:
+`Core/apu.c` (`GB_apu_render_audio` + `highpass_strength`).
+
+- Tre modalità (radio nel submenu):
+  - `Off` — sample raw dal mixer, output potenzialmente DC-shifted ma
+    "fedele" al digitale. Default ragionevole per debugging APU; non per
+    gameplay.
+  - `Accurate` — filtro IIR 1° ordine con cutoff ~60 Hz (DMG) / ~120 Hz (CGB
+    se si decide di gated su `mmu_.cgb_mode()`). Formula SameBoy:
+    `y[n] = α * (y[n-1] + x[n] - x[n-1])` con `α = exp(-1/(sample_rate * τ))`
+    e `τ ≈ 0.0026 s` (DMG). Stato (due float `prev_in_l/r`, `prev_out_l/r`)
+    su `apu` o `Application`. Suggerito **default**: replica fedele dell'hardware.
+  - `Preserve waveform` — α più alto (cutoff ~5 Hz). Toglie solo il DC offset
+    "vero" ma lascia le componenti basse delle waveform (più ricco a livello
+    di basso percepito, meno fedele). Modalità "gameplay" che molti utenti
+    SameBoy preferiscono.
+- Applicazione: in linea con il volume, subito a monte (i due filtri sono
+  commutativi sul gain costante, ma per ordine cache-friendly: highpass →
+  master gain → ring buffer).
+- Stato dei sample precedenti: i due float L/R devono essere azzerati a
+  reset APU e a power-off APU per evitare DC offset cumulato. Su switch fra
+  modalità non azzerare (la transizione naturale del filtro assorbe il
+  cambio di α senza pop).
+- Persistenza: `user_state.audio.highpass = "off"|"accurate"|"preserve"`
+  quando §14 è chiusa. Default = `accurate`.
+
 **Dipendenze**: nessuna bloccante. Implementabile subito; integrazione con
 `user_state` arriva con §14.
 
-**Costo stimato**: ~1-2 ore per Mute+hotkey; il volume slider + per-channel
-toggles aggiungono altre 2-3 ore se si vogliono fare bene (curva di volume
-log, non lineare).
+**Costo stimato**: ~1-2 ore per Mute+hotkey. Volume slider con curva e
+hotkey aggiunge ~1-2 ore. Highpass filter (3 modalità + IIR + stato + UI
+radio) aggiunge ~2-3 ore. Per-channel toggles (se desiderati) altre 1-2 ore.
 
 ---
 
