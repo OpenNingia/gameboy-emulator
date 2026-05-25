@@ -1,9 +1,14 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 #include <cfg.h>
+
+namespace gbemu {
+    struct core;
+}
 
 class Application {
 public:
@@ -18,6 +23,19 @@ public:
     void run();
 
 private:
+    // Load a ROM file, compute its FNV1a hash (used as the .sav key),
+    // hand it to the core, and pull in any matching battery save from
+    // <base>/<savs_dir>/<hash>.sav.  Sets current_rom_hash_ on success.
+    // Used both for the initial CLI-provided ROM and for the in-app
+    // File → Load ROM hot-swap path.
+    void load_rom_(gbemu::core& core, const std::string& path);
+
+    // Persist the current cartridge's SRAM (and RTC, if it carries one)
+    // to <base>/<savs_dir>/<current_rom_hash>.sav using the BESS format.
+    // No-op when there is no cart attached, no battery, or no hash.
+    // Writes are atomic (.sav.tmp → rename).
+    void flush_battery_save_(gbemu::core& core);
+
     // Resolved at construction time from $GBEMU_HOME / SDL_GetBasePath
     // — see gbemu::paths::resolve_base_dir. Anchors all data paths
     // (cfg, bios, roms, savs, sslots).
@@ -30,4 +48,15 @@ private:
     bool headless_{false};
     std::string script_path_{};
     std::string output_path_{};
+
+    // FNV1a hash of the currently loaded ROM (16-char lowercase hex),
+    // used to derive the .sav filename.  Empty when no ROM is loaded;
+    // re-derived on every load_rom_() including the in-app hot-swap.
+    std::string current_rom_hash_{};
+    // Wall-clock time of the last successful battery flush, in
+    // milliseconds since SDL init.  Drives the periodic flush gate so
+    // we don't write the .sav on every frame.  Reset to 0 when a new
+    // ROM is loaded so the first dirty period after a swap flushes
+    // promptly.
+    std::uint64_t last_battery_flush_ms_{0};
 };

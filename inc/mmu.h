@@ -41,8 +41,12 @@ namespace gbemu {
         void attach_cartridge(std::unique_ptr<mbc> c) { cart_ = std::move(c); }
         // Returns the attached cartridge or nullptr if none.  The MMU is the
         // sole owner; callers must not retain the pointer across an
-        // attach_cartridge call.
+        // attach_cartridge call.  The non-const overload is reserved for
+        // host-side state mutation that does not flow through the CPU bus
+        // — battery-save load (ram_load / rtc_load_blob), debugger pokes,
+        // and similar.  Bus reads/writes always go through read_u8/write_u8.
         const mbc* cart() const { return cart_.get(); }
+        mbc* cart() { return cart_.get(); }
 
         // Bus-side access — walks the full memory map dispatch and fires any
         // registered MMIO write handlers.  This is the path the CPU and

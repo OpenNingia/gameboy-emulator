@@ -1,7 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <vector>
 
 namespace gbemu {
@@ -102,7 +105,46 @@ namespace gbemu {
         // a future battery-save layer can read it back after a reset.
         // Default is a no-op for cartridges with no banking state (no_mbc).
         virtual void reset() {}
+
+        // True for cartridge types that carry a battery on the SRAM (or RTC)
+        // line — i.e. types 0x03, 0x06, 0x09, 0x0D, 0x0F, 0x10, 0x13, 0x1B,
+        // 0x1E, 0x22, 0xFF.  Drives whether the app should look for / write
+        // a .sav for this cart.  Default false (covers no_mbc(0x00/0x08)
+        // and the bare mbc1/2/3/5 variants without BATTERY).
+        virtual bool has_battery() const { return false; }
+
+        // Cartridge SRAM as a contiguous byte span — flat across banks, in
+        // the same layout it would have on a real battery-backed cart
+        // (compatible with BGB/mGBA/SameBoy .sav files at the SRAM level).
+        // Empty span for carts with no external RAM.  MBC2's 512-nibble
+        // built-in RAM is surfaced as 512 bytes here (low nibbles only,
+        // upper nibbles zero) — the de facto convention used by other
+        // emulators.
+        virtual std::span<const std::uint8_t> ram_data() const { return {}; }
+
+        // Restore SRAM from a previously dumped image.  Sizes that don't
+        // match `ram_data().size()` are ignored (logged at the call site).
+        virtual void ram_load(std::span<const std::uint8_t> /*src*/) {}
+
+        // Sticky dirty flag — set on every write to $A000-$BFFF that
+        // actually mutates RAM.  Read by the periodic flush.  Cleared via
+        // ram_clear_dirty() once the data has been persisted.
+        virtual bool ram_dirty() const { return false; }
+        virtual void ram_clear_dirty() {}
+
+        // RTC state, in the 48-byte BESS layout (block payload, no header).
+        // nullopt for carts without an RTC chip (everyone except MBC3
+        // TIMER variants, types 0x0F / 0x10).  Layout follows SameBoy
+        // BESS.md: 0x00-0x10 live S/M/H/DL/DH (1 byte + 3 padding each),
+        // 0x14-0x24 latched, 0x28-0x2F unix timestamp (int64 LE).
+        virtual std::optional<std::array<std::uint8_t, 48>> rtc_blob() const { return std::nullopt; }
+        virtual void rtc_load_blob(std::span<const std::uint8_t> /*src*/) {}
     };
+
+    // Derive the BATTERY bit from the raw cartridge type byte ($0147).
+    // Free function so callers (Application's load-time hookup) can check
+    // it before an mbc instance even exists.
+    bool cartridge_type_has_battery(std::uint8_t type);
 
     // Build the appropriate MBC for a freshly-loaded ROM image, looking at
     // the cartridge header (type 0x0147, ROM size 0x0148, RAM size 0x0149).

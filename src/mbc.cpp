@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <utility>
@@ -89,9 +90,19 @@ namespace gbemu {
             void write(std::uint16_t addr, std::uint8_t val) override {
                 if (addr >= 0xA000 && addr < 0xC000 && !ram_.empty()) {
                     ram_[addr - 0xA000] = val;
+                    ram_dirty_ = true;
                 }
                 // Writes to 0x0000-0x7FFF on a no-MBC cart are ignored.
             }
+
+            bool has_battery() const override { return cartridge_type_has_battery(type_); }
+            std::span<const std::uint8_t> ram_data() const override { return ram_; }
+            void ram_load(std::span<const std::uint8_t> src) override {
+                if (src.size() == ram_.size())
+                    std::copy(src.begin(), src.end(), ram_.begin());
+            }
+            bool ram_dirty() const override { return ram_dirty_; }
+            void ram_clear_dirty() override { ram_dirty_ = false; }
 
             mbc_debug_state debug_state() const override {
                 // No banking: slot1 is fixed at bank 1, RAM (if present) at bank 0.
@@ -109,6 +120,7 @@ namespace gbemu {
             std::vector<std::uint8_t> ram_;
             std::uint8_t type_{0};
             std::uint8_t cgb_flag_{0};
+            bool ram_dirty_{false};
         };
 
         // ----------------------------------------------------------------
@@ -172,10 +184,21 @@ namespace gbemu {
                 } else if (addr < 0x8000) {
                     mode_ = val & 0x01;
                 } else if (addr >= 0xA000 && addr < 0xC000) {
-                    if (ram_enabled_ && !ram_.empty())
+                    if (ram_enabled_ && !ram_.empty()) {
                         ram_[ram_offset(addr)] = val;
+                        ram_dirty_ = true;
+                    }
                 }
             }
+
+            bool has_battery() const override { return cartridge_type_has_battery(type_); }
+            std::span<const std::uint8_t> ram_data() const override { return ram_; }
+            void ram_load(std::span<const std::uint8_t> src) override {
+                if (src.size() == ram_.size())
+                    std::copy(src.begin(), src.end(), ram_.begin());
+            }
+            bool ram_dirty() const override { return ram_dirty_; }
+            void ram_clear_dirty() override { ram_dirty_ = false; }
 
             mbc_debug_state debug_state() const override {
                 const auto bank = static_cast<std::uint8_t>(((upper_bits_ << 5) | lower_bits_) &
@@ -214,6 +237,7 @@ namespace gbemu {
             std::uint8_t rom_bank_mask_{0};
             std::uint8_t type_{0};
             std::uint8_t cgb_flag_{0};
+            bool ram_dirty_{false};
         };
 
         // ----------------------------------------------------------------
@@ -272,11 +296,29 @@ namespace gbemu {
                         rom_bank_ = bank;
                     }
                 } else if (addr >= 0xA000 && addr < 0xC000) {
-                    if (ram_enabled_)
+                    if (ram_enabled_) {
                         ram_[(addr - 0xA000) & 0x01FF] = val & 0x0F;
+                        ram_dirty_ = true;
+                    }
                 }
                 // 0x4000-0x7FFF writes are ignored on MBC2.
             }
+
+            bool has_battery() const override { return cartridge_type_has_battery(type_); }
+            std::span<const std::uint8_t> ram_data() const override { return ram_; }
+            void ram_load(std::span<const std::uint8_t> src) override {
+                if (src.size() != ram_.size())
+                    return;
+                // Only the low nibble of each byte is real storage on MBC2.
+                // Mask incoming bytes to the same convention so a round-trip
+                // through a foreign emulator's .sav (which may store nibbles
+                // in either high or low half) doesn't accidentally inject
+                // garbage into the upper four bits.
+                for (std::size_t i = 0; i < ram_.size(); ++i)
+                    ram_[i] = src[i] & 0x0F;
+            }
+            bool ram_dirty() const override { return ram_dirty_; }
+            void ram_clear_dirty() override { ram_dirty_ = false; }
 
             mbc_debug_state debug_state() const override {
                 return mbc_debug_state{type_, static_cast<std::uint16_t>(rom_bank_ & rom_bank_mask_),
@@ -303,6 +345,7 @@ namespace gbemu {
             std::uint8_t rom_bank_mask_{0};
             std::uint8_t type_{0};
             std::uint8_t cgb_flag_{0};
+            bool ram_dirty_{false};
         };
 
         // ----------------------------------------------------------------
@@ -402,13 +445,97 @@ namespace gbemu {
                     if (!ram_enabled_)
                         return;
                     if (ram_rtc_select_ <= 0x03) {
-                        if (!ram_.empty())
+                        if (!ram_.empty()) {
                             ram_[ram_offset(addr)] = val;
+                            ram_dirty_ = true;
+                        }
                         return;
                     }
                     if (ram_rtc_select_ >= 0x08 && ram_rtc_select_ <= 0x0C)
                         write_rtc_reg(ram_rtc_select_, val);
                 }
+            }
+
+            bool has_battery() const override { return cartridge_type_has_battery(type_); }
+            std::span<const std::uint8_t> ram_data() const override { return ram_; }
+            void ram_load(std::span<const std::uint8_t> src) override {
+                if (src.size() == ram_.size())
+                    std::copy(src.begin(), src.end(), ram_.begin());
+            }
+            bool ram_dirty() const override { return ram_dirty_; }
+            void ram_clear_dirty() override { ram_dirty_ = false; }
+
+            // RTC serialization — only meaningful on MBC3 TIMER variants
+            // (types 0x0F / 0x10).  Non-TIMER MBC3 carts (0x11/0x12/0x13)
+            // return nullopt so the BESS writer doesn't emit a stale RTC
+            // block for them.
+            std::optional<std::array<std::uint8_t, 48>> rtc_blob() const override {
+                if (type_ != 0x0F && type_ != 0x10)
+                    return std::nullopt;
+                // catch_up() folds elapsed wall-clock into rtc_total_secs_
+                // before we serialize; decompose() routes through it.  We
+                // const_cast because the operation is logically observational
+                // even though the cached anchor moves forward — same pattern
+                // as MMU MMIO read handlers that update side state.
+                auto* self = const_cast<mbc3*>(this);
+                std::uint8_t s = 0, m = 0, h = 0, dl = 0, dh = 0;
+                self->decompose(s, m, h, dl, dh);
+                std::array<std::uint8_t, 48> out{};
+                // Live S/M/H/DL/DH at 0x00, 0x04, 0x08, 0x0C, 0x10 — each is
+                // 1 data byte followed by 3 padding zeros (BESS convention,
+                // matches SameBoy's layout).
+                out[0x00] = s;
+                out[0x04] = m;
+                out[0x08] = h;
+                out[0x0C] = dl;
+                out[0x10] = dh;
+                // Latched S/M/H/DL/DH at 0x14..0x24.
+                out[0x14] = latched_s_;
+                out[0x18] = latched_m_;
+                out[0x1C] = latched_h_;
+                out[0x20] = latched_dl_;
+                out[0x24] = latched_dh_;
+                // UNIX timestamp at 0x28 (int64 little-endian).  We write
+                // last_real_unix_ — the moment the live state above was
+                // taken — so a future load can compute the wall-clock gap.
+                const std::int64_t ts = last_real_unix_;
+                for (std::size_t i = 0; i < 8; ++i)
+                    out[0x28 + i] = static_cast<std::uint8_t>((ts >> (8 * i)) & 0xFF);
+                return out;
+            }
+
+            void rtc_load_blob(std::span<const std::uint8_t> src) override {
+                if (src.size() != 48)
+                    return;
+                if (type_ != 0x0F && type_ != 0x10)
+                    return;
+                const std::uint8_t s = src[0x00];
+                const std::uint8_t m = src[0x04];
+                const std::uint8_t h = src[0x08];
+                const std::uint8_t dl = src[0x0C];
+                const std::uint8_t dh = src[0x10];
+                latched_s_ = src[0x14];
+                latched_m_ = src[0x18];
+                latched_h_ = src[0x1C];
+                latched_dl_ = src[0x20];
+                latched_dh_ = src[0x24];
+                std::int64_t saved_unix = 0;
+                for (std::size_t i = 0; i < 8; ++i)
+                    saved_unix |= static_cast<std::int64_t>(src[0x28 + i]) << (8 * i);
+                rtc_halted_ = (dh & 0x40) != 0;
+                rtc_day_carry_ = (dh & 0x80) != 0;
+                const std::int64_t days = static_cast<std::int64_t>(dl) | (static_cast<std::int64_t>(dh & 0x01) << 8);
+                rtc_total_secs_ = static_cast<std::int64_t>(s) + static_cast<std::int64_t>(m) * 60 +
+                                  static_cast<std::int64_t>(h) * 3600 + days * 86400;
+                // Wall-clock gap survival: if the cart was not halted at the
+                // time of the dump, fold (now - saved) into the accumulator
+                // so the in-game clock "kept ticking" while the emulator was
+                // off.  Halted carts stay frozen — the player will see the
+                // same time they paused at.
+                const std::int64_t now = now_unix();
+                if (!rtc_halted_ && now > saved_unix)
+                    rtc_total_secs_ += (now - saved_unix);
+                last_real_unix_ = now;
             }
 
             mbc_debug_state debug_state() const override {
@@ -425,12 +552,16 @@ namespace gbemu {
                 ram_rtc_select_ = 0;
                 ram_enabled_ = false;
                 latch_prev_ = 0xFF;
-                // RTC state itself survives a soft reset: the host clock
-                // keeps ticking and the game's notion of "day count" is
-                // independent of the GB CPU's reset line.  Only the
-                // latched shadow is zeroed so the next read after reset
-                // returns a known value until the game latches again.
-                latched_s_ = latched_m_ = latched_h_ = latched_dl_ = latched_dh_ = 0;
+                // RTC state — including the latched shadow — survives a
+                // soft reset.  On real hardware the RTC chip lives on the
+                // cart and is battery-backed, fully independent of the GB
+                // CPU's reset line.  Preserving the latched values here
+                // also matters for the ROM hot-swap path: load_rom_
+                // restores .rtc blob bytes into latched_*, and the
+                // immediately-following core.reset() must not wipe them.
+                // Games will typically latch again before their first read
+                // anyway, so this is a no-visible-effect change for
+                // anything that exercises the latch port.
             }
 
             std::uint8_t cgb_flag() const override { return cgb_flag_; }
@@ -529,6 +660,7 @@ namespace gbemu {
             std::uint16_t rom_bank_mask_{0};
             std::uint8_t type_{0};
             std::uint8_t cgb_flag_{0};
+            bool ram_dirty_{false};
 
             // RTC live state.  catch_up() is only invoked from write paths
             // (latch_now via the $6000-$7FFF port, write_rtc_reg via the
@@ -599,11 +731,22 @@ namespace gbemu {
                 } else if (addr < 0x6000) {
                     ram_bank_ = val & 0x0F;
                 } else if (addr >= 0xA000 && addr < 0xC000) {
-                    if (ram_enabled_ && !ram_.empty())
+                    if (ram_enabled_ && !ram_.empty()) {
                         ram_[ram_offset(addr)] = val;
+                        ram_dirty_ = true;
+                    }
                 }
                 // 0x6000-0x7FFF writes are ignored on MBC5.
             }
+
+            bool has_battery() const override { return cartridge_type_has_battery(type_); }
+            std::span<const std::uint8_t> ram_data() const override { return ram_; }
+            void ram_load(std::span<const std::uint8_t> src) override {
+                if (src.size() == ram_.size())
+                    std::copy(src.begin(), src.end(), ram_.begin());
+            }
+            bool ram_dirty() const override { return ram_dirty_; }
+            void ram_clear_dirty() override { ram_dirty_ = false; }
 
             mbc_debug_state debug_state() const override {
                 return mbc_debug_state{type_, static_cast<std::uint16_t>(rom_bank_ & rom_bank_mask_), ram_bank_,
@@ -637,9 +780,32 @@ namespace gbemu {
             std::uint16_t rom_bank_mask_{0};
             std::uint8_t type_{0};
             std::uint8_t cgb_flag_{0};
+            bool ram_dirty_{false};
         };
 
     } // namespace
+
+    bool cartridge_type_has_battery(std::uint8_t type) {
+        // Pan Docs cartridge-type bytes that carry a battery line.  The set
+        // covers every official Nintendo MBC1/2/3/5 BATTERY variant plus the
+        // ROM+RAM+BATTERY pseudo-type, MMM01+RAM+BATTERY, MBC7, and HuC1.
+        switch (type) {
+            case 0x03: // MBC1+RAM+BATTERY
+            case 0x06: // MBC2+BATTERY
+            case 0x09: // ROM+RAM+BATTERY
+            case 0x0D: // MMM01+RAM+BATTERY
+            case 0x0F: // MBC3+TIMER+BATTERY
+            case 0x10: // MBC3+TIMER+RAM+BATTERY
+            case 0x13: // MBC3+RAM+BATTERY
+            case 0x1B: // MBC5+RAM+BATTERY
+            case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
+            case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
+            case 0xFF: // HuC1+RAM+BATTERY
+                return true;
+            default:
+                return false;
+        }
+    }
 
     std::unique_ptr<mbc> make_mbc(std::vector<std::uint8_t> rom) {
         if (rom.size() < 0x0150)

@@ -6,6 +6,7 @@
 #include <app.h>
 #include <apu.h>
 #include <audio_ring_buffer.hpp>
+#include <bess.h>
 #include <card.h>
 #include <core.h>
 #include <debugger.h>
@@ -14,6 +15,8 @@
 #include <gfx.h>
 #include <joypad.h>
 #include <log.h>
+#include <mbc.h>
+#include <mmu.h>
 #include <paths.h>
 #include <ui.h>
 
@@ -230,16 +233,121 @@ Application::~Application() {
     SDL_Quit();
 }
 
-static void load_rom(gbemu::core& core, const std::string& path) {
-    gbemu::rom_file c{};
-    c.load_from(path);
-    core.load(c);
-}
-
 static void load_bios(gbemu::core& core, const std::string& path) {
     gbemu::bios_file c{};
     c.load_from(path);
     core.load(c);
+}
+
+void Application::load_rom_(gbemu::core& core, const std::string& path) {
+    gbemu::rom_file rf{};
+    rf.load_from(path);
+
+    // Hash the ROM bytes BEFORE core.load(): core.load() moves rf.data
+    // into the freshly-built MBC, leaving rf.data empty.  The hash keys
+    // the .sav filename and must be stable across renames of the ROM
+    // file — FNV1a over the full image gives us that.
+    const std::string hash = gbemu::paths::fnv1a_64_hex(rf.data);
+
+    core.load(rf);
+    current_rom_hash_ = hash;
+    last_battery_flush_ms_ = 0;
+
+    auto* cart = core.mmu.cart();
+    if (!cart || !cart->has_battery())
+        return;
+
+    // Load the matching .sav, if any.  Missing file is normal (first
+    // run on this cart); read errors are logged and skipped — we don't
+    // want a half-baked file to bring the emulator down.
+    const auto sav_path = gbemu::paths::resolve_data_path(base_, cfg.paths.savs_dir, hash + ".sav");
+    std::ifstream f(sav_path, std::ios::binary);
+    if (!f) {
+        LOG_INFO(gbemu::log::root(), "battery: no .sav for {} (cart={:#04x})", hash, cart->debug_state().type);
+        return;
+    }
+    std::vector<std::uint8_t> buf((std::istreambuf_iterator<char>(f)), {});
+    f.close();
+
+    auto parsed = gbemu::bess::parse_sav(buf);
+
+    // SRAM restore.  Size mismatch (cart RAM has changed schema, or the
+    // file came from a different cart that happened to share a hash —
+    // shouldn't happen with FNV1a but a noisy log helps debugging) is
+    // ignored at the MBC level; warn here so the user knows the load
+    // was incomplete.
+    const auto expected = cart->ram_data().size();
+    if (!parsed.sram.empty()) {
+        if (parsed.sram.size() == expected) {
+            cart->ram_load(parsed.sram);
+        } else {
+            LOG_WARNING(gbemu::log::root(), "battery: .sav SRAM size {} bytes != cart {} bytes — ignored",
+                        parsed.sram.size(), expected);
+        }
+    }
+
+    if (parsed.rtc.has_value()) {
+        cart->rtc_load_blob(*parsed.rtc);
+        LOG_INFO(gbemu::log::root(), "battery: loaded {} SRAM bytes + RTC for {}", parsed.sram.size(), hash);
+    } else {
+        LOG_INFO(gbemu::log::root(), "battery: loaded {} SRAM bytes for {}", parsed.sram.size(), hash);
+    }
+
+    // The fresh RAM/RTC may have arrived as already-clean data; clear
+    // the dirty bit so the periodic flush doesn't immediately rewrite
+    // an identical file.
+    cart->ram_clear_dirty();
+}
+
+void Application::flush_battery_save_(gbemu::core& core) {
+    if (current_rom_hash_.empty())
+        return;
+    auto* cart = core.mmu.cart();
+    if (!cart || !cart->has_battery())
+        return;
+
+    const auto sram = cart->ram_data();
+    const auto rtc = cart->rtc_blob();
+
+    // Nothing to serialize: bare BATTERY type with zero-sized RAM and
+    // no RTC.  Theoretically possible (header byte misconfigured); just
+    // skip to avoid emitting an empty BESS file.
+    if (sram.empty() && !rtc.has_value())
+        return;
+
+    auto out = gbemu::bess::write_sav(sram, rtc, "GbEmu 0.1.0-dev");
+    if (out.empty())
+        return;
+
+    const auto sav_path = gbemu::paths::resolve_data_path(base_, cfg.paths.savs_dir, current_rom_hash_ + ".sav");
+    const auto tmp_path = sav_path + ".tmp";
+
+    // Atomic write: dump to .tmp first, then rename over the real path.
+    // std::filesystem::rename is atomic on the same filesystem on every
+    // platform we ship to (Windows NTFS does a posix-style replace
+    // since Win10), so a crash mid-write leaves either the previous
+    // .sav intact or, at worst, an orphaned .tmp that we can ignore on
+    // next boot.
+    {
+        std::ofstream f(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!f) {
+            LOG_ERROR(gbemu::log::root(), "battery: failed to open {}", tmp_path);
+            return;
+        }
+        f.write(reinterpret_cast<const char*>(out.data()), static_cast<std::streamsize>(out.size()));
+        if (!f) {
+            LOG_ERROR(gbemu::log::root(), "battery: failed to write {}", tmp_path);
+            return;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp_path, sav_path, ec);
+    if (ec) {
+        LOG_ERROR(gbemu::log::root(), "battery: rename {} → {} failed: {}", tmp_path, sav_path, ec.message());
+        return;
+    }
+    cart->ram_clear_dirty();
+    last_battery_flush_ms_ = SDL_GetTicks64();
 }
 
 void Application::set_rom_file(std::string_view path) {
@@ -272,7 +380,7 @@ void Application::run() {
     if (rom_present) {
         auto resolved = gbemu::paths::resolve_data_path(base_, cfg.paths.roms_dir, rom_path_);
         LOG_INFO(gbemu::log::root(), "rom:      {}", resolved);
-        load_rom(core, resolved);
+        load_rom_(core, resolved);
     }
 
     core.init();
@@ -290,6 +398,10 @@ void Application::run() {
         // buffer.  Sample-pacing counters still advance, so cycle accounting
         // is unaffected.
         gbemu::run_script(debugger, script_path_, output_path_);
+        // Headless scripts can mutate SRAM (write to $A000-$BFFF via the
+        // CPU); make sure those edits land on disk before returning so a
+        // subsequent script run picks them up.
+        flush_battery_save_(core);
         return;
     }
 
@@ -487,13 +599,19 @@ void Application::run() {
             auto path = std::move(acts.pending_rom_load);
             acts.pending_rom_load.clear();
             try {
-                gbemu::rom_file rf{};
-                rf.load_from(path);
-                core.load(rf);
+                // Flush the *outgoing* cart's battery save before swapping
+                // it out — the previous current_rom_hash_ still points at
+                // the file we want to update.  No-op when the previous
+                // cart had no battery (or no cart was loaded).
+                flush_battery_save_(core);
+                load_rom_(core, path);
                 // reset() wipes RAM / VRAM / regs and re-runs init() with the
                 // freshly attached cart in place — same path as Ctrl+R after
                 // the swap, so banking state, MBC, BIOS overlay, total cycles
-                // all land at power-on.
+                // all land at power-on.  Battery RAM survives because the
+                // MBC's ram_ vector is moved into the new cart untouched and
+                // reset() does not zero it (load_rom_ ran ram_load() before
+                // this point).
                 core.reset();
                 gbemu::ui::reset_display_post(ui_ctx);
                 debugger.resume();
@@ -503,7 +621,33 @@ void Application::run() {
                 LOG_ERROR(gbemu::log::root(), "Load ROM failed ({}): {}", path, e.what());
             }
         }
+
+        // Periodic battery save flush.  Every ~2 s we check whether the
+        // cart's SRAM has been written to and, if so, persist it.  RTC
+        // freshness is handled implicitly: rtc_blob() always reads the
+        // current decomposition (post catch_up), so each flush writes
+        // the most recent saved_unix anchor.  Worst-case data loss on a
+        // crash is ~2 s of unwritten SRAM + drifted RTC anchor — both
+        // recovered on next boot via rtc_load_blob's wall-clock gap
+        // logic.  Gated on cart presence to avoid syscall churn before
+        // a ROM is loaded.
+        {
+            const std::uint64_t now_ms = SDL_GetTicks64();
+            if (now_ms >= last_battery_flush_ms_ + 2000) {
+                const auto* cart = core.mmu.cart();
+                if (cart && cart->has_battery() && cart->ram_dirty())
+                    flush_battery_save_(core);
+                else if (cart && cart->has_battery())
+                    last_battery_flush_ms_ = now_ms; // throttle no-op probes
+            }
+        }
     }
+
+    // Final battery flush before tearing the core down.  We always write
+    // (not just on dirty) so the RTC's saved_unix anchor moves forward to
+    // the moment of shutdown — that's what rtc_load_blob keys off when
+    // the user next boots.  No-op when no cart was loaded.
+    flush_battery_save_(core);
 
     // Snapshot final window dimensions before teardown so the next launch
     // re-opens at the same size.

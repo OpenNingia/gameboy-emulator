@@ -13,7 +13,7 @@ find_package(imgui CONFIG REQUIRED)
 # does not open a console window when launched.  On non-Windows platforms
 # the keyword is a no-op.  SDL2main provides the WinMain entry point that
 # forwards to our standard `int main(int, char**)`.
-add_executable(GbEmu WIN32 "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "hdma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp" "ui.cpp" "apu.cpp" "joypad.cpp" "gfx.cpp" "paths.cpp" "display_post.cpp")
+add_executable(GbEmu WIN32 "gbemu.cpp" "app.cpp" "core.cpp" "cpu.cpp" "irq.cpp" "timer.cpp" "opcodes.cpp" "cfg.cpp" "card.cpp" "mmu.cpp" "mbc.cpp" "ppu.cpp" "serial.cpp" "dma.cpp" "hdma.cpp" "log.cpp" "disasm.cpp" "debugger.cpp" "script_runner.cpp" "ui.cpp" "apu.cpp" "joypad.cpp" "gfx.cpp" "paths.cpp" "display_post.cpp" "bess.cpp")
 set_property(TARGET GbEmu PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(GbEmu
