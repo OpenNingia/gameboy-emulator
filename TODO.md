@@ -108,7 +108,7 @@ del canale alpha attraverso i pass 1-3, Y-flip delle texcoord).
 
 ---
 
-## 5. MBC2 / MBC3 / MBC5 — **fatto (RTC stubbed)**
+## 5. MBC2 / MBC3 / MBC5 — **fatto (RTC live, persistence aperta)**
 
 `src/mbc.cpp` ora implementa `no_mbc`, `mbc1`, `mbc2`, `mbc3`, `mbc5`. Tutti i
 cartridge type 0x00-0x1E mappati nel factory `make_mbc`. Pokémon Red/Blue
@@ -119,11 +119,15 @@ solo in RAM finché il processo è vivo (battery save → sezione 6).
 dell'addr distingue RAM-enable vs ROM-select.
 
 **MBC3** (0x0F-0x13): 7-bit ROM bank con 0→1 remap, RAM/RTC select a
-$4000-$5FFF (banks 0-3 oppure RTC reg 0x08-0x0C), latch a $6000-$7FFF.
-**RTC = stub**: read ritorna 0, write ignorate, no time-keeping. Gold/Crystal
-girano con day/night cycle congelato — accettabile per la v1. RTC vero
-richiede `time(NULL)` baseline + emulazione del DIV interno → addendum
-opzionale che vive insieme alla battery-save (`.rtc` file).
+$4000-$5FFF (banks 0-3 oppure RTC reg 0x08-0x0C), latch a $6000-$7FFF. **RTC
+live**: `rtc_total_secs_` ancorato a `std::chrono::system_clock`, `catch_up()`
+somma `(now - last_real_unix_)` nell'accumulatore quando non halted; 9-bit day
+counter con wrap mod 512 e sticky carry su DH.7; halt su DH.6 freeza
+l'accumulatore. Letture passano sempre per lo shadow latched ($6000-$7FFF
+edge 0→1 lo aggiorna). Pokémon Gold/Silver/Crystal day/night cycle ora avanza
+correttamente in real-time. **Persistenza fra restart del processo** → vedi
+sezione 6 (lo stato live non viene serializzato oggi, quindi ogni avvio l'epoch
+torna al system_clock corrente).
 
 **MBC5** (0x19-0x1E): 9-bit ROM bank (low8 a $2000-$2FFF, bit9 a $3000-$3FFF,
 bank 0 valido, no remap), 4-bit RAM bank a $4000-$5FFF. Bit di rumble
@@ -136,7 +140,7 @@ selezionare fino a bank 511. UI / debugger `dump mbc` già castano a
 **Cosa resta:**
 - Battery save persistente → sezione 6 (essenziale per giocare seriamente a
   Pokémon).
-- RTC reale per MBC3 timer carts → addendum di sezione 6.
+- Serializzazione RTC su disco per sopravvivere ai restart → sezione 6.
 
 ---
 
@@ -177,9 +181,38 @@ BGB, mGBA, SameBoy, VBA-M, ecc. dal punto di vista del *contenuto*; il
 l'import/export richiede un rename manuale. Decisione consapevole — il
 rename-stable degli FNV1a vale la perdita di drop-in compatibility.
 
-**RTC (MBC3)**: addendum opzionale, file `.rtc` separato (base time + ultimi
-valori dei registri RTC). Molti emulatori non lo fanno e la RTC riparte da
-zero — rimandabile, non blocca i giochi.
+**RTC (MBC3)**: lo stato live esiste già in `mbc3` (sezione 5) — manca solo
+la serializzazione. Schema concreto:
+
+- File `.rtc` separato accanto al `.sav` (stesso FNV1a key:
+  `<base>/savs/<fnv1a>.rtc`). Tenerli separati semplifica l'import/export e
+  permette di azzerare la RTC senza toccare la SRAM.
+- Payload: `rtc_total_secs_` (int64 LE), `last_real_unix_` (int64 LE),
+  `rtc_halted_` (uint8), `rtc_day_carry_` (uint8), `latched_*` (5 byte
+  S/M/H/DL/DH). 24 byte totali — formato fisso, niente versioning per ora
+  (è un file privato dell'emulatore).
+- API sull'`mbc3` (e nulla sugli altri MBC): `rtc_load(span<const uint8_t>)`,
+  `rtc_data() const -> array<uint8_t,24>`, oppure rendere virtuale sulla
+  base `mbc::rtc_data() const -> std::optional<...>` che ritorna `nullopt`
+  per chi non ha RTC.
+- Su `rtc_load`: dopo aver letto i campi serializzati, calcolare
+  `wall_gap = now_unix() - saved_last_real_unix` e — se non halted —
+  sommarlo in `rtc_total_secs_` prima di resettare l'anchor a `now_unix()`.
+  Così i giorni accumulati sopravvivono al restart e l'orologio "ha
+  continuato a girare" mentre il processo era spento. Halted → `rtc_total_secs_`
+  resta congelato.
+- Persistenza: stessa cadenza del `.sav` (flush a chiusura + ogni ~2 s se
+  qualcosa è cambiato). La RTC cambia ogni secondo quindi conviene gating
+  su "ultimo dump > N secondi fa" invece di un dirty bit.
+- Formato compatibility: il layout sopra **non** è interoperabile con BGB /
+  VBA / SameBoy (ognuno usa un proprio formato `.rtc`). Decisione
+  consapevole — la complessità non vale per la v1, l'utente può ricalibrare
+  la RTC in-game al primo boot dopo un import.
+
+Senza questo file, la RTC riparte all'epoch del `system_clock` corrente ad
+ogni avvio: i secondi/minuti/ore puntano all'ora reale di sistema, ma il
+counter "giorni dall'inizio della partita" si azzera ad ogni restart →
+day/night funziona per la sessione corrente, non sopravvive ai riavvii.
 
 **Distinzione da Save State (sezione 2)**: il battery save è solo la SRAM
 del cart, è il salvataggio *del gioco* (il giocatore lo crea via menu
@@ -691,6 +724,51 @@ dall'utente (preferenze esplicite). `user/` è **stato di sessione**
 generato e gestito dall'app (window pose, MRU, dock layout, ultima palette
 selezionata). Tenerli separati evita di mescolare "cose che l'utente edita"
 con "cose che l'app riscrive in continuazione".
+
+---
+
+## 15. Menu Audio — abilita/disabilita audio
+
+Oggi l'APU gira sempre e il device SDL audio è aperto in `Application` senza
+controllo utente. Manca un toggle UI per silenziare l'output (use-case classico:
+"sto ascoltando musica mentre gioco").
+
+**Menu bar**: aggiungere voce **Audio** fra **Emulation** e **View** in
+`draw_menu_bar` (`src/ui.cpp`). Voci iniziali:
+
+- `Mute` (checkable) — toggle stato muted. Hotkey suggerita `M` (gated su
+  `!imgui_captured`, non collide con joypad bindings).
+- (Follow-up, non bloccanti per la v1) `Volume ▸` submenu con slider 0-100%,
+  toggle per-canale `Channel 1/2/3/4` (utile per debug APU).
+
+**Implementazione mute:**
+
+- Stato vive sull'`Application` (è output-side, non emulation state — l'APU
+  continua a girare per non desyncare la timeline cycle-accurate).
+- Due approcci possibili:
+  - **Gate sul producer**: nel callback di `apu::sample_pull` (o equivalente
+    SPSC nel ring buffer) scrivere zeri quando muted. Pro: nessun pop
+    all'attivazione (il ring già pieno suona ancora per ~1 frame, poi
+    silenzio). Contro: spreca cicli APU.
+  - **Gate sul consumer SDL**: `SDL_PauseAudioDevice(dev, muted ? 1 : 0)`.
+    Pro: zero CPU. Contro: pop all'unpause se il ring ha campioni stale —
+    serve un drain del ring su unmute.
+  - Scelta consigliata v1: **consumer-gate** + drain. Pop occasionale a
+    unmute è accettabile per un toggle utente; il risparmio CPU vale.
+- Persistenza: stato muted in `user_state` (sezione 14) sotto `audio.muted`.
+  Finché §14 non è chiusa, vivere in memoria e dimenticarsi al riavvio.
+
+**Interazione con §3 (speed multiplier)**: la §3 prevede già "mute automatico
+quando `multiplier != 1.0`". Tenere i due flag separati (`user_muted` vs
+`speed_muted`, OR per il gating effettivo) così la velocità non sovrascrive
+la scelta esplicita dell'utente.
+
+**Dipendenze**: nessuna bloccante. Implementabile subito; integrazione con
+`user_state` arriva con §14.
+
+**Costo stimato**: ~1-2 ore per Mute+hotkey; il volume slider + per-channel
+toggles aggiungono altre 2-3 ore se si vogliono fare bene (curva di volume
+log, non lineare).
 
 ---
 
