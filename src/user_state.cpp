@@ -42,6 +42,18 @@ namespace gbemu {
             d.lookupValue("active_palette", active_palette);
         }
 
+        if (root.exists("audio")) {
+            const auto& a = root["audio"];
+            a.lookupValue("muted", audio_muted);
+            // libconfig stores numeric scalars as either int or float
+            // depending on whether the literal had a dot; lookupValue<float>
+            // accepts only floats, so we look up double and narrow.
+            double vol_d = static_cast<double>(audio_volume);
+            if (a.lookupValue("volume", vol_d))
+                audio_volume = static_cast<float>(vol_d);
+            a.lookupValue("highpass", audio_highpass);
+        }
+
         return true;
     }
 
@@ -63,6 +75,11 @@ namespace gbemu {
 
         auto& display = root.add("display", libconfig::Setting::TypeGroup);
         display.add("active_palette", libconfig::Setting::TypeString) = active_palette.c_str();
+
+        auto& audio = root.add("audio", libconfig::Setting::TypeGroup);
+        audio.add("muted", libconfig::Setting::TypeBoolean) = audio_muted;
+        audio.add("volume", libconfig::Setting::TypeFloat) = static_cast<double>(audio_volume);
+        audio.add("highpass", libconfig::Setting::TypeString) = audio_highpass.c_str();
 
         try {
             std::filesystem::path p{path};

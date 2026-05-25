@@ -23,6 +23,16 @@ namespace gbemu {
         std::vector<std::string> recent_roms{};
         std::string active_palette{};
 
+        // Audio output preferences. Defaults match "no menu interaction":
+        // not muted, unity gain, accurate DC-blocking filter. Stored under
+        // an `audio` sub-group in user.conf.
+        bool audio_muted{false};
+        float audio_volume{1.0f};
+        // Serialised as "off" / "accurate" / "preserve". Unknown values
+        // fall back to "accurate" on load — the typo path mirrors what
+        // ui::apply_display_config does for unknown palettes.
+        std::string audio_highpass{"accurate"};
+
         // Read libconfig from `path`.  Missing file (first run) or parse
         // error -> fields stay at construction defaults and returns false.
         // Never throws.

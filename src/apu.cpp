@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include <apu.h>
 #include <gb_layout.h>
 
@@ -84,6 +86,12 @@ apu::apu(mmu& mmu) : mmu_(mmu) {
     // the system counter on a ROM DIV write can produce an extra frame
     // sequencer step if the FS-clocking bit was high before the reset.
     mmu_.add_mmio_write_handler(gb::io::DIV, [this](std::uint8_t v) { on_div_write(v); });
+
+    // Seed the highpass IIR coefficient from the default mode. cgb_mode is
+    // false at this point (set later by core::load(rom_file)); the DMG
+    // tau is a safe baseline and Application re-applies settings post-load
+    // so the CGB alpha takes over before the first sample is pushed.
+    recompute_hp_alpha();
 }
 
 // --- square_channel: register loads -----------------------------------------
@@ -671,6 +679,46 @@ void apu::reset() {
     frame_seq_acc_ = 0;
     frame_seq_step_ = 0;
     powered_ = true;
+    // Zero the highpass memory — residual DC from the prior session
+    // would otherwise leak through the first samples after the reset
+    // (audible as a low thump on hot-swap). Re-derive alpha too, even
+    // though it doesn't depend on cgb_mode anymore, so a future tuning
+    // of the curve takes effect on the next emit.
+    hp_prev_in_l_ = hp_prev_in_r_ = 0.0f;
+    hp_prev_out_l_ = hp_prev_out_r_ = 0.0f;
+    recompute_hp_alpha();
+}
+
+void apu::set_highpass_mode(highpass_mode m) {
+    highpass_mode_ = m;
+    recompute_hp_alpha();
+}
+
+void apu::recompute_hp_alpha() {
+    // IIR 1st-order DC blocker: y[n] = alpha * (y[n-1] + x[n] - x[n-1]).
+    // Equivalent (and used by SameBoy) to "subtract a slow moving-average
+    // of the input", with alpha == the running-average retention rate.
+    //
+    // Important: the real DMG analog filter sits around f_c ≈ 60 Hz, which
+    // happens to bracket the lowest CH1/CH2 fundamentals (~64 Hz). Using
+    // a textbook 60 Hz IIR here audibly clips the attack of low notes —
+    // it sounds like crackle/grit even though it's the filter chewing
+    // bass content. SameBoy intentionally backs off to ~28 Hz for its
+    // accurate mode for exactly this reason; we follow suit.
+    //
+    // alpha is expressed via the SameBoy parameterisation: a per-CPU-clock
+    // retention rate raised to (CPU_HZ / SAMPLE_RATE), so the effective
+    // cutoff is stable across sample rates without retuning.
+    //   accurate : 0.999958 base ≈ 0.99634 at 48 kHz → f_c ≈ 28 Hz.
+    //   preserve : 0.999999 base ≈ 0.99991 at 48 kHz → f_c ≈ 0.7 Hz
+    //              (DC only, the actual waveform low end stays intact).
+    if (highpass_mode_ == highpass_mode::off) {
+        hp_alpha_ = 0.0f;
+        return;
+    }
+    const float base = (highpass_mode_ == highpass_mode::accurate) ? 0.999958f : 0.999999f;
+    const float exponent = static_cast<float>(gb::CPU_HZ) / static_cast<float>(SAMPLE_RATE);
+    hp_alpha_ = std::pow(base, exponent);
 }
 
 void apu::refresh_nr52_status() {
@@ -795,6 +843,31 @@ void apu::emit_sample() {
     // Phase 2's single-channel output, intentional tradeoff for consistency.
     l *= 0.25f;
     r *= 0.25f;
+
+    // Post-mix highpass. Run the IIR even while muted so the filter
+    // memory does not develop a step on un-mute — but feed it the
+    // pre-mute sample so the running average matches what the user
+    // would otherwise be hearing.
+    if (highpass_mode_ != highpass_mode::off) {
+        const float in_l = l;
+        const float in_r = r;
+        const float out_l = hp_alpha_ * (hp_prev_out_l_ + in_l - hp_prev_in_l_);
+        const float out_r = hp_alpha_ * (hp_prev_out_r_ + in_r - hp_prev_in_r_);
+        hp_prev_in_l_ = in_l;
+        hp_prev_in_r_ = in_r;
+        hp_prev_out_l_ = out_l;
+        hp_prev_out_r_ = out_r;
+        l = out_l;
+        r = out_r;
+    }
+
+    if (muted_) {
+        ring_.push(0.0f, 0.0f);
+        return;
+    }
+
+    l *= master_gain_;
+    r *= master_gain_;
 
     ring_.push(l, r);
 }

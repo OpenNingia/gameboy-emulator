@@ -14,6 +14,15 @@ namespace gbemu {
         // pushes samples into the ring buffer.
         static constexpr int SAMPLE_RATE = 48000;
 
+        // Post-mix high-pass filter modes. Game Boy hardware has an analog
+        // DC-blocking filter on the audio output; without it, square waves
+        // with non-50% duty cycles produce a "thump" at note edges because
+        // their DC component shifts the baseline. accurate emulates DMG/CGB
+        // hardware (~60 Hz / ~120 Hz cutoff). preserve uses a much lower
+        // cutoff (~5 Hz) so only the DC drift is removed and the perceived
+        // bass content stays intact — a popular "gameplay" preset.
+        enum class highpass_mode : std::uint8_t { off, accurate, preserve };
+
         explicit apu(mmu& mmu);
 
         // Advance the APU by `cycles` T-cycles. Drives the frame sequencer
@@ -33,6 +42,23 @@ namespace gbemu {
         // headless mode (no audio device, nobody draining the ring) doesn't
         // deadlock on the first full buffer.
         void enable_output(bool on) { output_enabled_ = on; }
+
+        // Output-side controls. Independent of emulation state: the channels
+        // keep advancing so cycle accounting stays accurate; only the values
+        // pushed into the ring buffer are gated. `muted` is a hard zero
+        // (separate from `set_volume(0)` so the user's chosen volume is
+        // preserved across mute toggles). `master_gain` is the squared slider
+        // value in [0..1], applied as a plain multiplier before the ring
+        // push. `highpass` selects the post-mix DC-blocking filter — see
+        // highpass_mode above. Changing modes does not zero the IIR memory
+        // so the natural decay of the filter absorbs the alpha switch
+        // without producing a pop.
+        void set_muted(bool m) { muted_ = m; }
+        bool is_muted() const { return muted_; }
+        void set_master_gain(float g) { master_gain_ = g; }
+        float master_gain() const { return master_gain_; }
+        void set_highpass_mode(highpass_mode m);
+        highpass_mode get_highpass_mode() const { return highpass_mode_; }
 
         // Default-construct every channel and clear the sample / frame
         // sequencer accumulators.  The audio ring buffer is left alone — the
@@ -193,6 +219,24 @@ namespace gbemu {
         mmu& mmu_;
         audio_ring_buffer ring_{};
         bool output_enabled_{false};
+
+        // Output-side state (mute / volume / highpass). Defaults: not
+        // muted, unity gain, accurate filter — same audible behavior as
+        // before the menu was added. `hp_alpha_` is derived from
+        // highpass_mode_ in recompute_hp_alpha and refreshed on reset;
+        // the IIR memory (prev_in/prev_out) is also zeroed there so a
+        // ROM swap or soft reset doesn't leak the prior session's DC
+        // bias into the first samples of the new run.
+        bool muted_{false};
+        float master_gain_{1.0f};
+        highpass_mode highpass_mode_{highpass_mode::accurate};
+        float hp_alpha_{0.0f};
+        float hp_prev_in_l_{0.0f};
+        float hp_prev_in_r_{0.0f};
+        float hp_prev_out_l_{0.0f};
+        float hp_prev_out_r_{0.0f};
+
+        void recompute_hp_alpha();
 
         // Bresenham sample-rate accumulator.
         std::uint64_t sample_acc_{0};

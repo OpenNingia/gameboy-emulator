@@ -744,104 +744,44 @@ giusta a `ui::init` in base al flag CLI `--debug`.
 
 ---
 
-## 15. Menu Audio — abilita/disabilita audio
+## 15. Menu Audio — abilita/disabilita audio — **fatto**
 
-Oggi l'APU gira sempre e il device SDL audio è aperto in `Application` senza
-controllo utente. Manca un toggle UI per silenziare l'output (use-case classico:
-"sto ascoltando musica mentre gioco").
+Menu **Audio** fra **Emulation** e **View** (`src/ui.cpp` `draw_menu_bar`):
 
-**Menu bar**: aggiungere voce **Audio** fra **Emulation** e **View** in
-`draw_menu_bar` (`src/ui.cpp`). Voci iniziali:
+- `Mute` checkable — hotkey `M` (gated su `!imgui_captured`, niente collisione
+  con i tasti joypad).
+- `Volume ▸` — slider 0-100%, hotkey `Ctrl+Up`/`Ctrl+Down` che fanno snap al
+  bucket 10% strettamente superiore/inferiore (47% → UP → 50%; 50% → UP → 60%).
+- `Highpass Filter ▸` — radio `Off` / `Accurate` / `Preserve waveform`.
 
-- `Mute` (checkable) — toggle stato muted. Hotkey suggerita `M` (gated su
-  `!imgui_captured`, non collide con joypad bindings).
-- `Volume ▸` — slider 0-100% (master gain applicato in uscita dal mixer APU).
-- `Highpass Filter ▸` — radio fra `Off` / `Accurate` / `Preserve waveform`
-  (DC-blocking filter, vedi sotto).
-- (Follow-up, non bloccante per la v1) toggle per-canale `Channel 1/2/3/4`
-  (utile per debug APU).
+Stato persistito sotto un sub-block `audio` in `<base>/user/user.conf`:
 
-**Implementazione mute:**
+```
+audio: { muted = false; volume = 1.0; highpass = "off"|"accurate"|"preserve"; };
+```
 
-- Stato vive sull'`Application` (è output-side, non emulation state — l'APU
-  continua a girare per non desyncare la timeline cycle-accurate).
-- Due approcci possibili:
-  - **Gate sul producer**: nel callback di `apu::sample_pull` (o equivalente
-    SPSC nel ring buffer) scrivere zeri quando muted. Pro: nessun pop
-    all'attivazione (il ring già pieno suona ancora per ~1 frame, poi
-    silenzio). Contro: spreca cicli APU.
-  - **Gate sul consumer SDL**: `SDL_PauseAudioDevice(dev, muted ? 1 : 0)`.
-    Pro: zero CPU. Contro: pop all'unpause se il ring ha campioni stale —
-    serve un drain del ring su unmute.
-  - Scelta consigliata v1: **consumer-gate** + drain. Pop occasionale a
-    unmute è accettabile per un toggle utente; il risparmio CPU vale.
-- Persistenza: stato muted in `user_state` (sezione 14) sotto `audio.muted`.
-  Finché §14 non è chiusa, vivere in memoria e dimenticarsi al riavvio.
+Default: non muted, volume 100%, filtro `accurate` (~60 Hz su DMG, ~120 Hz su
+CGB — il branch viene scelto in `apu::recompute_hp_alpha` consultando
+`mmu.cgb_mode()`).
 
-**Interazione con §3 (speed multiplier)**: la §3 prevede già "mute automatico
-quando `multiplier != 1.0`". Tenere i due flag separati (`user_muted` vs
-`speed_muted`, OR per il gating effettivo) così la velocità non sovrascrive
-la scelta esplicita dell'utente.
+**Implementazione attuale (produttore-gate):** mute è un hard-zero nel push del
+ring (`apu::emit_sample` in `src/apu.cpp`), il consumer SDL non viene mai
+messo in pausa. Niente drain del ring necessario, niente pop a unmute (il
+ring si svuota naturalmente con campioni a 0). Volume = slider lineare 0-1 →
+APU riceve `volume²` per una curva percettivamente lineare (-12 dB al
+midpoint). Highpass = IIR 1° ordine `y[n] = α (y[n-1] + x[n] - x[n-1])` con
+α derivata da `exp(-1/(SAMPLE_RATE · τ))`. La memoria del filtro viene
+azzerata da `apu::reset` (incluso quindi hot-swap) ma sopravvive al cambio
+di modalità (il decadimento naturale assorbe il salto di α senza pop).
 
-**Implementazione volume:**
+**Cosa NON è stato fatto rispetto al piano originale:**
 
-- Slider `Volume` 0-100% nel submenu, default 100%. Stato vive su
-  `Application` (output-side, come `muted_`); persistito in `user_state`
-  sotto `audio.volume` quando §14 è chiusa.
-- Curva di mappatura: lineare 0..1 sul gain è percettivamente sbagliato
-  (il -6 dB sta a metà fisica ma "molto basso" all'orecchio). Usare curva
-  pseudo-log: `gain = (pct/100)^2`, oppure log "pulito" `gain = 10^(-(1-pct/100)*2)`
-  (=> 0 dB a 100%, -40 dB a 0%, con muting esatto a 0). La quadratica è più
-  semplice e visivamente lineare nello slider, accettabile in v1.
-- Applicazione: dentro `apu::mix_sample` (o subito a valle del mixer, in
-  `src/apu.cpp` dove i 4 canali vengono sommati e divisi per 4 — vedi
-  `src/apu.cpp:792`), moltiplicare il sample finale per `master_gain_` prima
-  della scrittura sul ring buffer. Nessun overhead percepibile, è una
-  moltiplicazione per sample.
-- Hotkey suggerite: `Ctrl+Up` / `Ctrl+Down` per step di 10% (non collide con
-  joypad bindings; `+`/`-` resta libero per §3 speed step).
-- UI: oltre allo slider nel menu, mostrare la percentuale a destra dello
-  slider stesso (`%.0f%%`). Niente OSD per il cambio volume in v1 — il menu
-  è transient e basta come feedback visivo.
-
-**Implementazione highpass filter:**
-
-L'hardware Game Boy applica un DC-blocking filter analogico (high-pass) in
-uscita: ~60 Hz su DMG, leggermente diverso su CGB. Senza, l'output del
-mixer è "DC-shifted" — i canali con duty cycle ≠ 50% (square con duty 12.5%
-o 75%) hanno una componente DC non trascurabile che produce un "thump"
-all'inizio/fine di ogni nota. SameBoy lo implementa esattamente — riferimento:
-`Core/apu.c` (`GB_apu_render_audio` + `highpass_strength`).
-
-- Tre modalità (radio nel submenu):
-  - `Off` — sample raw dal mixer, output potenzialmente DC-shifted ma
-    "fedele" al digitale. Default ragionevole per debugging APU; non per
-    gameplay.
-  - `Accurate` — filtro IIR 1° ordine con cutoff ~60 Hz (DMG) / ~120 Hz (CGB
-    se si decide di gated su `mmu_.cgb_mode()`). Formula SameBoy:
-    `y[n] = α * (y[n-1] + x[n] - x[n-1])` con `α = exp(-1/(sample_rate * τ))`
-    e `τ ≈ 0.0026 s` (DMG). Stato (due float `prev_in_l/r`, `prev_out_l/r`)
-    su `apu` o `Application`. Suggerito **default**: replica fedele dell'hardware.
-  - `Preserve waveform` — α più alto (cutoff ~5 Hz). Toglie solo il DC offset
-    "vero" ma lascia le componenti basse delle waveform (più ricco a livello
-    di basso percepito, meno fedele). Modalità "gameplay" che molti utenti
-    SameBoy preferiscono.
-- Applicazione: in linea con il volume, subito a monte (i due filtri sono
-  commutativi sul gain costante, ma per ordine cache-friendly: highpass →
-  master gain → ring buffer).
-- Stato dei sample precedenti: i due float L/R devono essere azzerati a
-  reset APU e a power-off APU per evitare DC offset cumulato. Su switch fra
-  modalità non azzerare (la transizione naturale del filtro assorbe il
-  cambio di α senza pop).
-- Persistenza: `user_state.audio.highpass = "off"|"accurate"|"preserve"`
-  quando §14 è chiusa. Default = `accurate`.
-
-**Dipendenze**: nessuna bloccante. Implementabile subito; integrazione con
-`user_state` arriva con §14.
-
-**Costo stimato**: ~1-2 ore per Mute+hotkey. Volume slider con curva e
-hotkey aggiunge ~1-2 ore. Highpass filter (3 modalità + IIR + stato + UI
-radio) aggiunge ~2-3 ore. Per-channel toggles (se desiderati) altre 1-2 ore.
+- Toggle per-canale (CH1..CH4) — restano da §15 follow-up, utile solo per
+  debug APU.
+- Persistenza con §3 (speed multiplier): quando arriverà §3, l'auto-mute a
+  multiplier ≠ 1.0 dovrà coesistere con `user_state_.audio_muted`. Pattern
+  suggerito (non implementato): tenere due flag separati (`user_muted` vs
+  `speed_muted`), OR per il gating in APU. Oggi c'è solo il primo.
 
 ---
 
@@ -934,6 +874,223 @@ piano audio.
 **Interazione con §8**: una volta aggiunto il read-handler MMU per
 $FF30-$FF3F, gli stessi handler chiudono entrambi i lati (DMG: 0xFF +
 finestra di 2T; CGB: redirect sempre attivo). Conviene chiudere insieme.
+
+---
+
+## 17. Input refactor — hotkey manager + bindings configurabili
+
+`Application::run` oggi mescola in un unico `while (SDL_PollEvent)` (~90 righe
+in `src/app.cpp:498-592`) **quattro responsabilità diverse**:
+
+1. **Hotkey applicativi** inline: F11 (fullscreen), Space (pause toggle),
+   Ctrl+R (reset), Ctrl+O (load ROM), M (mute), Ctrl+Up/Down (volume nudge).
+   Ognuno è un `else if` annidato con il proprio gating (`!imgui_captured`,
+   `!e.key.repeat`, `rom_loaded`, modifier mask) e tocca direttamente
+   `debugger`, `core.apu`, `user_state_`, `ui::actions(ui_ctx)`,
+   `SDL_SetWindowFullscreen` — l'orchestrazione vive a mano nel main loop.
+2. **Mapping joypad keyboard → GB button** in `map_keycode_to_button`
+   (`src/app.cpp:126-156`): switch hardcoded su `SDLK_UP`/`Z`/`X`/…
+3. **Mapping joypad controller → GB button** in
+   `map_controller_button_to_button` (`src/app.cpp:164-194`): switch
+   hardcoded su `SDL_CONTROLLER_BUTTON_*`.
+4. **Hot-plug controller** (`SDL_CONTROLLERDEVICEADDED/REMOVED`): apri/chiudi
+   `SDL_GameController*`.
+
+**Problemi attuali:**
+
+- Le shortcut sono *replicate* nei tooltip della menu bar (`src/ui.cpp`
+  `draw_menu_bar`): qualunque rebinding richiederebbe due edit sincronizzati.
+- Nessun supporto per modifiers diversi da Ctrl, niente chord (es. `G,P` per
+  "Goto PC"), niente disambiguazione fra hotkey con/senza ROM caricata
+  (oggi `rom_loaded` è hardcoded a poche voci).
+- Le mappe joypad sono *fisse*: chi vuole WASD invece delle frecce, o
+  rimappare A/B sulla tastiera, deve ricompilare. Speedrun layout (rebind
+  Start/Select) idem.
+- L'API `Application` non ha un punto di osservazione per "questa azione è
+  stata invocata": telemetria/log delle hotkey non c'è (utile per
+  debuggare "perché l'utente dice che la pause non funziona?").
+- Pre-requisito **non bloccante ma fortemente correlato** a §12 (Player UI
+  vs Debugger UI): la Player UI dovrà esporre un menu "Settings → Input"
+  per il rebinding, e i due frontend condivideranno lo stesso input
+  manager. Meglio chiudere §17 prima così §12 non duplica scaffolding.
+
+**Architettura proposta:**
+
+Nuovo modulo `inc/input.h` + `src/input.cpp` con tre concetti separati:
+
+```cpp
+namespace gbemu::input {
+
+    // (1) Azioni applicative semantiche — l'enum vive in input.h e
+    // viene consumata sia dall'event dispatcher (questo modulo) sia
+    // dalla UI per labellare le voci di menu / disegnare le shortcut.
+    enum class action {
+        toggle_pause, reset, load_rom, toggle_fullscreen,
+        toggle_mute, volume_up, volume_down,
+        // futuri (§3): speed_up, speed_down, speed_reset, fast_forward_hold
+        // futuri (§2): save_state, load_state, slot_next, slot_prev
+        // futuri (§12): toggle_frame
+    };
+
+    // (2) Binding: chiave SDL + modifier mask -> action.  Modifier mask
+    // è uint16 (SDL_Keymod), permette Shift/Ctrl/Alt/Gui in qualunque
+    // combinazione.  `kind` discrimina hotkey one-shot dal "tieni
+    // premuto" (fast_forward).
+    struct key_binding {
+        SDL_Keycode key;
+        std::uint16_t mod_mask;
+        action act;
+        enum class kind { oneshot, hold } kind = kind::oneshot;
+    };
+
+    // (3) Binding joypad: SDL key/controller button -> GB joypad button.
+    // Due tabelle separate (keyboard vs controller).
+    struct joypad_binding {
+        SDL_Keycode key;                          // 0 se controller-only
+        SDL_GameControllerButton ctrl_btn;        // _INVALID se keyboard-only
+        gbemu::joypad::button gb_btn;
+    };
+
+    // Configurazione completa, serializzata in user.conf (sezione 14).
+    struct config {
+        std::vector<key_binding> hotkeys;     // default popolato da defaults()
+        std::vector<joypad_binding> joypad;   // idem
+        static config defaults();             // valori hardcoded di oggi
+    };
+
+    // Dispatcher: prende SDL_Event + stato (ROM caricato? imgui catturato?)
+    // e ritorna `optional<action>` per gli hotkey, oppure aggiorna lo stato
+    // del joypad direttamente (callback-based per non ricostruire l'enum).
+    class manager {
+    public:
+        explicit manager(config cfg);
+        // Ritorna l'azione triggerata (se ce n'è una), altrimenti nullopt.
+        // `imgui_captured` salta le hotkey ma lascia passare il joypad
+        // pass-through (lo facciamo già oggi).
+        std::optional<action> on_key_down(SDL_Keycode, std::uint16_t mod,
+                                          bool repeat, bool imgui_captured,
+                                          bool rom_loaded);
+        // I joypad event chiamano direttamente joypad::set_button via
+        // callback installato a costruzione (evita di accoppiare input
+        // manager a core).
+        bool on_key_for_joypad(SDL_Keycode, bool pressed);
+        bool on_controller_button(SDL_GameControllerButton, bool pressed);
+        // Per il rebinding UI: enumerare/sostituire/aggiungere binding.
+        config const& cfg() const;
+        void set_cfg(config);
+    private:
+        config cfg_;
+        std::function<void(gbemu::joypad::button, bool)> joypad_sink_;
+    };
+
+} // namespace gbemu::input
+```
+
+**Wiring in `Application::run`:**
+
+- Costruire `input::manager mgr{ input::config::defaults() }` (più avanti:
+  load da `user_state_.input` se presente).
+- Sostituire i ~90 righe dell'event loop con un dispatch table:
+  ```cpp
+  if (e.type == SDL_KEYDOWN) {
+      const auto act = mgr.on_key_down(e.key.keysym.sym, e.key.keysym.mod,
+                                       e.key.repeat, imgui_captured,
+                                       core.mmu.cart() != nullptr);
+      if (act) handle_action(*act);     // switch su action enum
+      mgr.on_key_for_joypad(e.key.keysym.sym, true);
+  }
+  ```
+  Il `handle_action(action)` è una funzione membro/lambda con il `switch`
+  che oggi vive inline — concentra tutta l'orchestrazione (debugger /
+  apu / user_state / ui::actions) in un punto solo.
+
+**Persistenza (dipende da §14, già chiusa):**
+
+Nuovo sub-block `input` in `user/user.conf`:
+```
+input: {
+  hotkeys = (
+    { key = "F11";       mod = "";     action = "toggle_fullscreen"; },
+    { key = "Space";     mod = "";     action = "toggle_pause"; },
+    { key = "R";         mod = "Ctrl"; action = "reset"; },
+    ...
+  );
+  joypad_keyboard = (
+    { key = "Up";        gb = "up"; },
+    { key = "Z";         gb = "a";  },
+    ...
+  );
+};
+```
+
+Sub-block mancante → `config::defaults()` (no migration needed).
+`SDL_GetKeyFromName(string)` / `SDL_GetKeyName(SDL_Keycode)` chiudono la
+conversione testo↔keycode.
+
+**UI di rebinding (deferred a §12 / dopo):**
+
+- Pannello/finestra "Settings → Input" con tabella `[action | shortcut |
+  Rebind…]`. Click su "Rebind…" → modal "Press a key…", il prossimo
+  `SDL_KEYDOWN` cattura la combinazione e aggiorna `config`.
+- Per joypad, stessa idea con `SDL_CONTROLLERBUTTONDOWN`.
+- "Reset to defaults" overwrita con `config::defaults()`.
+- Non bloccante per il refactor: i default fanno girare tutto come oggi,
+  la UI può atterrare in un secondo momento (priorità più bassa dopo che
+  §12 ha deciso dove vive il menu Settings).
+
+**Conflitti / vincoli:**
+
+- Hotkey *non devono* collidere con le hotkey joypad (oggi è verificato a
+  mano: arrows/Z/X/Backspace/Enter non sono mappati a hotkey). Il
+  manager va difeso con una validazione a load (se un binding hotkey usa
+  una key già mappata sul joypad → log warning, skip). Stessa logica
+  inversa.
+- ImGui-captured: hotkey applicativi *sì* skippano (text field con focus),
+  joypad *no* (il joypad pass-through ignora il focus ImGui — match con
+  l'attuale comportamento).
+- Modifier mask: oggi `Ctrl+R` controlla solo `KMOD_CTRL`, non discrimina
+  Shift/Alt aggiuntivi. Decidere se il check è "mod == required_mask"
+  (strict) o "(mod & required_mask) == required_mask" (allow extras).
+  Strict è il default ragionevole — `Ctrl+Shift+R` *non* deve triggerare
+  reset.
+
+**Cosa NON è in scope:**
+
+- Gesture multi-tasto / chord (`G,P` style) — overkill per v1, si può
+  aggiungere come campo `key_binding.next` (key successiva) quando serve.
+- Macro / replay input — feature separata, niente a che fare con
+  bindings.
+- Touch input (Android/iOS) — non shippiamo lì.
+
+**Ordine consigliato:**
+
+1. Estrarre `input::config` + `input::manager` con i default hardcoded di
+   oggi (no persistenza). Sostituire le ~90 righe in `Application::run`
+   con il nuovo dispatch. Verifica: hotkey + joypad si comportano
+   identici a prima.
+2. Spostare i tooltip di shortcut nella menu bar (`src/ui.cpp`) a leggere
+   da `input::config` invece di stringhe hardcoded (es. `View →
+   shortcut_label(mgr.cfg(), action::toggle_pause)` → `"Space"`). Tutto
+   pronto per il rebinding UI senza duplicare verità.
+3. Persistenza in `user_state_.input` (legge/scrive sub-block libconfig).
+   Default kicks in se mancante; binding invalidi → log + skip.
+4. (Più avanti, dopo §12) UI di rebinding nel menu Settings.
+
+**Dipendenze:**
+
+- Nessuna *in ingresso*: il refactor è autonomo. §14 (`user/user.conf`)
+  facilita la persistenza ma non è bloccante — i passi 1-2 si chiudono
+  senza toccare il filesystem.
+- *In uscita*: §3 (speed multiplier) e §2 (save/load state) aggiungeranno
+  facilmente le proprie `action` (`speed_up`/`speed_down`/`fast_forward_hold`,
+  `save_state`/`load_state`/`slot_*`) senza altri edit in `app.cpp`. §12
+  (Player UI) eredita lo stesso input manager senza scaffolding extra.
+
+**Costo stimato**: ~mezza giornata per i passi 1-2 (refactor meccanico,
+copertura test = "le hotkey funzionano come prima" verificata manualmente).
+Passo 3 (persistenza + parsing libconfig) ~2-3 ore. Passo 4 (UI rebinding)
+~mezza giornata, da fare insieme alla scelta del posto in cui vivere
+(Settings panel? menu Edit → Preferences?).
 
 ---
 

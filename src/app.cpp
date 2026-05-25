@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -421,6 +422,26 @@ void Application::run() {
     }
     user_state_.load(user_conf_path_);
 
+    // Push persisted audio prefs into the APU now that user_state has been
+    // loaded and the ROM is attached (so cgb_mode is correct for the
+    // accurate-filter cutoff).  Volume slider is stored as 0..1 linear in
+    // user_state; the APU receives the squared value so the perceived
+    // taper is closer to log.  Unknown highpass strings (forward-compat /
+    // typo) fall back to "accurate" matching the load-time default.
+    {
+        core.apu.set_muted(user_state_.audio_muted);
+        core.apu.set_master_gain(user_state_.audio_volume * user_state_.audio_volume);
+        using hp = gbemu::apu::highpass_mode;
+        hp mode = hp::accurate;
+        if (user_state_.audio_highpass == "off")
+            mode = hp::off;
+        else if (user_state_.audio_highpass == "preserve")
+            mode = hp::preserve;
+        else if (user_state_.audio_highpass != "accurate")
+            user_state_.audio_highpass = "accurate";
+        core.apu.set_highpass_mode(mode);
+    }
+
     // Restore last-used SDL window dimensions if available; otherwise fall
     // back to the hard-coded default (first launch on this machine).  A
     // zero in either dimension is treated as "no saved value" — covers
@@ -510,6 +531,27 @@ void Application::run() {
                         gbemu::ui::reset_display_post(ui_ctx);
                     } else if (ctrl && k == SDLK_o) {
                         gbemu::ui::actions(ui_ctx).load_rom_dialog_requested = true;
+                    } else if (k == SDLK_m && !ctrl) {
+                        // Mute toggle. Mirror the menu path: flip
+                        // user_state, propagate to APU, raise the save
+                        // flag so user.conf persists the change.
+                        user_state_.audio_muted = !user_state_.audio_muted;
+                        core.apu.set_muted(user_state_.audio_muted);
+                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
+                    } else if (ctrl && (k == SDLK_UP || k == SDLK_DOWN)) {
+                        // Volume nudge: snap to the next 10% bucket strictly
+                        // above (or below) the current value, clamped to
+                        // [0,100]. Snap-to-bucket means repeated presses
+                        // converge on round numbers regardless of where the
+                        // slider sat before — 47% + UP -> 50%, not 57%; and
+                        // 50% + UP still advances to 60% so a held key keeps
+                        // moving.
+                        const int cur = static_cast<int>(user_state_.audio_volume * 100.0f + 0.5f);
+                        int pct = (k == SDLK_UP) ? ((cur / 10) + 1) * 10 : ((cur > 0) ? ((cur - 1) / 10) * 10 : 0);
+                        pct = std::clamp(pct, 0, 100);
+                        user_state_.audio_volume = static_cast<float>(pct) / 100.0f;
+                        core.apu.set_master_gain(user_state_.audio_volume * user_state_.audio_volume);
+                        gbemu::ui::actions(ui_ctx).save_user_state_requested = true;
                     }
                 }
                 gbemu::joypad::button btn;

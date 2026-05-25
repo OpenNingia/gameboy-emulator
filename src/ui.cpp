@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <SDL2/SDL.h>
+#include <apu.h>
 #include <cfg.h>
 #include <core.h>
 #include <debugger.h>
@@ -288,6 +289,62 @@ namespace gbemu::ui {
                             }
                         }
                         ImGui::EndMenu();
+                    }
+                    ImGui::EndMenu();
+                }
+
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Audio")) {
+                auto& u = *c.user;
+                auto& apu = c.core->apu;
+
+                // Mute toggle. We keep user_state and apu in sync explicitly
+                // instead of plumbing a watcher — Application::run does the
+                // same after a hotkey toggle. The save flag is raised so
+                // user.conf reflects the new state on next frame drain.
+                if (ImGui::MenuItem("Mute", "M", u.audio_muted)) {
+                    u.audio_muted = !u.audio_muted;
+                    apu.set_muted(u.audio_muted);
+                    c.actions.save_user_state_requested = true;
+                }
+
+                if (ImGui::BeginMenu("Volume")) {
+                    // Slider value is a percentage (0..100) so the user sees
+                    // a familiar scale; the gain pushed into the APU is the
+                    // square of pct/100, giving a perceptually-linear feel
+                    // (-12 dB at the midpoint instead of -6 dB).
+                    int pct = static_cast<int>(u.audio_volume * 100.0f + 0.5f);
+                    ImGui::SetNextItemWidth(180);
+                    if (ImGui::SliderInt("##volpct", &pct, 0, 100, "%d%%")) {
+                        pct = std::clamp(pct, 0, 100);
+                        u.audio_volume = static_cast<float>(pct) / 100.0f;
+                        apu.set_master_gain(u.audio_volume * u.audio_volume);
+                        c.actions.save_user_state_requested = true;
+                    }
+                    ImGui::EndMenu();
+                }
+
+                if (ImGui::BeginMenu("Highpass Filter")) {
+                    using hp = gbemu::apu::highpass_mode;
+                    struct entry {
+                        const char* label;
+                        const char* key;
+                        hp mode;
+                    };
+                    static constexpr entry entries[] = {
+                        {"Off", "off", hp::off},
+                        {"Accurate", "accurate", hp::accurate},
+                        {"Preserve waveform", "preserve", hp::preserve},
+                    };
+                    for (const auto& e : entries) {
+                        const bool selected = (u.audio_highpass == e.key);
+                        if (ImGui::MenuItem(e.label, nullptr, selected)) {
+                            u.audio_highpass = e.key;
+                            apu.set_highpass_mode(e.mode);
+                            c.actions.save_user_state_requested = true;
+                        }
                     }
                     ImGui::EndMenu();
                 }
