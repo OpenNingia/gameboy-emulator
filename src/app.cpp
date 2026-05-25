@@ -344,6 +344,16 @@ void Application::run() {
 
     auto* ui_ctx = gbemu::ui::init(window, renderer, gfx_backend, debugger, core);
 
+    // Apply display config (frame blending mode + active palette) and
+    // scan the palettes directory for any user .sbp files.  Has to run
+    // after ui::init (which constructs the post-processor) and before
+    // the main loop pumps frames so the first VBlank renders with the
+    // right palette.
+    {
+        const auto palettes_dir = gbemu::paths::resolve_under(base_, cfg.paths.palettes_dir);
+        gbemu::ui::apply_display_config(ui_ctx, cfg, palettes_dir);
+    }
+
     // Open the first available game controller, if any. The matching
     // SDL_CONTROLLERDEVICEADDED event also fires in the main loop, so
     // hotplug works the same way — this just covers the case where a
@@ -391,6 +401,7 @@ void Application::run() {
                         debugger.toggle_running();
                     } else if (ctrl && k == SDLK_r && rom_loaded) {
                         debugger.reset();
+                        gbemu::ui::reset_display_post(ui_ctx);
                     } else if (ctrl && k == SDLK_o) {
                         gbemu::ui::actions(ui_ctx).load_rom_dialog_requested = true;
                     }
@@ -479,6 +490,7 @@ void Application::run() {
                 // the swap, so banking state, MBC, BIOS overlay, total cycles
                 // all land at power-on.
                 core.reset();
+                gbemu::ui::reset_display_post(ui_ctx);
                 debugger.resume();
                 gbemu::ui::add_recent_rom(ui_ctx, path);
                 LOG_INFO(gbemu::log::root(), "Loaded ROM: {}", path);

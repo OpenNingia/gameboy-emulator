@@ -29,6 +29,13 @@ namespace gbemu {
         // before the next step has run.
         void reset();
 
+        // Active palette accessor. The PPU owns the single palette_resolver
+        // shared by BG/window/sprite rendering and by the UI's tile / BG-map
+        // viewers (which call resolve() to colour their own off-screen
+        // pixmaps). Swapping the four-shade table here changes both at once.
+        const palette_resolver& palette() const { return resolver_; }
+        void set_palette(const std::array<std::uint32_t, 4>& p) { resolver_.set_palette(p); }
+
     private:
         mmu& mmu_;
         irq& irq_;

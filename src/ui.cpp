@@ -16,15 +16,18 @@
 #include <vector>
 
 #include <SDL2/SDL.h>
+#include <cfg.h>
 #include <core.h>
 #include <debugger.h>
 #include <disasm.h>
+#include <display_post.h>
 #include <gb_layout.h>
 #include <gfx.h>
 #include <imgui.h>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include <imgui_internal.h>
+#include <log.h>
 #include <mbc.h>
 #include <pixel_pipeline.h>
 #include <third_party/imgui_memory_editor.h>
@@ -96,6 +99,18 @@ namespace gbemu::ui {
         host_actions actions{};
         std::vector<std::string> recent_roms{};
         bool show_about_popup{false};
+
+        // Display post-processing — frame blending (LCD ghosting) and the
+        // palette registry feeding the PPU's resolver.  Owned by the UI
+        // context because both are interactive-only: the headless script
+        // runner never calls ui::render_frame and therefore never touches
+        // this state.  The Application configures both from cfg.display
+        // during ui::init.
+        gbemu::display::frame_blender post{};
+        gbemu::display::palette_registry palettes{};
+        // Track the currently-active palette name so the menu can render
+        // radio checkmarks without re-walking the registry to identify it.
+        std::string active_palette_name{"grey"};
     };
 
     namespace {
@@ -224,8 +239,13 @@ namespace gbemu::ui {
                     if (ImGui::MenuItem("Pause", "Space"))
                         dbg.pause();
                 }
-                if (ImGui::MenuItem("Reset", "Ctrl+R"))
+                if (ImGui::MenuItem("Reset", "Ctrl+R")) {
                     dbg.reset();
+                    // Clear the blender history so the first post-reset frame
+                    // is shown un-ghosted (matches the user's mental model of
+                    // "power-cycle").
+                    c.post.reset();
+                }
                 ImGui::EndDisabled();
 
                 // Speed and Save/Load State live behind TODO §3 and §2
@@ -247,6 +267,42 @@ namespace gbemu::ui {
                 const bool is_fs = c.window && (SDL_GetWindowFlags(c.window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
                 if (ImGui::MenuItem("Toggle Fullscreen", "F11", is_fs)) {
                     SDL_SetWindowFullscreen(c.window, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+                }
+
+                // Display ▸ — frame blending (LCD ghosting) + palette swap.
+                // Live state lives in the context; the cfg.display values
+                // are only the initial defaults at boot.
+                if (ImGui::BeginMenu("Display")) {
+                    using gbemu::display::blend_mode;
+                    if (ImGui::BeginMenu("Frame Blending")) {
+                        const blend_mode current = c.post.mode();
+                        if (ImGui::MenuItem("Disabled", nullptr, current == blend_mode::disabled))
+                            c.post.set_mode(blend_mode::disabled);
+                        if (ImGui::MenuItem("Simple", nullptr, current == blend_mode::simple))
+                            c.post.set_mode(blend_mode::simple);
+                        if (ImGui::MenuItem("Accurate", nullptr, current == blend_mode::accurate))
+                            c.post.set_mode(blend_mode::accurate);
+                        ImGui::EndMenu();
+                    }
+                    if (ImGui::BeginMenu("Palette")) {
+                        // Built-ins are inserted first by install_builtins()
+                        // and any user .sbp files follow.  A separator marks
+                        // the boundary so users can tell at a glance what is
+                        // custom vs. ours.  The first 4 entries are the
+                        // built-ins (grey/dmg/mgb/gbl), see palette_registry.
+                        const auto& list = c.palettes.all();
+                        for (std::size_t i = 0; i < list.size(); ++i) {
+                            if (i == 4 && list.size() > 4)
+                                ImGui::Separator();
+                            const bool selected = (list[i].name == c.active_palette_name);
+                            if (ImGui::MenuItem(list[i].name.c_str(), nullptr, selected)) {
+                                c.core->ppu.set_palette(list[i].shades);
+                                c.active_palette_name = list[i].name;
+                            }
+                        }
+                        ImGui::EndMenu();
+                    }
+                    ImGui::EndMenu();
                 }
 
                 ImGui::EndMenu();
@@ -718,7 +774,7 @@ namespace gbemu::ui {
                     return;
             }
             std::array<std::uint32_t, 128 * 192> pixels{};
-            const gbemu::palette_resolver resolver{c.core->mmu};
+            const auto& resolver = c.core->ppu.palette();
             const std::uint8_t* vram = c.core->mmu.vram_bank().data();
             // The viewer covers $8000-$97FF: 384 tiles laid out 16 wide × 24 tall.
             constexpr std::uint32_t tiles_per_row = 16;
@@ -743,7 +799,7 @@ namespace gbemu::ui {
             }
             std::array<std::uint32_t, 256 * 256> pixels{};
             const std::uint8_t lcdc = c.core->mmu.hwr_lcdc();
-            const gbemu::palette_resolver resolver{c.core->mmu};
+            const auto& resolver = c.core->ppu.palette();
             const bool data_8000 = (lcdc & gb::lcdc::tile_data_8000) != 0;
             const std::uint16_t map_base = c.ppu_bgmap_idx ? gb::BG_MAP_1 : gb::BG_MAP_0;
             const std::uint8_t* vram = c.core->mmu.vram_bank().data();
@@ -813,7 +869,7 @@ namespace gbemu::ui {
                         (stat >> 4) & 1, (stat >> 3) & 1, (stat >> 2) & 1, stat & 3);
 
             ImGui::SeparatorText("Palettes");
-            const gbemu::palette_resolver resolver{mmu};
+            const auto& resolver = c.core->ppu.palette();
             palette_swatch("BGP ", resolver, gbemu::palette_id::bg);
             palette_swatch("OBP0", resolver, gbemu::palette_id::obj0);
             palette_swatch("OBP1", resolver, gbemu::palette_id::obj1);
@@ -982,6 +1038,39 @@ namespace gbemu::ui {
         save_recent_roms(*ctx);
     }
 
+    void apply_display_config(context* ctx, const config& cfg, const std::string& palettes_dir) {
+        if (!ctx)
+            return;
+        // 1) Built-ins first so "grey"/"dmg"/"mgb"/"gbl" are always available
+        //    even when the user palettes dir is missing.  User .sbp files
+        //    may shadow a built-in by sharing its stem (last-wins).
+        ctx->palettes.install_builtins();
+        ctx->palettes.scan_directory(palettes_dir);
+
+        // 2) Frame blending mode straight from the config string.
+        ctx->post.set_mode(gbemu::display::parse_blend_mode(cfg.display.frame_blending));
+
+        // 3) Resolve the active palette name.  Unknown names fall back to
+        //    "grey" rather than throwing — the user has just typed a string
+        //    in the config and a typo shouldn't crash the emulator.
+        const auto* p = ctx->palettes.find(cfg.display.palette);
+        if (!p) {
+            LOG_WARNING(gbemu::log::root(), "display: unknown palette \"{}\", falling back to \"grey\"",
+                        cfg.display.palette);
+            p = ctx->palettes.find("grey");
+        }
+        if (p && ctx->core) {
+            ctx->core->ppu.set_palette(p->shades);
+            ctx->active_palette_name = p->name;
+        }
+    }
+
+    void reset_display_post(context* ctx) {
+        if (!ctx)
+            return;
+        ctx->post.reset();
+    }
+
     void shutdown(context* ctx) {
         if (!ctx)
             return;
@@ -1023,7 +1112,11 @@ namespace gbemu::ui {
         // Application::run; consolidating it here lets the UI fully own the
         // display presenter's lifecycle.
         if (ctx->display_present && ctx->core && ctx->core->ppu.consume_frame_ready()) {
-            gbemu::gfx::presenter_upload(ctx->display_present, ctx->core->ppu.framebuffer());
+            // Frame blending: with mode == disabled the blender returns
+            // `framebuffer()` verbatim (zero copy) so this stays cheap on
+            // the default path.  Other modes mix in the history ring.
+            const std::uint32_t* fb = ctx->post.blend(ctx->core->ppu.framebuffer());
+            gbemu::gfx::presenter_upload(ctx->display_present, fb);
         }
 
         ImGui_ImplSDLRenderer2_NewFrame();

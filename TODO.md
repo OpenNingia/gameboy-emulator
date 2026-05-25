@@ -6,17 +6,21 @@ abstraction).
 
 ---
 
-## 1. Debugger — stub minori
+## 1. Debugger — stub minori — **fatto**
 
-Lasciati indietro da PR5; non bloccano nulla ma sono evidenti nel pannello CPU.
+Lasciati indietro da PR5; ora entrambi chiusi.
 
-- **Reset button** (pannello CPU) — oggi è disabilitato. Deve fare re-init del
-  `core` + clear RAM/VRAM. Il commento nel codice cita "PR5: re-init core + clear
-  RAM/VRAM" ma non era nello scope ufficiale di PR5.
-- **Step Over** (pannello CPU) — attualmente alias di Step. Per uno step-over
-  vero serve `disasm_one` che restituisca la lunghezza dell'istruzione corrente,
-  così da settare un breakpoint temporaneo a `PC + len` quando si è su
-  `CALL` / `RST`.
+- **Reset button** — **fatto** (commit `c3173df`). `reset()` è esposto da
+  `core`, `cpu`, `mmu`, `ppu`, `apu`, `timer`, `mbc` e `debugger`; chiamato dal
+  pulsante Reset del pannello CPU, da `Emulation → Reset` e dalla hotkey
+  `Ctrl+R`. Su reset MBC corrente, RAM/VRAM/OAM/HRAM, registri PPU e flag CPU
+  tornano allo stato post-BIOS (o zero quando il BIOS è caricato).
+- **Step Over** — **fatto** (`debugger::step_over()` in `src/debugger.cpp:36`).
+  Usa `disasm_one` per ottenere la lunghezza dell'istruzione e imposta una
+  `stop_condition{pc_eq, PC+len}` con cap a 1M T-cycle quando l'opcode è
+  `CALL` (incl. cc: `$CD`/`$C4`/`$CC`/`$D4`/`$DC`) o `RST` (`(op & 0xC7) ==
+  0xC7`). Per tutto il resto (HALT, JR, JP, RET) si riduce a un singolo
+  `step()`. Wired al pulsante "Step Over" del pannello CPU (`src/ui.cpp:415`).
 
 ---
 
@@ -30,6 +34,8 @@ mmio + flag `bios_accessible`), `cpu` (flag `halted`/`stopped`/`halt_bug`/
 (framebuffer, `dot_counter`, contatori interni), `irq` e lo stato dell'MBC
 corrente (current ROM/RAM bank, RAM-enable, mode bit). Formato: blob binario
 versionato (`magic + version + sezioni`). Slot multipli + hotkey F5/F9.
+
+Rispettare la specifica BESS: https://github.com/LIJI32/SameBoy/blob/master/BESS.md
 
 ---
 
@@ -139,31 +145,37 @@ selezionare fino a bank 511. UI / debugger `dump mbc` già castano a
 Giochi come Zelda: Link's Awakening (MBC1+RAM+BATTERY, type `0x03`), Pokémon
 (MBC3+RAM+BATTERY+RTC) e in generale tutti i titoli con salvataggio interno
 scrivono il progresso in RAM esterna mantenuta da una batteria sulla cartuccia.
-Oggi `src/mbc.cpp:207-219` distingue già nei commenti i tipi BATTERY (0x03,
-0x09) ma la RAM è solo allocata in memoria e muore al process exit.
+Oggi `src/mbc.cpp` distingue già nei commenti i tipi BATTERY (0x03, 0x06, 0x09,
+0x0F, 0x10, 0x13, 0x1B, 0x1E) ma la RAM è solo allocata in memoria e muore al
+process exit.
 
 **Cosa serve:**
 
-- Rilevamento header: tipi battery-backed da gestire sono `0x03`, `0x06`,
-  `0x09`, `0x0F`, `0x10`, `0x13`, `0x1B`, `0x1E` (alcuni dipendono da MBC
-  ancora da implementare in sezione 5 — si avanza in parallelo).
+- Rilevamento header: tipi battery-backed sono `0x03`, `0x06`, `0x09`, `0x0F`,
+  `0x10`, `0x13`, `0x1B`, `0x1E`. Tutti gli MBC necessari (MBC1/2/3/5) sono già
+  implementati — vedi §5.
 - API sull'`mbc`: `ram_load(span<const uint8_t>)`, `ram_data() const`,
   `ram_dirty() const` (flag settato da ogni write a `$A000-$BFFF`),
   `ram_clear_dirty()`. Già virtuali sulla base in modo che no_mbc/mbc1/…
   possano fare override.
-- All'avvio (`core::load(rom_file)`): se l'MBC è battery, cercare
-  `<rom_path>.sav` accanto al ROM e caricarlo via `ram_load`. Dimensione
-  attesa = quella decodificata da `ram_size_code`; mismatch → log warning +
-  ignore.
+- All'avvio (`core::load(rom_file)`): se l'MBC è battery, cercare il file
+  `.sav` sotto `<base>/savs/` e caricarlo via `ram_load`. Dimensione attesa =
+  quella decodificata da `ram_size_code`; mismatch → log warning + ignore.
 - Persistenza: flush a chiusura applicazione (sempre) + flush periodico
   (~2 s se `ram_dirty`) per sopravvivere ai crash. Scrittura atomica
   (`.sav.tmp` + rename).
-- Path: di default accanto al ROM (`zelda.gb` → `zelda.sav`); opzionale
-  override via `cfg/gbemu.conf` (`save.directory`).
+- Path: lo schema è già definito dal **portable layout**
+  (`<base>/savs/<fnv1a>.sav` — vedi `CLAUDE.md` § Portable layout). La
+  chiave FNV1a sull'intero ROM rende il salvataggio rename-stable
+  (rinominare `zelda.gb` non rompe il `.sav`). `paths::resolve_data_path` +
+  `cfg.paths.savs_dir` sono già pronti — basta agganciare il caricamento /
+  flush nel ciclo di vita di `core::load`.
 
 **Formato**: `.sav` = dump raw della SRAM, byte-per-byte. Compatibile con
-BGB, mGBA, SameBoy, VBA-M, ecc. — il giocatore può portarsi il salvataggio
-fra emulatori.
+BGB, mGBA, SameBoy, VBA-M, ecc. dal punto di vista del *contenuto*; il
+*nome file* è specifico (FNV1a invece di `<basename>.sav`), quindi
+l'import/export richiede un rename manuale. Decisione consapevole — il
+rename-stable degli FNV1a vale la perdita di drop-in compatibility.
 
 **RTC (MBC3)**: addendum opzionale, file `.rtc` separato (base time + ultimi
 valori dei registri RTC). Molti emulatori non lo fanno e la RTC riparte da
@@ -346,70 +358,68 @@ Tutto da fare; vanno fatti in quest'ordine perché ognuno dipende dal precedente
 
 ---
 
-## 11. Menù bar funzionale
+## 11. Menù bar funzionale — **scaffolding fatto, voci §2/§3 ancora da popolare**
 
-Oggi `src/ui.cpp` (`draw_main_dockspace`, ~riga 167) ha una sola voce **View**
-che toggla i pannelli ImGui + Reset layout. Mancano tutte le entry "da
-emulatore": caricamento ROM, controllo emulazione, slot di salvataggio, info.
+Stato attuale (commit `b756075` + `c3173df` + `40eb54f`): menu bar a quattro voci
+in `src/ui.cpp` (`draw_menu_bar`), hotkey nel main loop di `Application::run`,
+boundary UI→host via `ui::host_actions` (drained ogni frame dopo
+`SDL_RenderPresent`).
 
-**Struttura proposta** (in ordine, da sinistra a destra):
+**Fatto:**
 
 - **File**
-  - `Load ROM…` — apre file dialog nativo (Windows: `GetOpenFileNameW`;
-    portabile: `nfd` / `tinyfiledialogs` da aggiungere a `vcpkg.json`).
-    Filtro `*.gb;*.gbc`. Selezione → ricostruzione del `core` con la nuova
-    ROM (oggi il path è fisso in `cfg/gbemu.conf`, va spezzato il vincolo:
-    `core` deve poter essere ri-inizializzato a runtime — interagisce con
-    il `Reset` button della sezione 1).
-  - `Recent ROMs ▸` — submenu con gli ultimi N (8?) ROM caricati. Persistenza
-    in un file accanto a `imgui.ini` (es. `gbemu_recent.txt`, una riga per
-    path); aggiornato dopo ogni `Load ROM`. Voce `Clear list` in fondo.
-  - `Exit` — `SDL_PushEvent(SDL_QUIT)`. Hotkey `Alt+F4` resta nativo.
+  - `Load ROM…` (`Ctrl+O`) — apre `GetOpenFileNameW` nativo Windows,
+    parented alla SDL window. Filtro `*.gb;*.gbc`. Selezione → propaga
+    `host_actions::pending_rom_load`; Application fa `core.load(rf);
+    core.reset();` e `ui::add_recent_rom(...)`. Niente dipendenza
+    `nfd`/`tinyfiledialogs` (Windows-only finché non serve Linux/macOS
+    in §10).
+  - `Recent ROMs ▸` — MRU a 8 entry, persistita in `gbemu_recent.txt`
+    accanto a `imgui.ini` (una riga per path). Submenu disabled +
+    "(none)" quando la lista è vuota. Voce `Clear list` in fondo.
+  - `Exit` — push `SDL_QUIT` via `host_actions::quit_requested`.
 
 - **Emulation**
-  - `Start` / `Pause` — toggle che riusa `debugger::pause()` /
-    `debugger::resume()` (oggi guidati dai pulsanti del pannello CPU).
-    Hotkey `F5` o `Space` (configurabile).
-  - `Reset` — re-init `core` + clear RAM/VRAM. Stessa azione del Reset
-    button (sezione 1) — le due UI devono chiamare la *stessa* funzione,
-    non duplicarla. Hotkey `Ctrl+R`.
-  - `Speed ▸` — sub-menu con radio entries `0.25x` / `0.5x` / `1.0x` /
-    `1.5x` / `2.0x` / `4.0x`. Indicatore corrente in titlebar. Dipende
-    dalla sezione 3 (moltiplicatore di velocità).
-  - `Save State ▸` / `Load State ▸` — sub-menu con slot `0..9`.
-    Dipende dalla sezione 2 (save & load state). Hotkey `F5` (save) /
-    `F9` (load) sullo slot corrente; `Shift+0..9` per cambiare slot.
-    Le voci del menu mostrano timestamp / "empty" per ogni slot.
-  - `Toggle Fullscreen` — `SDL_SetWindowFullscreen` con
-    `SDL_WINDOW_FULLSCREEN_DESKTOP`. Hotkey `F11`.
+  - `Resume`/`Pause` (`Space`) — toggle su `debugger::pause()` /
+    `debugger::resume()`. Gated su `has_rom(c)` (`mmu.cart() != nullptr`)
+    — senza cartuccia il MMU restituisce open-bus, "Run" eseguirebbe
+    solo 0xFF (RST 38h).
+  - `Reset` (`Ctrl+R`) — `debugger::reset()` → `core::reset()` (vedi §1).
+    Gated su `has_rom(c)`.
+  - `Speed ▸` — submenu **disabled** (placeholder, attende §3).
+  - `Save State ▸` / `Load State ▸` — submenu **disabled** (attendono §2).
+  - `Toggle Fullscreen` (`F11`) — `SDL_SetWindowFullscreen` con
+    `SDL_WINDOW_FULLSCREEN_DESKTOP`, checkmark sullo stato corrente.
+
+- **View** — toggle per i 9 pannelli (Display, CPU, Disassembly, Memory,
+  Breakpoints, PPU, MBC, Serial, PC ring) + `Reset layout`. Era già in
+  piedi.
 
 - **About**
-  - `About GbEmu…` — popup modale con nome, versione (dalla sezione 10),
-    repo URL, build date, copyright. Pulsante `OK` + `Copy version info`
-    che mette in clipboard una stringa diagnostica
-    (`gbemu vX.Y.Z, SDL2 a.b.c, ImGui d.e.f, ...`) utile per le bug
-    report.
+  - `About GbEmu…` — popup modale con nome ("GbEmu"), tagline ("Game Boy
+    emulator"), versione hardcoded `0.1.0-dev`, build timestamp
+    (`__DATE__ __TIME__`), versione runtime SDL2 e ImGui. Pulsante
+    `Copy version info` (clipboard stringa diagnostica) + `OK`. Pattern
+    "request flag → OpenPopup nel frame" per non finire in conflitto con
+    lo scope del DockSpace.
 
-**Considerazioni implementative:**
+**Cosa resta:**
 
-- Le hotkey vivono nello stesso punto in cui oggi è gestito F12 (interactive
-  toggle): `Application::run` event loop. ImGui captura i tasti quando un
-  text field ha focus — la branch va dopo `process_event` returning false.
-- `Recent ROMs` e `Save State` slot list vanno costruiti dinamicamente in
-  `BeginMenu` con `ImGui::MenuItem(label.c_str(), shortcut, false, enabled)`
-  — il flag `enabled = false` per slot vuoti rende il menu auto-esplicativo.
-- File dialog **non** può girare in fase di render ImGui se il dialog è
-  modale-bloccante (rischia di starvare il loop e la GPU). Pattern:
-  settare un flag (`c.load_rom_requested = true`), aprire il dialog
-  fuori dal blocco `NewFrame / Render`, all'inizio del frame successivo.
-- Tutte le voci che dipendono da feature non ancora implementate (Speed,
-  Save State) vanno mostrate `disabled` finché la rispettiva sezione è
-  chiusa — meglio che farle sparire (l'utente non capisce dove sono).
+- Popolare `Speed ▸` con le radio entries (`0.25x`…`4.0x`) — dipende §3.
+- Popolare `Save State ▸` / `Load State ▸` con slot 0..9 + timestamp /
+  "empty" — dipende §2. Hotkey suggerite: `F5` save / `F9` load sullo
+  slot corrente; `Shift+0..9` per cambiare slot.
+- Versione hardcoded `0.1.0-dev`: va sostituita con un define generato
+  dal CMake (dipende §10 versioning).
 
-**Dipendenze**: sezione 1 (Reset), sezione 2 (save state), sezione 3
-(speed). Lo scaffolding del menu si può fare prima — voci stub disabled
-+ Load ROM + Exit + About — e popolare il resto man mano che le feature
-sottostanti atterrano.
+**Note implementative (per non perdere il pattern):**
+
+- File dialog **non** può girare dentro `NewFrame/Render`: si setta
+  `host_actions::load_rom_dialog_requested`, Application lo apre dopo
+  `SDL_RenderPresent`. Pattern simmetrico per `pending_rom_load`.
+- Le hotkey nel main loop sono gated su `!imgui_captured` (restituito da
+  `ui::process_event`) per non triggerare quando un text field ImGui ha
+  focus.
 
 ---
 
@@ -608,10 +618,89 @@ dedicati). Va chiuso prima di queste tre.
 
 ---
 
+## 14. Cartella `user/` per i file di sessione
+
+Oggi i file di stato della sessione vivono sparsi nel **CWD** del processo
+(non sotto la base portable):
+
+- `gbemu_window.state` — `src/app.cpp:45` (`WINDOW_STATE_FILE`), aperto come
+  bare filename → finisce in `build/src/` quando si lancia da lì.
+- `gbemu_recent.txt` — `src/ui.cpp:47` (`RECENT_ROMS_FILE`), stessa storia.
+- `imgui.ini` — default di ImGui, sempre relativo al CWD.
+- Palette attiva (`feature/palette`) — `ui::context.active_palette_name` non è
+  ancora persistita; quando lo sarà, va nello stesso posto.
+
+Conseguenza: cambiando CWD si "perdono" finestre, recents, layout, palette.
+Non è coerente col portable layout di `cfg/`, `bios/`, `roms/`, `savs/`,
+`sslots/`, `palettes/` che invece risolvono via
+`gbemu::paths::resolve_base_dir()`.
+
+**Cosa serve:**
+
+- Aggiungere `cfg.paths.user_dir` con default `"user"` (in `inc/cfg.h` e
+  `src/cfg.cpp`), creato da CMake accanto agli altri (`MAKE_DIRECTORY`).
+- Helper `paths::user_file(base, cfg, name)` che restituisce
+  `<base>/<user_dir>/<name>` (riusa `resolve_data_path`).
+
+**Un solo `user/user.conf` invece di N parser**: tutto quello che è
+serializzabile come chiave/valore (o lista di stringhe) finisce in un
+unico file libconfig — riusa lo stesso `Config` / `Setting` machinery già
+in piedi per `cfg/gbemu.conf`. Schema iniziale:
+
+```
+window:
+{
+  width = 1280;
+  height = 720;
+  x = 100;
+  y = 100;
+  maximized = false;
+};
+
+recent_roms = ( "C:/roms/zelda.gb", "C:/roms/pokemon_red.gb", ... );
+
+display:
+{
+  active_palette = "dmg-green";
+};
+```
+
+- API: `user_state` class in `inc/user_state.h` / `src/user_state.cpp`
+  con `load(path)`, `save(path)`, getter/setter tipati. Save atomico
+  (`.tmp` + rename), salvataggio on-change o a chiusura.
+- Migrare i siti d'uso:
+  - `src/app.cpp`: blocco `gbemu_window.state` → `user_state.window_*`.
+  - `src/ui.cpp`: load/save di `gbemu_recent.txt` → `user_state.recent_roms`.
+  - Palette attiva: `user_state.active_palette` — niente nuovo file.
+- File futuri (§12 Player/Debugger UI split): aggiungere
+  `window_player`/`window_debugger` come sub-block, **non** nuovi file.
+
+**Eccezione: `imgui.ini`**. Formato proprietario di ImGui, lo gestisce lui;
+non si può fondere in `user.conf`. Va però spostato sotto `user/` settando
+`ImGui::GetIO().IniFilename` a una stringa owned (path assoluto risolto
+via `paths::user_file`). Nello split §12: `user/imgui_player.ini` /
+`user/imgui_debug.ini`.
+
+**Migrazione**: rottura compat accettata (è v0.x). Niente fallback / move
+automatico — chi aveva i file in CWD li ricrea al primo avvio. Documentare
+in `CLAUDE.md` § Portable layout aggiungendo `user/` alla lista delle
+sotto-directory.
+
+**Distinzione da `cfg/`**: `cfg/gbemu.conf` è la **configurazione** editata
+dall'utente (preferenze esplicite). `user/` è **stato di sessione**
+generato e gestito dall'app (window pose, MRU, dock layout, ultima palette
+selezionata). Tenerli separati evita di mescolare "cose che l'utente edita"
+con "cose che l'app riscrive in continuazione".
+
+---
+
 ## Note tecniche permanenti
 
-- `cfg/gbemu.conf` shipped ha path **assoluti** Windows per ROM e BIOS — va
-  reso relativo prima del packaging.
+- **Path config**: `cfg/gbemu.conf` non ha più path assoluti — il portable
+  layout (`<base>/{cfg,bios,roms,savs,sslots}/`) è in piedi via
+  `gbemu::paths::resolve_base_dir()` + `resolve_data_path()` (commit
+  `ab7bb97`). Le quattro sub-directory sono user-overridable in
+  `cfg.paths.{bios,roms,savs,sslots}_dir`.
 - `CMakeUserPresets.json` pinna `VCPKG_ROOT` locale: tenere fuori dai workflow
   cross-machine (già menzionato in `CLAUDE.md`).
 - `inc/opcodes.hpp` è generato — modificare solo `scripts/gen_ops.py` o

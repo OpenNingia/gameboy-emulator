@@ -6,6 +6,7 @@
 
 namespace gbemu {
     struct core;
+    struct config;
     struct debugger;
     namespace gfx {
         struct backend;
@@ -70,5 +71,18 @@ namespace gbemu::ui {
     // persist to gbemu_recent.txt next to imgui.ini.  Called by Application
     // after a successful ROM load.
     void add_recent_rom(context* ctx, const std::string& path);
+
+    // Install the built-in palettes, scan `palettes_dir` for user *.sbp
+    // files, then apply `cfg.display.frame_blending` and `cfg.display.palette`
+    // to the live blender and PPU resolver.  Unknown palette names fall
+    // back to "grey" with a log warning.  Called by Application once after
+    // ui::init.
+    void apply_display_config(context* ctx, const config& cfg, const std::string& palettes_dir);
+
+    // Clear the frame blender's history so the next frame shown is not
+    // mixed with anything from the prior session.  Called from Application
+    // after `core::reset()` (Ctrl+R or ROM hot-swap) so a freshly started
+    // ROM doesn't ghost the prior image for a few frames.
+    void reset_display_post(context* ctx);
 
 } // namespace gbemu::ui

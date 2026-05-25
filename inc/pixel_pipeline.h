@@ -27,9 +27,18 @@ namespace gbemu {
     // entrypoint means the BG / window / OBJ scanline code does not have to
     // change to support CGB.
     //
-    // Holds only an mmu reference; constructing one is free.
+    // The 4-shade table itself is swappable at runtime via `set_palette` so
+    // the user can pick between built-in palettes (grey / SameBoy DMG / MGB
+    // / GBL) and user-loaded *.sbp files without touching the PPU. Default
+    // points at `gb::DMG_PALETTE_ARGB` (classic four-shade grey) so the
+    // resolver behaves exactly like before until `set_palette` is called.
+    //
+    // Holds only an mmu reference + a palette pointer; constructing one is
+    // free.
     struct palette_resolver {
         explicit palette_resolver(const mmu& m) : mmu_(m) {}
+
+        void set_palette(const std::array<std::uint32_t, 4>& p) { active_palette_ = &p; }
 
         std::uint32_t resolve(palette_id id, std::uint8_t color_index) const {
             std::uint8_t reg = 0;
@@ -45,11 +54,12 @@ namespace gbemu {
                     break;
             }
             const std::uint8_t shade = static_cast<std::uint8_t>((reg >> (color_index * 2)) & 0x03);
-            return gb::DMG_PALETTE_ARGB[shade];
+            return (*active_palette_)[shade];
         }
 
     private:
         const mmu& mmu_;
+        const std::array<std::uint32_t, 4>* active_palette_ = &gb::DMG_PALETTE_ARGB;
     };
 
     // Decode one 2bpp planar tile pixel: returns the 2-bit color index (0..3)

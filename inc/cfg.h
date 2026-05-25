@@ -22,6 +22,18 @@ namespace gbemu {
             std::string roms_dir{"roms"};
             std::string savs_dir{"savs"};
             std::string sslots_dir{"sslots"};
+            std::string palettes_dir{"palettes"};
         } paths;
+
+        // Display post-processing: frame blending (LCD response simulation)
+        // and palette swap. Both apply only in interactive mode — the
+        // headless script runner never consumes frames. `palette` resolves
+        // against the built-in registry (`grey` / `dmg` / `mgb` / `gbl`)
+        // first, then against user-loaded .sbp files under
+        // <base>/<paths.palettes_dir>; unknown names fall back to `grey`.
+        struct displaycfg {
+            std::string frame_blending{"accurate"}; // "disabled" | "simple" | "accurate"
+            std::string palette{"dmg"};             // built-in name or user .sbp stem
+        } display;
     };
 } // namespace gbemu
