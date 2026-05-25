@@ -152,10 +152,24 @@ namespace gbemu {
         // cartridge (ROM + external RAM); owns its own bytes and handles
         // banking.  Installed by core::load(rom_file&) via attach_cartridge.
         std::unique_ptr<mbc> cart_{};
-        // gpu vram 0x8000 -> 0x9FFF
-        ram_t<0x2000> vram_{};
-        // working ram 0xC000 -> 0xDFFF (mirrored at 0xE000 -> 0xFDFF)
-        ram_t<0x2000> wram_{};
+        // gpu vram $8000-$9FFF.  Two banks: DMG sees only bank 0; CGB selects
+        // between banks 0 and 1 via VBK ($FF4F).  Bank 1 carries BG/window
+        // tile-map attribute bytes and (optionally) tile pixel data.
+        std::array<ram_t<0x2000>, 2> vram_{};
+        // working ram $C000-$DFFF (mirrored at $E000-$FDFF).  DMG sees a flat
+        // 8 KB (banks 0 and 1 here); CGB keeps bank 0 fixed at $C000-$CFFF
+        // and selects bank 1-7 at $D000-$DFFF via SVBK ($FF70).
+        std::array<ram_t<0x1000>, 8> wram_{};
+        // VBK ($FF4F) latch — current VRAM bank for CPU accesses to
+        // $8000-$9FFF.  Always 0 on DMG (no handler updates it); on CGB the
+        // VBK write handler (step 3) flips it between 0 and 1.
+        std::uint8_t vram_bank_{0};
+        // SVBK ($FF70) latch — current WRAM bank for CPU accesses to
+        // $D000-$DFFF (and the corresponding echo-RAM window).  Defaults to
+        // 1 because SVBK=0 maps to bank 1 in hardware; on DMG no handler
+        // updates this so it stays at 1, giving the same flat layout the
+        // single-bank implementation had.
+        std::uint8_t wram_bank_{1};
         // sprite ram (OAM) 0xFE00 -> 0xFE9F
         ram_t<0x00A0> oam_{};
         // memory-mapped I/O region 0xFF00 -> 0xFF7F

@@ -48,29 +48,33 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
         case 0x7000:
             return cart_ ? cart_->read(addr) : gb::OPEN_BUS;
 
-            // gpu vram
+            // gpu vram — bank is the VBK latch on CGB, always 0 on DMG.
         case 0x8000:
         case 0x9000:
-            return vram_[addr - gb::VRAM_BASE];
+            return vram_[vram_bank_][addr - gb::VRAM_BASE];
 
             // cartridge external ram
         case 0xA000:
         case 0xB000:
             return cart_ ? cart_->read(addr) : gb::OPEN_BUS;
 
-            // working ram
+            // working ram — $C000-$CFFF is the fixed bank-0 window, $D000-$DFFF
+            // is the SVBK-selected bank (1-7 on CGB; stays at 1 on DMG so the
+            // dispatch reproduces the flat 8 KB layout).
         case 0xC000:
+            return wram_[0][addr - gb::WRAM_BASE];
         case 0xD000:
-            return wram_[addr - gb::WRAM_BASE];
+            return wram_[wram_bank_][addr - 0xD000];
 
-            // echo ram
+            // echo ram — mirrors WRAM with the same bank-0 / SVBK split:
+            // $E000-$EFFF aliases $C000-$CFFF, $F000-$FDFF aliases $D000-$FDDF.
         case 0xE000:
-            return wram_[addr - gb::ECHO_BASE];
+            return wram_[0][addr - gb::ECHO_BASE];
 
         case 0xF000:
-            // echo ram
+            // echo ram (upper half — banked window)
             if (addr < gb::OAM_BASE)
-                return wram_[addr - gb::ECHO_BASE];
+                return wram_[wram_bank_][addr - 0xF000];
             // sprite ram
             if (addr < gb::OAM_BASE + gb::OAM_TOTAL_BYTES)
                 return oam_[addr - gb::OAM_BASE];
@@ -115,10 +119,10 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
                 cart_->write(addr, val);
             break;
 
-            // gpu vram
+            // gpu vram — bank is the VBK latch on CGB, always 0 on DMG.
         case 0x8000:
         case 0x9000:
-            vram_[addr - gb::VRAM_BASE] = val;
+            vram_[vram_bank_][addr - gb::VRAM_BASE] = val;
             break;
 
             // cartridge external ram
@@ -128,21 +132,23 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
                 cart_->write(addr, val);
             break;
 
-            // working ram
+            // working ram — see read_u8 for the bank split.
         case 0xC000:
+            wram_[0][addr - gb::WRAM_BASE] = val;
+            break;
         case 0xD000:
-            wram_[addr - gb::WRAM_BASE] = val;
+            wram_[wram_bank_][addr - 0xD000] = val;
             break;
 
-            // echo ram
+            // echo ram (mirrors WRAM with the same bank split)
         case 0xE000:
-            wram_[addr - gb::ECHO_BASE] = val;
+            wram_[0][addr - gb::ECHO_BASE] = val;
             break;
 
         case 0xF000:
-            // echo ram
+            // echo ram (upper half — banked window)
             if (addr < gb::OAM_BASE)
-                wram_[addr - gb::ECHO_BASE] = val;
+                wram_[wram_bank_][addr - 0xF000] = val;
             // sprite ram
             else if (addr < gb::OAM_BASE + gb::OAM_TOTAL_BYTES)
                 oam_[addr - gb::OAM_BASE] = val;
@@ -169,16 +175,16 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
     }
 }
 
-std::uint8_t gbemu::mmu::vram_read(std::uint16_t off, std::uint8_t /*bank*/) const {
-    return vram_[off];
+std::uint8_t gbemu::mmu::vram_read(std::uint16_t off, std::uint8_t bank) const {
+    return vram_[bank][off];
 }
 
-void gbemu::mmu::vram_write(std::uint16_t off, std::uint8_t val, std::uint8_t /*bank*/) {
-    vram_[off] = val;
+void gbemu::mmu::vram_write(std::uint16_t off, std::uint8_t val, std::uint8_t bank) {
+    vram_[bank][off] = val;
 }
 
-std::span<const std::uint8_t> gbemu::mmu::vram_bank(std::uint8_t /*bank*/) const {
-    return {vram_.data(), vram_.size()};
+std::span<const std::uint8_t> gbemu::mmu::vram_bank(std::uint8_t bank) const {
+    return {vram_[bank].data(), vram_[bank].size()};
 }
 
 std::uint8_t gbemu::mmu::oam_read(std::uint8_t off) const {
@@ -209,8 +215,12 @@ void gbemu::mmu::load_bios(std::span<const std::uint8_t> data) {
 }
 
 void gbemu::mmu::reset() {
-    vram_.fill(0);
-    wram_.fill(0);
+    for (auto& b : vram_)
+        b.fill(0);
+    for (auto& b : wram_)
+        b.fill(0);
+    vram_bank_ = 0;
+    wram_bank_ = 1;
     oam_.fill(0);
     mmio_.fill(0);
     hram_.fill(0);
