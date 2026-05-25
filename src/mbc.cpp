@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstddef>
 #include <utility>
 
@@ -314,17 +315,23 @@ namespace gbemu {
         // - 0x4000-0x5FFF write: 0x00-0x03 selects a RAM bank;
         //   0x08-0x0C selects an RTC register (S/M/H/DL/DH) visible at
         //   0xA000-0xBFFF.
-        // - 0x6000-0x7FFF write: latch clock data.  A 0 followed by a 1
-        //   latches the current RTC values into the read-back registers.
-        //   We track the transition but the RTC itself is a stub.
+        // - 0x6000-0x7FFF write: latch clock data.  A 0 → 1 sequence
+        //   latches the current live RTC values into the read-back
+        //   shadow.  Reads of the RTC registers via $A000-$BFFF always
+        //   return the latched shadow, never the live state.
         // - 0xA000-0xBFFF: external RAM bank or latched RTC register,
         //   depending on the current select.  Gated by `ram_enabled_`.
         //
-        // RTC support is intentionally a stub: registers read back 0,
-        // writes are ignored, no time-keeping is performed.  Pokémon
-        // Red/Blue (type 0x13) has no RTC; Pokémon Gold/Crystal (types
-        // 0x10) tolerate a frozen clock — the day/night cycle simply
-        // doesn't advance.
+        // RTC implementation: anchored to the host's std::chrono real
+        // time.  rtc_total_secs_ accumulates while not halted; catch_up()
+        // adds (now - last_real_unix_) into it on every read/write.  The
+        // 9-bit day counter wraps mod 512, with a sticky carry bit
+        // (DH.7) set on overflow and cleared only by a DH register
+        // write.  Halt (DH.6) freezes the accumulation.
+        //
+        // Pokémon Gold/Silver/Crystal exercise this for the day-night
+        // cycle; without a real clock the world stays in whatever phase
+        // was active at the last meaningful in-game checkpoint.
         // ----------------------------------------------------------------
         class mbc3 final : public mbc {
         public:
@@ -333,7 +340,9 @@ namespace gbemu {
                   ram_(ram_bytes, 0u),
                   rom_bank_mask_(rom_bank_mask_for_u16(rom_.size())),
                   type_(type),
-                  cgb_flag_(cgb_flag) {}
+                  cgb_flag_(cgb_flag) {
+                last_real_unix_ = now_unix();
+            }
 
             std::uint8_t read(std::uint16_t addr) const override {
                 if (addr < 0x4000) {
@@ -352,9 +361,21 @@ namespace gbemu {
                             return 0xFF;
                         return ram_[ram_offset(addr)];
                     }
-                    // RTC register 0x08-0x0C.  Stubbed: reads return 0.
-                    if (ram_rtc_select_ >= 0x08 && ram_rtc_select_ <= 0x0C)
-                        return 0x00;
+                    // RTC registers always read back the latched shadow,
+                    // never live state.  The shadow only updates on a
+                    // 0 → 1 sequence at $6000-$7FFF.
+                    switch (ram_rtc_select_) {
+                        case 0x08:
+                            return latched_s_;
+                        case 0x09:
+                            return latched_m_;
+                        case 0x0A:
+                            return latched_h_;
+                        case 0x0B:
+                            return latched_dl_;
+                        case 0x0C:
+                            return latched_dh_;
+                    }
                     return 0xFF;
                 }
                 return 0xFF;
@@ -371,16 +392,22 @@ namespace gbemu {
                 } else if (addr < 0x6000) {
                     ram_rtc_select_ = val;
                 } else if (addr < 0x8000) {
-                    // Latch clock data write — RTC is stubbed, so the 0->1
-                    // edge that would normally latch is a no-op here.
+                    // 0 → 1 sequence on the latch port copies the live RTC
+                    // into the readable shadow.  Any other transition
+                    // (0→0, 1→1, 1→0) just updates the edge detector.
+                    if (latch_prev_ == 0x00 && val == 0x01)
+                        latch_now();
+                    latch_prev_ = val;
                 } else if (addr >= 0xA000 && addr < 0xC000) {
                     if (!ram_enabled_)
                         return;
                     if (ram_rtc_select_ <= 0x03) {
                         if (!ram_.empty())
                             ram_[ram_offset(addr)] = val;
+                        return;
                     }
-                    // RTC register writes ignored (stub).
+                    if (ram_rtc_select_ >= 0x08 && ram_rtc_select_ <= 0x0C)
+                        write_rtc_reg(ram_rtc_select_, val);
                 }
             }
 
@@ -397,6 +424,13 @@ namespace gbemu {
                 rom_bank_ = 1;
                 ram_rtc_select_ = 0;
                 ram_enabled_ = false;
+                latch_prev_ = 0xFF;
+                // RTC state itself survives a soft reset: the host clock
+                // keeps ticking and the game's notion of "day count" is
+                // independent of the GB CPU's reset line.  Only the
+                // latched shadow is zeroed so the next read after reset
+                // returns a known value until the game latches again.
+                latched_s_ = latched_m_ = latched_h_ = latched_dl_ = latched_dh_ = 0;
             }
 
             std::uint8_t cgb_flag() const override { return cgb_flag_; }
@@ -414,6 +448,79 @@ namespace gbemu {
                 return bank * 0x2000 + (addr - 0xA000);
             }
 
+            // ---- RTC plumbing -------------------------------------------
+            static std::int64_t now_unix() {
+                using namespace std::chrono;
+                return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+            }
+
+            // Move accumulated real time into rtc_total_secs_ and reset the
+            // anchor.  No-op while halted (the anchor still slides forward
+            // so the next un-halt doesn't pick up the gap).
+            void catch_up() {
+                const auto now = now_unix();
+                if (!rtc_halted_)
+                    rtc_total_secs_ += (now - last_real_unix_);
+                last_real_unix_ = now;
+            }
+
+            // Break rtc_total_secs_ into S / M / H / DL / DH.  Sets the
+            // sticky day-carry on overflow past 511 days.
+            void decompose(std::uint8_t& s, std::uint8_t& m, std::uint8_t& h, std::uint8_t& dl, std::uint8_t& dh) {
+                catch_up();
+                std::int64_t secs = rtc_total_secs_;
+                if (secs < 0)
+                    secs = 0;
+                s = static_cast<std::uint8_t>(secs % 60);
+                std::int64_t mins = secs / 60;
+                m = static_cast<std::uint8_t>(mins % 60);
+                std::int64_t hours = mins / 60;
+                h = static_cast<std::uint8_t>(hours % 24);
+                std::int64_t days = hours / 24;
+                if (days > 511) {
+                    rtc_day_carry_ = true;
+                    days %= 512;
+                }
+                dl = static_cast<std::uint8_t>(days & 0xFF);
+                dh = static_cast<std::uint8_t>(((days >> 8) & 0x01) | (rtc_halted_ ? 0x40 : 0x00) |
+                                               (rtc_day_carry_ ? 0x80 : 0x00));
+            }
+
+            void latch_now() { decompose(latched_s_, latched_m_, latched_h_, latched_dl_, latched_dh_); }
+
+            void write_rtc_reg(std::uint8_t reg, std::uint8_t val) {
+                // Refresh the live decomposition first so we can patch a
+                // single field and recompose without losing the others.
+                std::uint8_t s, m, h, dl, dh;
+                decompose(s, m, h, dl, dh);
+                switch (reg) {
+                    case 0x08:
+                        s = static_cast<std::uint8_t>(val & 0x3F);
+                        break;
+                    case 0x09:
+                        m = static_cast<std::uint8_t>(val & 0x3F);
+                        break;
+                    case 0x0A:
+                        h = static_cast<std::uint8_t>(val & 0x1F);
+                        break;
+                    case 0x0B:
+                        dl = val;
+                        break;
+                    case 0x0C:
+                        dh = static_cast<std::uint8_t>(val & 0xC1);
+                        rtc_halted_ = (val & 0x40) != 0;
+                        rtc_day_carry_ = (val & 0x80) != 0;
+                        break;
+                    default:
+                        return;
+                }
+                const std::int64_t days = static_cast<std::int64_t>(dl) | (static_cast<std::int64_t>(dh & 0x01) << 8);
+                rtc_total_secs_ = static_cast<std::int64_t>(s) + static_cast<std::int64_t>(m) * 60 +
+                                  static_cast<std::int64_t>(h) * 3600 + days * 86400;
+                last_real_unix_ = now_unix();
+            }
+            // -------------------------------------------------------------
+
             std::vector<std::uint8_t> rom_;
             std::vector<std::uint8_t> ram_;
             std::uint8_t rom_bank_{1};
@@ -422,6 +529,25 @@ namespace gbemu {
             std::uint16_t rom_bank_mask_{0};
             std::uint8_t type_{0};
             std::uint8_t cgb_flag_{0};
+
+            // RTC live state.  catch_up() is only invoked from write paths
+            // (latch_now via the $6000-$7FFF port, write_rtc_reg via the
+            // RTC register slot at $A000-$BFFF), so these fields are
+            // plain non-const members — the latched shadow is what
+            // reads see.
+            std::int64_t rtc_total_secs_{0};
+            std::int64_t last_real_unix_{0};
+            bool rtc_day_carry_{false};
+            bool rtc_halted_{false};
+            // Latch port edge detector ($6000-$7FFF write history).
+            std::uint8_t latch_prev_{0xFF};
+            // Latched shadow — what reads through $A000-$BFFF (with the
+            // RTC register selected) return.
+            std::uint8_t latched_s_{0};
+            std::uint8_t latched_m_{0};
+            std::uint8_t latched_h_{0};
+            std::uint8_t latched_dl_{0};
+            std::uint8_t latched_dh_{0};
         };
 
         // ----------------------------------------------------------------
