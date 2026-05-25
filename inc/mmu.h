@@ -86,6 +86,13 @@ namespace gbemu {
         std::uint8_t oam_read(std::uint8_t off) const;
         void oam_write(std::uint8_t off, std::uint8_t val);
 
+        // CGB palette RAM (BG and OBJ sides). 8 palettes × 4 colors × 2 bytes
+        // each side = 64 bytes. Indexed via BCPS/OCPS bits 0-5 from the CPU
+        // side; the resolver_cgb path reads directly through these accessors.
+        // On DMG the storage stays zero and is unreachable from MMIO.
+        std::uint8_t cgb_bg_palette_byte(std::uint8_t idx) const { return bg_palette_ram_[idx & 0x3F]; }
+        std::uint8_t cgb_obj_palette_byte(std::uint8_t idx) const { return obj_palette_ram_[idx & 0x3F]; }
+
         // Direct I/O region access ($FF00-$FF7F) for chip-internal updates
         // that must not re-enter write_u8 — e.g. the timer's per-cycle DIV
         // increment, the joypad's P1/IF latch refresh, the APU's read-mask
@@ -186,6 +193,14 @@ namespace gbemu {
         std::uint8_t wram_bank_{1};
         // Cartridge-driven hardware-model selection — see set_cgb_mode().
         bool cgb_mode_{false};
+        // CGB palette RAM. 64 bytes per side = 8 palettes × 4 colors × 2
+        // bytes (15-bit BGR packed in the low 15 of 16). Accessed via
+        // BCPS/BCPD ($FF68/$FF69) for BG and OCPS/OCPD ($FF6A/$FF6B) for OBJ;
+        // both pairs share the same auto-increment-on-write semantics. Zero
+        // on power-up; unreachable on DMG (the MMIO routes return open-bus
+        // and the write handlers short-circuit on !cgb_mode_).
+        std::array<std::uint8_t, 64> bg_palette_ram_{};
+        std::array<std::uint8_t, 64> obj_palette_ram_{};
         // sprite ram (OAM) 0xFE00 -> 0xFE9F
         ram_t<0x00A0> oam_{};
         // memory-mapped I/O region 0xFF00 -> 0xFF7F

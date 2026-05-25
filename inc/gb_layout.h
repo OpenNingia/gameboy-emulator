@@ -211,6 +211,19 @@ namespace gb {
     }                                                   // namespace oam_attr
 
     // ------------------------------------------------------------------
+    // CGB BG attribute byte bits — the second-bank tile-map byte at
+    // (BG_MAP_x + tile_y * 32 + tile_x) when VBK=1. Bit layout is the
+    // same as oam_attr except bit 4 (DMG-only OBP select) is unused.
+    // ------------------------------------------------------------------
+    namespace bg_attr {
+        constexpr std::uint8_t cgb_palette_mask = 0x07; // bits 0-2: BG palette 0-7
+        constexpr std::uint8_t cgb_vram_bank = 0x08;    // bit 3: tile-data VRAM bank (0 or 1)
+        constexpr std::uint8_t x_flip = 0x20;           // bit 5
+        constexpr std::uint8_t y_flip = 0x40;           // bit 6
+        constexpr std::uint8_t priority = 0x80;         // bit 7 (1 = BG over OBJ — master)
+    }                                                   // namespace bg_attr
+
+    // ------------------------------------------------------------------
     // IF / IE ($FF0F / $FFFF) bits — same layout for both
     // ------------------------------------------------------------------
     namespace irq_bit {

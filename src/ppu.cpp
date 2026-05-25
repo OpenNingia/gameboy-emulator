@@ -138,6 +138,21 @@ namespace {
         return static_cast<std::uint16_t>(gb::TILE_DATA_SIGNED_BASE +
                                           static_cast<std::int8_t>(tile_index) * gb::TILE_BYTES + row * 2);
     }
+
+    // Decode the CGB BG attribute byte (VRAM bank 1, same map offset as the
+    // tile index byte in bank 0) into a pixel_attr. The five honored bits
+    // are bits 0-2 (palette 0-7 → cgb_bgN), bit 3 (tile-data VRAM bank),
+    // bit 5 (x-flip), bit 6 (y-flip), bit 7 (BG-over-OBJ priority).
+    inline gbemu::pixel_attr decode_bg_attr_byte(std::uint8_t b) {
+        return {
+            static_cast<gbemu::palette_id>(static_cast<std::uint8_t>(gbemu::palette_id::cgb_bg0) +
+                                           (b & gb::bg_attr::cgb_palette_mask)),
+            static_cast<std::uint8_t>((b & gb::bg_attr::cgb_vram_bank) ? 1 : 0),
+            (b & gb::bg_attr::priority) != 0,
+            (b & gb::bg_attr::x_flip) != 0,
+            (b & gb::bg_attr::y_flip) != 0,
+        };
+    }
 } // namespace
 
 void ppu::render_bg_scanline(std::uint8_t ly) {
@@ -170,11 +185,11 @@ void ppu::render_bg_scanline(std::uint8_t ly) {
             static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x);
         const std::uint8_t idx = mmu_.vram_read(map_off);
 
-        // DMG: every BG/window tile uses the same default attribute. CGB will
-        // read the attribute byte from the same map_off in VRAM bank 1 and
-        // decode bit 7 (priority), bit 6 (y-flip), bit 5 (x-flip), bit 3
-        // (tile-data bank), bits 0-2 (palette 0-7).
-        const pixel_attr attr = DMG_BG_ATTR;
+        // DMG: every BG/window tile uses the same default attribute. CGB:
+        // the attribute byte lives at the same map_off in VRAM bank 1 and
+        // carries palette (0-2), tile-data bank (3), x-flip (5), y-flip (6),
+        // BG-over-OBJ priority (7).
+        const pixel_attr attr = mmu_.cgb_mode() ? decode_bg_attr_byte(mmu_.vram_read(map_off, 1)) : DMG_BG_ATTR;
 
         const std::uint8_t row =
             attr.y_flip ? static_cast<std::uint8_t>(7 - (y & 7)) : static_cast<std::uint8_t>(y & 7);
@@ -227,7 +242,9 @@ void ppu::render_window_scanline(std::uint8_t ly) {
             static_cast<std::uint16_t>(map_base - gb::VRAM_BASE + tile_y * gb::TILES_PER_MAP_ROW + tile_x);
         const std::uint8_t idx = mmu_.vram_read(map_off);
 
-        const pixel_attr attr = DMG_BG_ATTR; // CGB: read attribute byte from bank 1 at map_off
+        // Same CGB attribute decode as render_bg_scanline (window shares the
+        // tile-map attribute layout in VRAM bank 1).
+        const pixel_attr attr = mmu_.cgb_mode() ? decode_bg_attr_byte(mmu_.vram_read(map_off, 1)) : DMG_BG_ATTR;
 
         const std::uint8_t row =
             attr.y_flip ? static_cast<std::uint8_t>(7 - (y & 7)) : static_cast<std::uint8_t>(y & 7);
