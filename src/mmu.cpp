@@ -72,6 +72,14 @@ void gbemu::mmu::add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn) {
     mmio_write_handlers_[gb::io_offset(addr)].push_back(std::move(fn));
 }
 
+void gbemu::mmu::add_mmio_read_handler(std::uint16_t addr, mmio_read_fn fn) {
+    mmio_read_handlers_[gb::io_offset(addr)].push_back(std::move(fn));
+}
+
+void gbemu::mmu::add_mmio_write_redirect(std::uint16_t addr, mmio_write_redirect_fn fn) {
+    mmio_write_redirects_[gb::io_offset(addr)].push_back(std::move(fn));
+}
+
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
     switch (addr & 0xF000) {
             // CGB BIOS overlay spans $0000-$08FF with a "hole" at
@@ -134,9 +142,16 @@ std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
             // black hole
             if (addr < gb::io::BASE)
                 return 0;
-            // memory mapped i/o (IF mask + CGB-only register masks)
-            if (addr < gb::HRAM_BASE)
-                return mmio_read_masked(addr);
+            // memory mapped i/o (IF mask + CGB-only register masks); chained
+            // read handlers can redirect the masked value (e.g. CGB CH3 wave
+            // RAM redirect lives in the APU).
+            if (addr < gb::HRAM_BASE) {
+                auto v = mmio_read_masked(addr);
+                for (auto const& fn : mmio_read_handlers_[gb::io_offset(addr)]) {
+                    v = fn(addr, v);
+                }
+                return v;
+            }
             // hram (zero-page)
             return hram_[addr - gb::HRAM_BASE];
         default:
@@ -270,11 +285,18 @@ void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
             // during normal execution, so throwing is wrong: drop the write.
             else if (addr < gb::io::BASE)
                 break;
-            // memory mapped i/o
+            // memory mapped i/o — write-redirect hooks may rewrite the
+            // destination offset before the store (e.g. CGB CH3 wave RAM
+            // redirects every $FF30-$FF3F write to the byte CH3 is currently
+            // fetching).  Handlers still fire on the redirected target.
             else if (addr < gb::HRAM_BASE) {
-                const auto off = gb::io_offset(addr);
-                mmio_[off] = val;
-                for (auto& fn : mmio_write_handlers_[off]) {
+                std::uint16_t target = addr;
+                for (auto const& rfn : mmio_write_redirects_[gb::io_offset(addr)]) {
+                    target = rfn(target);
+                }
+                const auto target_off = gb::io_offset(target);
+                mmio_[target_off] = val;
+                for (auto& fn : mmio_write_handlers_[target_off]) {
                     fn(val);
                 }
             }

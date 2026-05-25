@@ -124,8 +124,17 @@ namespace gbemu {
             bool channel_enabled{false};
             bool dac_enabled{false}; // NR30 bit 7 — explicit DAC bit
             std::int32_t freq_timer{8};
-            std::uint8_t wave_pos{0};      // 0..31
+            std::uint8_t wave_pos{0};      // 0..31 — index of NEXT nibble to fetch
             std::uint8_t sample_buffer{0}; // last fetched 4-bit nibble
+            // Byte just fetched (= wave_ram[(wave_pos - 1) >> 1] in steady
+            // state).  Tracked separately because the CGB read/write redirect
+            // for $FF30-$FF3F needs the byte the channel is currently
+            // accessing, which after the increment is at (wave_pos - 1) >> 1
+            // rather than wave_pos >> 1.  Pre-first-fetch this holds residual
+            // state (defaults to 0; cleared on CGB trigger alongside
+            // sample_buffer).
+            std::uint8_t current_sample_byte{0};
+            std::uint8_t current_sample_byte_idx{0};
 
             void load_nr30(std::uint8_t v);
             void load_nr31(std::uint8_t v);
@@ -138,7 +147,7 @@ namespace gbemu {
             // external avoids a back-pointer.
             void tick_frequency(std::uint32_t cycles, const std::uint8_t* wave_ram);
             void tick_length();
-            void trigger(bool next_step_clocks_length);
+            void trigger(bool next_step_clocks_length, bool cgb_mode);
             float sample() const;
         };
 

@@ -76,6 +76,26 @@ apu::apu(mmu& mmu) : mmu_(mmu) {
     for (std::uint16_t a = unused_tail_begin; a <= unused_tail_end; ++a) {
         mmu_.io_store(a, gb::OPEN_BUS);
     }
+    // Wave RAM read/write redirect — CGB only.  While CH3 is active every
+    // bus access to $FF30-$FF3F is redirected to the byte CH3 is currently
+    // fetching (wave_ram[wave_pos >> 1]) regardless of the addressed byte.
+    // The DMG blackout-window quirk (returns 0xFF / silently ignores writes
+    // outside the 2-T fetch window) is intentionally NOT modeled here —
+    // see TODO §8.  Blargg cgb_sound 09:01 / 12:0x exercise the CGB paths.
+    for (std::uint16_t a = gb::io::WAVE_RAM_BASE; a < gb::io::WAVE_RAM_END; ++a) {
+        mmu_.add_mmio_read_handler(a, [this](std::uint16_t /*addr*/, std::uint8_t current) -> std::uint8_t {
+            if (mmu_.cgb_mode() && ch3_.channel_enabled) {
+                return ch3_.current_sample_byte;
+            }
+            return current;
+        });
+        mmu_.add_mmio_write_redirect(a, [this](std::uint16_t addr) -> std::uint16_t {
+            if (mmu_.cgb_mode() && ch3_.channel_enabled) {
+                return static_cast<std::uint16_t>(gb::io::WAVE_RAM_BASE + ch3_.current_sample_byte_idx);
+            }
+            return addr;
+        });
+    }
     // Master mixer — NR50 (master volume / VIN), NR51 (channel pan).
     mmu_.add_mmio_write_handler(gb::io::NR50, [this](std::uint8_t v) { on_nr50(v); });
     mmu_.add_mmio_write_handler(gb::io::NR51, [this](std::uint8_t v) { on_nr51(v); });
@@ -296,9 +316,15 @@ void apu::wave_channel::tick_frequency(std::uint32_t cycles, const std::uint8_t*
         // Wave period is (2048 - freq) * 2 — half the square period because
         // CH3 advances one 4-bit sample per step, not one duty bit.
         freq_timer += (2048 - static_cast<std::int32_t>(freq_raw)) * 2;
+        // Fetch using the CURRENT wave_pos, THEN increment.  This makes byte 0
+        // get fetched twice per cycle (high nibble at wave_pos=0, low nibble
+        // at wave_pos=1) just like every other byte; the alternative
+        // increment-first ordering fetches byte 0 only once per cycle and
+        // produces a 4x asymmetry visible in Blargg cgb_sound 09.
+        current_sample_byte_idx = static_cast<std::uint8_t>(wave_pos >> 1);
+        current_sample_byte = wave_ram[current_sample_byte_idx];
+        sample_buffer = (wave_pos & 1) ? (current_sample_byte & 0x0F) : (current_sample_byte >> 4);
         wave_pos = (wave_pos + 1) & 0x1F;
-        const std::uint8_t byte = wave_ram[wave_pos >> 1];
-        sample_buffer = (wave_pos & 1) ? (byte & 0x0F) : (byte >> 4);
     }
 }
 
@@ -309,17 +335,33 @@ void apu::wave_channel::tick_length() {
     }
 }
 
-void apu::wave_channel::trigger(bool next_step_clocks_length) {
+void apu::wave_channel::trigger(bool next_step_clocks_length, bool cgb_mode) {
     channel_enabled = dac_enabled;
     if (length == 0) {
         length = 256;
         if (length_enabled && !next_step_clocks_length)
             --length;
     }
-    freq_timer = (2048 - static_cast<std::int32_t>(freq_raw)) * 2;
+    // First sample after trigger: the wave channel's frequency timer is
+    // loaded with a small fixed countdown (~6 T-cycles), not the full
+    // (2048 - freq) * 2 nibble period (SameBoy convention; matches the
+    // shape of Blargg cgb_sound 09's leading 4-read 0x00 group).  After
+    // the first fetch the timer reloads with the normal nibble period.
+    // We apply the short countdown on CGB only — DMG's wave-RAM access
+    // gating (TODO §8) interacts with trigger timing differently and
+    // changing it here would shift the passing dmg_sound tests.
+    freq_timer = cgb_mode ? 6 : (2048 - static_cast<std::int32_t>(freq_raw)) * 2;
     wave_pos = 0;
-    // sample_buffer intentionally NOT reset — matches DMG behavior where
-    // the first sample after a trigger is the previously buffered nibble.
+    // DMG: sample_buffer / current_sample_byte survive the trigger — the
+    // first sample after a trigger is the previously buffered nibble.
+    // CGB: both are cleared on trigger (Blargg cgb_sound 12:02 covers the
+    // sample_buffer side; clearing current_sample_byte keeps the wave-RAM
+    // read redirect symmetric).
+    if (cgb_mode) {
+        sample_buffer = 0;
+        current_sample_byte = 0;
+        current_sample_byte_idx = 0;
+    }
 }
 
 float apu::wave_channel::sample() const {
@@ -560,7 +602,7 @@ void apu::on_nr34(std::uint8_t v) {
     GATE(gb::io::NR34);
     const bool nclk = next_step_clocks_length();
     if (ch3_.load_nr34(v, nclk))
-        ch3_.trigger(nclk);
+        ch3_.trigger(nclk, mmu_.cgb_mode());
     apply_read_mask(gb::io::NR34, v);
 }
 

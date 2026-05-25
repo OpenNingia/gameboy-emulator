@@ -390,9 +390,10 @@ rewrite della pipeline.
 - `interrupt_time/interrupt_time.gb` ✅ (richiede CGB; passa ora che il branch `gbc` ha attivato il path CGB).
 - `dmg_sound` 09:01 / 10:01 / 12:01 ❌ — wave RAM access bug del CH3,
   indipendente dall'M-cycle, vedi §8.
-- `cgb_sound` 09:01 / 12:02 ❌ — quirk APU CGB-specifici residui (wave RAM
-  read mirroring, wave behavior su trigger). 08:01 e 11:04 chiusi dal
-  branch CGB-gate su `power_off` / `on_nrX1`. Dettaglio in §16.
+- `cgb_sound` 08:01 / 09:01 / 11:04 / 12:02 ✅ — chiusi dai branch CGB-gate
+  su `power_off`, dal redirect MMU $FF30-$FF3F installato dall'APU e dal
+  ramo CGB di `wave_channel::trigger`. Dettaglio in §16. I sotto-test `:02+`
+  di altri gruppi `cgb_sound` non sono ancora stati ispezionati.
 
 ---
 
@@ -801,7 +802,7 @@ di modalità (il decadimento naturale assorbe il salto di α senza pop).
 
 ---
 
-## 16. CGB APU quirks — `cgb_sound` 09:01 / 12:02 (08:01 / 11:04 fatti)
+## 16. CGB APU quirks — **fatto** (08:01 / 09:01 / 11:04 / 12:02 chiusi sul ramo `:01`)
 
 Sul branch `gbc` il bring-up CGB ha lasciato l'APU come copia 1:1 della DMG.
 Blargg `cgb_sound` esercita quattro divergenze hardware DMG → CGB che oggi non
@@ -817,27 +818,26 @@ PPU/HDMA): la knob esiste, manca solo applicarla nei posti giusti dentro
   reinietta i quattro `length` solo nel ramo DMG; su CGB cadono a zero con
   il resto dello stato di canale.
 
-**09-wave_read_while_on:01 — wave RAM read while CH3 active**
+**09-wave_read_while_on:01 / 12-wave_write_while_on — accesso wave RAM con CH3 attivo — fatto**
 
-- Su DMG la read di `$FF30-$FF3F` mentre CH3 è on restituisce `0xFF` salvo
-  durante la finestra di 2 T-cycle del prossimo fetch CH3 (cfr. §8 per la
-  versione DMG, ancora aperta).
-- Su CGB la read **redirige sempre** al byte che CH3 sta correntemente
-  leggendo, cioè `wave_ram[wave_pos >> 1]`, indipendentemente dall'indirizzo
+- Su DMG la read/write di `$FF30-$FF3F` mentre CH3 è on restituisce/scrive
+  fuori target salvo durante la finestra di 2 T-cycle del prossimo fetch CH3
+  (cfr. §8 per la versione DMG, ancora aperta).
+- Su CGB l'accesso **redirige sempre** al byte che CH3 sta correntemente
+  fetchando, cioè `wave_ram[wave_pos >> 1]`, indipendentemente dall'indirizzo
   richiesto. Non c'è la finestra di blackout DMG.
-- Oggi nessun gating: `mmu::read_u8($FF30..$FF3F)` ritorna sempre il byte
-  raw → match con DMG-in-finestra (sbagliato fuori finestra) e con CGB solo
-  quando per caso `wave_pos >> 1 == addr - $FF30` (raramente).
-- **Pre-requisito**: l'MMU oggi espone solo `add_mmio_write_handler`
-  (`src/mmu.cpp`); per ridirigere una read serve aggiungere il simmetrico
-  `add_mmio_read_handler(addr, fn)` (o `add_mmio_read_redirect`), e
-  consultarlo in `read_u8`. Pochi altri use-case ne hanno bisogno
-  (joypad/STAT live-read già passano per accessor diretti) → cambio
-  contenuto: un `absl::InlinedVector<read_redirect_fn, 1>` per byte.
-- Fix APU: in CGB-mode su `$FF30-$FF3F`, se `ch3_.channel_enabled`,
-  ritorna `wave_ram[ch3_.wave_pos >> 1]`. Stesso slot di entrypoint
-  utilizzabile poi anche per chiudere `dmg_sound` 09:01 (sezione §8) con
-  un branch sul modello.
+- Implementazione (read): `mmu::add_mmio_read_handler(addr, fn)` simmetrico
+  al write handler — `mmio_read_fn(addr, current) -> uint8_t`, chained in
+  `read_u8` dopo `mmio_read_masked`.
+- Implementazione (write): `mmu::add_mmio_write_redirect(addr, fn)` con
+  signature `(uint16_t addr) -> uint16_t` — viene consultata in `write_u8`
+  prima dello store mmio e ritorna l'eventuale indirizzo redirezionato (i
+  write handler post-store firano sul target redirezionato). L'APU registra
+  entrambe le hook su tutto `$FF30-$FF3F`: in modalità CGB con
+  `ch3_.channel_enabled`, read e write puntano a `wave_ram[wave_pos >> 1]`,
+  altrimenti pass-through. Lo stesso entrypoint può poi chiudere il lato DMG
+  di §8 con un branch sul modello (window di 2 T-cycle + blackout 0xFF /
+  ignore della write).
 
 **11-regs_after_power:04 — NRx1 ignorato a power-off su CGB — fatto**
 
@@ -849,42 +849,39 @@ PPU/HDMA): la knob esiste, manca solo applicarla nei posti giusti dentro
   quando `mmu_.cgb_mode()`: il valore di `length` non viene toccato e
   l'mmio byte resta forzato al suo read-mask come prima.
 
-**12-wave:02 — wave channel su trigger (ipotesi da verificare)**
+**12-wave_write_while_on — accesso CGB con CH3 attivo — fatto**
 
-- Sub-test `:02` del gruppo wave: l'oracolo Blargg verifica un aspetto del
-  comportamento di CH3 alla trigger che differisce fra DMG e CGB.
-- Ipotesi più probabili (in ordine decrescente di confidenza):
-  1. **`sample_buffer` azzerato su trigger CGB**. Oggi
-     `wave_channel::trigger()` (`src/apu.cpp:304`) preserva
-     `sample_buffer` (commento: "matches DMG behavior where the first
-     sample after a trigger is the previously buffered nibble"). Su CGB
-     il buffer è azzerato → il primo sample post-trigger è 0, non il
-     vecchio nibble.
-  2. **`wave_pos` inizializzato a un valore diverso da 0 su CGB**.
-     Plausibile ma meno documentato.
-  3. **Wave RAM init pattern diverso a power-on CGB vs DMG**. La RAM
-     wave nasce con un pattern noto su DMG (`00 FF 00 FF ...` o simile)
-     e con pattern diverso/azzerato su CGB. Se il test legge wave RAM
-     prima di scriverla, l'init state cambia la baseline. Oggi la
-     nostra wave RAM nasce a `OPEN_BUS` da `mmu::initialize_registers`;
-     verificare se serve un pattern CGB specifico.
-- Va investigato con `dump_mem ff30 10` ai vari step del sub-test contro
-  un riferimento (SameBoy) prima di scegliere il fix.
+Tre fix combinati per chiudere 09:01 + 12:0x:
 
-**Costo stimato (escluso §8 DMG)**: 08:01 e 11:04 sono one-liner (~10 min
-ciascuno una volta toccata `apu::power_off` / i quattro `on_nrX1`). 09:01
-costa il piccolo refactor MMU read-handler (~1 h, semplice). 12:02 è
-diagnostica-driven (~mezza giornata se l'ipotesi 1 regge, di più se va
-inseguito il pattern wave RAM init).
+1. **Increment-after-fetch in `wave_channel::tick_frequency`** — prima
+   `wave_pos` veniva incrementato PRIMA della fetch, quindi byte 0 veniva
+   letto una sola volta per ciclo (solo low nibble a `wave_pos=1`), mentre
+   tutti gli altri byte due volte. SameBoy / Pan Docs: ogni byte high+low
+   nibble, partendo da byte 0 high.
 
-**Priorità**: media. Nessun gioco CGB commerciale dipende noticeably da
-queste sequenze (come per §8: tutti i ROM ben scritti scrivono wave RAM
-con CH3 disabilitato). Si chiude solo per "CGB accurate al 100%" sul
-piano audio.
+2. **`current_sample_byte` / `current_sample_byte_idx` separati** — il
+   redirect non può più usare `wave_ram[wave_pos>>1]` perché dopo il flip
+   dell'increment quel valore punta al PROSSIMO byte da fetchare; quindi
+   il channel registra il byte appena letto + il suo indice e il redirect
+   read/write li consuma.
 
-**Interazione con §8**: una volta aggiunto il read-handler MMU per
-$FF30-$FF3F, gli stessi handler chiudono entrambi i lati (DMG: 0xFF +
-finestra di 2T; CGB: redirect sempre attivo). Conviene chiudere insieme.
+3. **Trigger: `freq_timer = 6` su CGB** — invece di `(2048-freq)*2`. Il
+   primo fetch avviene 6 T-cycle dopo trigger (non un periodo intero),
+   poi i fetch successivi si svolgono ogni `(2048-freq)*2`. Senza questo,
+   il pre-fetch tiene `current_sample_byte` a 0 (residual) per un periodo
+   intero di nibble, producendo ~2 read di residual extra che spostano il
+   pattern leading di 09:01 (visto come 6×00 invece di 4×00). Su DMG il
+   formato resta `(2048-freq)*2`: il quirk di gating della wave RAM (§8)
+   interagisce diversamente con il timing di trigger e i test dmg_sound
+   che passano oggi non sopravviverebbero al cambio.
+
+Su trigger CGB anche `current_sample_byte` e `_idx` vengono azzerati
+oltre a `sample_buffer` (simmetria); su DMG tutti restano al valore
+precedente (residual), com'è stato sempre.
+
+**Interazione con §8**: il read-handler MMU per $FF30-$FF3F è ora in piedi
+(registrato dall'APU); chiudere il lato DMG di §8 si riduce a un branch sul
+modello dentro la stessa lambda (window di 2 T-cycle + blackout 0xFF).
 
 ---
 

@@ -36,6 +36,20 @@ namespace gbemu {
 
         using mmio_write_fn = std::function<void(std::uint8_t)>;
 
+        // Read-side hook: takes the address and the value that would otherwise
+        // be returned, returns a (possibly redirected) replacement byte.
+        // Handlers are chained in registration order — the output of one is the
+        // `current` input of the next.  Used by hardware subsystems that need
+        // to redirect a read based on live state (e.g. CGB CH3 wave RAM redirects
+        // every $FF30-$FF3F read to the byte CH3 is currently fetching).
+        using mmio_read_fn = std::function<std::uint8_t(std::uint16_t /*addr*/, std::uint8_t /*current*/)>;
+
+        // Write-side address redirect: invoked before the bus store, may rewrite
+        // the destination MMIO offset.  Returns the (possibly redirected) address.
+        // Same use-case as the read hook: on CGB, a write to any of $FF30-$FF3F
+        // while CH3 is active actually lands at the byte CH3 is currently fetching.
+        using mmio_write_redirect_fn = std::function<std::uint16_t(std::uint16_t /*addr*/)>;
+
         // Install the cartridge.  Called once after the ROM has been read
         // off disk and the appropriate mbc subclass has been instantiated.
         void attach_cartridge(std::unique_ptr<mbc> c) { cart_ = std::move(c); }
@@ -61,6 +75,16 @@ namespace gbemu {
         // mmio[].  Used by hardware subsystems (serial, dma, timer, apu, ...)
         // and by debug observers (write-watchpoints, serial taps).
         void add_mmio_write_handler(std::uint16_t addr, mmio_write_fn fn);
+
+        // Register a read-side hook for a single MMIO byte (0xFF00-0xFF7F).
+        // Invoked after the masked default value has been computed but before
+        // it is returned to the bus; the handler may return any byte.
+        void add_mmio_read_handler(std::uint16_t addr, mmio_read_fn fn);
+
+        // Register a write-side address redirect for a single MMIO byte.
+        // Invoked before the byte is stored; chained, so the output of one
+        // redirect feeds the next.
+        void add_mmio_write_redirect(std::uint16_t addr, mmio_write_redirect_fn fn);
 
         std::uint16_t read_u16(std::uint16_t addr) { return read_u8(addr) + (read_u8(addr + 1) << 8); }
 
@@ -226,5 +250,9 @@ namespace gbemu {
         // handler + at most one or two debug observers); rarer 3+ cases
         // spill to heap.
         std::array<absl::InlinedVector<mmio_write_fn, 2>, 0x80> mmio_write_handlers_{};
+        // Inline N=1: typical occupancy is zero (default returns the masked
+        // mmio byte) or one (a single subsystem-driven redirect).
+        std::array<absl::InlinedVector<mmio_read_fn, 1>, 0x80> mmio_read_handlers_{};
+        std::array<absl::InlinedVector<mmio_write_redirect_fn, 1>, 0x80> mmio_write_redirects_{};
     };
 } // namespace gbemu
