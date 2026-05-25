@@ -181,8 +181,6 @@ std::uint8_t gbemu::mmu::mmio_read_masked(std::uint16_t addr) const {
     }
 
     // CGB read masks for registers with unimplemented bits that pull to 1.
-    // HDMA1-5 still wait on the HDMA new-code subsystem — until then they
-    // return raw storage, which Blargg's CGB suites tolerate (0 after reset).
     switch (addr) {
         case gb::io::KEY1:
             // bits 0 (prepare) and 7 (current speed) live in storage; 1-6 pull-up.
@@ -193,6 +191,19 @@ std::uint8_t gbemu::mmu::mmio_read_masked(std::uint16_t addr) const {
         case gb::io::SVBK:
             // Pan Docs: read returns the raw write ANDed with 0x07; bits 3-7 pull.
             return static_cast<std::uint8_t>(0xF8 | (v & 0x07));
+        case gb::io::HDMA1:
+        case gb::io::HDMA2:
+        case gb::io::HDMA3:
+        case gb::io::HDMA4:
+            // HDMA source/dest registers are write-only on real hardware;
+            // reads return $FF.  The actual latched values live in mmio_[]
+            // and are read by the HDMA subsystem via io_read().
+            return 0xFF;
+        case gb::io::HDMA5:
+            // The HDMA subsystem mirrors its live status_byte() into mmio_[HDMA5]
+            // after every event (HDMA5 write, H-Blank block, terminate), so the
+            // raw byte is already the correct readback value here.
+            return v;
         case gb::io::BCPS:
         case gb::io::OCPS:
             // bit 7 (auto-increment) + bits 0-5 (index) are real; bit 6 pulls high.

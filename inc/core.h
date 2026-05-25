@@ -11,6 +11,7 @@
 #    include <card.h>
 #    include <cpu.h>
 #    include <dma.h>
+#    include <hdma.h>
 #    include <irq.h>
 #    include <joypad.h>
 #    include <mmu.h>
@@ -30,6 +31,7 @@ namespace gbemu {
               irq(cpu, mmu),
               serial(mmu, irq),
               dma(mmu),
+              hdma(mmu, cpu),
               timer(mmu, irq),
               apu(mmu),
               joypad(mmu, irq),
@@ -71,6 +73,12 @@ namespace gbemu {
                 c->timer.step(t);
                 c->total_cycles += t;
             };
+
+            // PPU H-Blank edge → HDMA block copy.  No-op on DMG (hdma's
+            // public entrypoints short-circuit when mmu.cgb_mode() is false
+            // and HDMA5 writes never arm it in the first place).
+            ppu.hblank_ctx = this;
+            ppu.hblank_fn = [](void* ctx) { static_cast<core*>(ctx)->hdma.on_hblank(); };
         }
 
         cpu cpu;
@@ -80,6 +88,7 @@ namespace gbemu {
         irq irq;
         serial serial;
         dma dma;
+        hdma hdma;
         timer timer;
         apu apu;
         joypad joypad;

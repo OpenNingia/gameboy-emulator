@@ -78,6 +78,7 @@ void core::reset() {
     ppu.reset();
     timer.reset();
     apu.reset();
+    hdma.reset();
     pc_ring.fill(0);
     pc_idx = 0;
     total_cycles = 0;
@@ -100,9 +101,14 @@ std::uint32_t core::step() {
         if (irq.dispatch()) {
             total += 20;
         }
-        if (pending_ppu_t) {
-            ppu.step(pending_ppu_t);
+        // Drain pending_ppu_t in a loop so any cpu.tick() that lands inside
+        // ppu.step() (notably the HBlank DMA block copy fired from
+        // ppu::enter_hblank → hdma::on_hblank) is picked up by the next
+        // iteration instead of being silently zeroed out below.
+        while (pending_ppu_t) {
+            const auto t = pending_ppu_t;
             pending_ppu_t = 0;
+            ppu.step(t);
         }
         return total;
     } catch (const gbemu_exception& e) {

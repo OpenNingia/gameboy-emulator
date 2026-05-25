@@ -29,6 +29,14 @@ namespace gbemu {
         // before the next step has run.
         void reset();
 
+        // H-Blank edge hook: invoked from enter_hblank() with the H-Blank
+        // mode about to begin.  Wired by core::core() to drive the CGB
+        // HDMA engine (which copies one 16-byte block per fire when armed).
+        // Kept as a free C-style fn ptr for the same reason cpu.tick_fn is.
+        using hblank_fn_t = void (*)(void* ctx);
+        hblank_fn_t hblank_fn{nullptr};
+        void* hblank_ctx{nullptr};
+
         // Active palette accessor. The PPU owns the single palette_resolver
         // shared by BG/window/sprite rendering and by the UI's tile / BG-map
         // viewers (which call resolve() to colour their own off-screen

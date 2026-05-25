@@ -95,6 +95,11 @@ void ppu::enter_hblank() {
     set_stat_mode(mode_e::HBLANK);
     if (mmu_.hwr_stat() & gb::stat::mode0_irq_enable)
         irq_.request(irq::source::lcd_stat);
+    // CGB HDMA: notify any observer that an H-Blank just started so it can
+    // copy its 16-byte block.  The hook is null on DMG and when no HDMA
+    // subsystem is wired (e.g. headless unit-test paths).
+    if (hblank_fn)
+        hblank_fn(hblank_ctx);
 }
 
 void ppu::enter_vblank() {
