@@ -503,6 +503,14 @@ void Application::run() {
     }
     user_state_.load(user_conf_path_);
 
+    // Push any persisted input bindings into the live manager.  The manager
+    // was constructed with config::defaults() at member-init time; if
+    // user.conf carried an `input` block, user_state_.load mutated
+    // user_state_.input_bindings to reflect it, and we forward that here.
+    // No-op semantics when the block was missing — input_bindings still
+    // equals defaults() at this point.
+    input_.set_cfg(user_state_.input_bindings);
+
     // Push persisted audio prefs into the APU now that user_state has been
     // loaded and the ROM is attached (so cgb_mode is correct for the
     // accurate-filter cutoff).  Volume slider is stored as 0..1 linear in
@@ -782,6 +790,12 @@ void Application::run() {
         // waiting for the next.
         if (acts.save_user_state_requested) {
             acts.save_user_state_requested = false;
+            // Mirror the live input config back into user_state_ before
+            // saving so a future Settings -> Input rebinding panel doesn't
+            // have to remember to push the change through user_state_
+            // separately — the manager is the source of truth at runtime,
+            // user_state_ is the source of truth on disk.
+            user_state_.input_bindings = input_.cfg();
             user_state_.save(user_conf_path_);
             // The Audio -> Mute menu writes apu.set_muted directly with
             // the raw user_state_.audio_muted value; re-apply the
@@ -837,6 +851,7 @@ void Application::run() {
         SDL_GetWindowSize(window, &final_w, &final_h);
         user_state_.window_w = final_w;
         user_state_.window_h = final_h;
+        user_state_.input_bindings = input_.cfg();
         user_state_.save(user_conf_path_);
     }
 

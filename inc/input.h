@@ -5,6 +5,7 @@
 #    include <cstdint>
 #    include <optional>
 #    include <string>
+#    include <string_view>
 #    include <vector>
 
 #    include <SDL2/SDL.h>
@@ -33,26 +34,33 @@ namespace gbemu::input {
         volume_down,       // Ctrl+Down
     };
 
+    // Press semantics for a key_binding.
+    //   oneshot: fires once on KEYDOWN with hold_pressed=true; auto-repeat
+    //            events are filtered.
+    //   hold:    fires on KEYDOWN with hold_pressed=true AND on the
+    //            matching KEYUP with hold_pressed=false (fast-forward).
+    // Hoisted out of key_binding to dodge a member-vs-type name collision
+    // (`enum class kind ... } kind = ...` makes `key_binding::kind` resolve
+    // to the data member as a type-name, breaking outside spellings).
+    enum class binding_kind : std::uint8_t { oneshot, hold };
+
+    // Whether the binding requires a cartridge to be attached.  rom_only
+    // matches the BeginDisabled() guards in the menu bar so Space / Ctrl+R
+    // don't kick a BIOS-on-open-bus into RST 38h loops.
+    enum class binding_gate : std::uint8_t { always, rom_only };
+
     // Binding of a key chord to an action.  mod_mask is the SDL_Keymod
     // combination required for the binding to fire; the match is STRICT
     // (mod ^ mod_mask == 0 across the meaningful bits) so Ctrl+R does NOT
     // trigger on Ctrl+Shift+R.  Only the "useful" modifier bits are
     // considered — Caps/Num/Scroll lock and the system Mode key are
     // masked out before the comparison, see normalize_mod().
-    //
-    // kind::hold flips semantics: the action fires once on key-down with
-    // hold_pressed=true, and again on key-up with hold_pressed=false.
-    // Repeat events are filtered out (the user is still holding).
-    //
-    // gate::rom_only suppresses the action when no cartridge is loaded —
-    // matches the BeginDisabled() guards in the menu bar so the Space /
-    // Ctrl+R hotkeys don't kick a BIOS-on-open-bus into RST 38h loops.
     struct key_binding {
         SDL_Keycode key;
         std::uint16_t mod_mask;
         action act;
-        enum class kind : std::uint8_t { oneshot, hold } kind = kind::oneshot;
-        enum class gate : std::uint8_t { always, rom_only } gate = gate::always;
+        binding_kind kind = binding_kind::oneshot;
+        binding_gate gate = binding_gate::always;
     };
 
     // Joypad binding: a keyboard key OR a game-controller button mapped
@@ -136,6 +144,50 @@ namespace gbemu::input {
     private:
         config cfg_;
     };
+
+    // ---------------------------------------------------------------------
+    // String round-trip helpers — used by user_state.cpp to (de)serialize
+    // `input::config` into the libconfig sub-block in user.conf, and (when
+    // the rebinding UI lands, §17 step 4) by the menu to render the current
+    // binding for an action.  All converters are pure functions; no SDL
+    // initialisation is required to call them.
+    //
+    // Convention: `to_string(x)` is the canonical form (lower-snake-case for
+    // enums, SDL's preferred name for keys/buttons).  `*_from_string` returns
+    // a sentinel (nullopt / SDLK_UNKNOWN / -1) on unknown input so callers
+    // can log + skip rather than throwing.
+    // ---------------------------------------------------------------------
+
+    std::string to_string(action a);
+    std::optional<action> action_from_string(std::string_view s);
+
+    std::string to_string(gbemu::joypad::button b);
+    std::optional<gbemu::joypad::button> joypad_button_from_string(std::string_view s);
+
+    std::string to_string(binding_kind k);
+    std::optional<binding_kind> binding_kind_from_string(std::string_view s);
+
+    std::string to_string(binding_gate g);
+    std::optional<binding_gate> binding_gate_from_string(std::string_view s);
+
+    // Modifier-mask round-trip ("Ctrl+Shift" <-> KMOD_CTRL | KMOD_SHIFT).
+    // Tokens are case-insensitive, joined with '+', whitespace stripped;
+    // an empty string maps to 0.  Unknown tokens yield nullopt.
+    std::string mod_mask_to_string(std::uint16_t mod_mask);
+    std::optional<std::uint16_t> mod_mask_from_string(std::string_view s);
+
+    // Keycode round-trip via SDL_GetKeyName / SDL_GetKeyFromName.  Returns
+    // "" / SDLK_UNKNOWN on failure so the caller can detect bogus user.conf
+    // entries (key = "Bogus" -> log warning, skip the binding).
+    std::string keycode_to_string(SDL_Keycode k);
+    SDL_Keycode keycode_from_string(std::string_view s);
+
+    // SDL_GameControllerButton round-trip — wraps
+    // SDL_GameControllerGetStringForButton / *_GetButtonFromString so
+    // user_state.cpp doesn't have to depend on the controller API
+    // directly.  -1 / "" on the inactive side.
+    std::string controller_button_to_string(int btn);
+    int controller_button_from_string(std::string_view s);
 
 } // namespace gbemu::input
 

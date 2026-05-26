@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <input.h>
+
 namespace gbemu {
 
     // Per-session user state shared across the UI and the host Application.
@@ -42,6 +44,16 @@ namespace gbemu {
         // deliberately does NOT update this field, so a crash mid-FF does
         // not bake the setting into user.conf.
         float speed_multiplier{1.0f};
+
+        // Input bindings (hotkeys + joypad mapping).  Initialised to the
+        // hard-coded `defaults()` so a missing `input` sub-block in
+        // user.conf produces the same behaviour as the pre-step-3 builds.
+        // load() replaces sub-arrays selectively (see src/user_state.cpp):
+        // the `hotkeys` list, the keyboard half of `joypad`, and the
+        // controller half each survive independently of one another so a
+        // hand-edited user.conf that overrides only joypad_keyboard keeps
+        // the default hotkeys intact.
+        input::config input_bindings{input::config::defaults()};
 
         // Read libconfig from `path`.  Missing file (first run) or parse
         // error -> fields stay at construction defaults and returns false.

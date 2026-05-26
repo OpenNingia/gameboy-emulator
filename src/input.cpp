@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cctype>
+
 #include <input.h>
 
 namespace gbemu::input {
@@ -81,8 +84,8 @@ namespace gbemu::input {
             // File
             {SDLK_o, KMOD_CTRL, action::load_rom},
             // Emulation
-            {SDLK_SPACE, 0, action::toggle_pause, key_binding::kind::oneshot, key_binding::gate::rom_only},
-            {SDLK_r, KMOD_CTRL, action::reset, key_binding::kind::oneshot, key_binding::gate::rom_only},
+            {SDLK_SPACE, 0, action::toggle_pause, binding_kind::oneshot, binding_gate::rom_only},
+            {SDLK_r, KMOD_CTRL, action::reset, binding_kind::oneshot, binding_gate::rom_only},
             {SDLK_F11, 0, action::toggle_fullscreen},
             // Speed
             {SDLK_EQUALS, 0, action::speed_up},
@@ -91,7 +94,7 @@ namespace gbemu::input {
             {SDLK_KP_MINUS, 0, action::speed_down},
             {SDLK_0, 0, action::speed_reset},
             {SDLK_KP_0, 0, action::speed_reset},
-            {SDLK_TAB, 0, action::fast_forward, key_binding::kind::hold},
+            {SDLK_TAB, 0, action::fast_forward, binding_kind::hold},
             // Audio
             {SDLK_m, 0, action::toggle_mute},
             {SDLK_UP, KMOD_CTRL, action::volume_up},
@@ -139,9 +142,9 @@ namespace gbemu::input {
                 continue;
             if (nm != kb.mod_mask)
                 continue;
-            if (kb.gate == key_binding::gate::rom_only && !rom_loaded)
+            if (kb.gate == binding_gate::rom_only && !rom_loaded)
                 continue;
-            if (kb.kind == key_binding::kind::oneshot) {
+            if (kb.kind == binding_kind::oneshot) {
                 if (repeat)
                     return std::nullopt; // one-shot ignores key auto-repeat
                 return hotkey_event{kb.act, true};
@@ -157,7 +160,7 @@ namespace gbemu::input {
 
     std::optional<hotkey_event> manager::on_key_up(SDL_Keycode k) const {
         for (const auto& kb : cfg_.hotkeys) {
-            if (kb.kind != key_binding::kind::hold)
+            if (kb.kind != binding_kind::hold)
                 continue;
             if (kb.key != k)
                 continue;
@@ -197,6 +200,206 @@ namespace gbemu::input {
             return mod_prefix(kb.mod_mask) + key_label(kb.key);
         }
         return {};
+    }
+
+    // -----------------------------------------------------------------
+    // Serialization helpers
+    // -----------------------------------------------------------------
+
+    namespace {
+        // Pair-of-(enum,string) tables keep the forward and reverse
+        // converters perfectly in sync — adding a new action means one
+        // edit instead of two.
+        struct action_pair {
+            action a;
+            const char* s;
+        };
+        constexpr action_pair ACTION_TABLE[] = {
+            {action::load_rom, "load_rom"},
+            {action::toggle_pause, "toggle_pause"},
+            {action::reset, "reset"},
+            {action::toggle_fullscreen, "toggle_fullscreen"},
+            {action::speed_up, "speed_up"},
+            {action::speed_down, "speed_down"},
+            {action::speed_reset, "speed_reset"},
+            {action::fast_forward, "fast_forward"},
+            {action::toggle_mute, "toggle_mute"},
+            {action::volume_up, "volume_up"},
+            {action::volume_down, "volume_down"},
+        };
+
+        struct button_pair {
+            gbemu::joypad::button b;
+            const char* s;
+        };
+        constexpr button_pair BUTTON_TABLE[] = {
+            {gbemu::joypad::button::right, "right"},   {gbemu::joypad::button::left, "left"},
+            {gbemu::joypad::button::up, "up"},         {gbemu::joypad::button::down, "down"},
+            {gbemu::joypad::button::a, "a"},           {gbemu::joypad::button::b, "b"},
+            {gbemu::joypad::button::select, "select"}, {gbemu::joypad::button::start, "start"},
+        };
+
+        // Trim ASCII whitespace from both ends.
+        std::string_view trim_sv(std::string_view s) {
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
+                s.remove_prefix(1);
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+                s.remove_suffix(1);
+            return s;
+        }
+
+        bool ieq(std::string_view a, std::string_view b) {
+            if (a.size() != b.size())
+                return false;
+            for (std::size_t i = 0; i < a.size(); ++i) {
+                if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+                    return false;
+            }
+            return true;
+        }
+    } // namespace
+
+    std::string to_string(action a) {
+        for (const auto& p : ACTION_TABLE)
+            if (p.a == a)
+                return p.s;
+        return {};
+    }
+
+    std::optional<action> action_from_string(std::string_view s) {
+        const auto t = trim_sv(s);
+        for (const auto& p : ACTION_TABLE)
+            if (ieq(t, p.s))
+                return p.a;
+        return std::nullopt;
+    }
+
+    std::string to_string(gbemu::joypad::button b) {
+        for (const auto& p : BUTTON_TABLE)
+            if (p.b == b)
+                return p.s;
+        return {};
+    }
+
+    std::optional<gbemu::joypad::button> joypad_button_from_string(std::string_view s) {
+        const auto t = trim_sv(s);
+        for (const auto& p : BUTTON_TABLE)
+            if (ieq(t, p.s))
+                return p.b;
+        return std::nullopt;
+    }
+
+    std::string to_string(binding_kind k) {
+        return k == binding_kind::hold ? "hold" : "oneshot";
+    }
+
+    std::optional<binding_kind> binding_kind_from_string(std::string_view s) {
+        const auto t = trim_sv(s);
+        if (ieq(t, "oneshot"))
+            return binding_kind::oneshot;
+        if (ieq(t, "hold"))
+            return binding_kind::hold;
+        return std::nullopt;
+    }
+
+    std::string to_string(binding_gate g) {
+        return g == binding_gate::rom_only ? "rom_only" : "always";
+    }
+
+    std::optional<binding_gate> binding_gate_from_string(std::string_view s) {
+        const auto t = trim_sv(s);
+        if (ieq(t, "always"))
+            return binding_gate::always;
+        if (ieq(t, "rom_only"))
+            return binding_gate::rom_only;
+        return std::nullopt;
+    }
+
+    std::string mod_mask_to_string(std::uint16_t mod_mask) {
+        // Same display order as the menu-bar formatter (mod_prefix), minus
+        // the trailing '+'. An empty mask serialises to "" — libconfig
+        // round-trips empty strings just fine.
+        std::string s;
+        const auto append = [&](const char* tok) {
+            if (!s.empty())
+                s += '+';
+            s += tok;
+        };
+        if (mod_mask & KMOD_CTRL)
+            append("Ctrl");
+        if (mod_mask & KMOD_ALT)
+            append("Alt");
+        if (mod_mask & KMOD_SHIFT)
+            append("Shift");
+        if (mod_mask & KMOD_GUI)
+            append("Gui");
+        return s;
+    }
+
+    std::optional<std::uint16_t> mod_mask_from_string(std::string_view s) {
+        std::uint16_t out = 0;
+        const auto t = trim_sv(s);
+        if (t.empty())
+            return out;
+        std::size_t i = 0;
+        while (i < t.size()) {
+            // Find the next '+' (token separator).
+            const std::size_t plus = t.find('+', i);
+            const std::size_t end = (plus == std::string_view::npos) ? t.size() : plus;
+            const auto tok = trim_sv(t.substr(i, end - i));
+            if (!tok.empty()) {
+                if (ieq(tok, "Ctrl") || ieq(tok, "Control"))
+                    out |= KMOD_CTRL;
+                else if (ieq(tok, "Shift"))
+                    out |= KMOD_SHIFT;
+                else if (ieq(tok, "Alt"))
+                    out |= KMOD_ALT;
+                else if (ieq(tok, "Gui") || ieq(tok, "Meta") || ieq(tok, "Super"))
+                    out |= KMOD_GUI;
+                else
+                    return std::nullopt;
+            }
+            if (plus == std::string_view::npos)
+                break;
+            i = plus + 1;
+        }
+        return out;
+    }
+
+    std::string keycode_to_string(SDL_Keycode k) {
+        if (k == SDLK_UNKNOWN)
+            return {};
+        const char* name = SDL_GetKeyName(k);
+        if (!name || !*name)
+            return {};
+        return name;
+    }
+
+    SDL_Keycode keycode_from_string(std::string_view s) {
+        // SDL_GetKeyFromName needs a NUL-terminated string; copy into a
+        // temporary to honour the contract regardless of how the view was
+        // constructed.
+        std::string buf{trim_sv(s)};
+        if (buf.empty())
+            return SDLK_UNKNOWN;
+        return SDL_GetKeyFromName(buf.c_str());
+    }
+
+    std::string controller_button_to_string(int btn) {
+        if (btn < 0 || btn >= SDL_CONTROLLER_BUTTON_MAX)
+            return {};
+        const char* name = SDL_GameControllerGetStringForButton(static_cast<SDL_GameControllerButton>(btn));
+        if (!name || !*name)
+            return {};
+        return name;
+    }
+
+    int controller_button_from_string(std::string_view s) {
+        std::string buf{trim_sv(s)};
+        if (buf.empty())
+            return -1;
+        const SDL_GameControllerButton b = SDL_GameControllerGetButtonFromString(buf.c_str());
+        return (b == SDL_CONTROLLER_BUTTON_INVALID) ? -1 : static_cast<int>(b);
     }
 
 } // namespace gbemu::input
