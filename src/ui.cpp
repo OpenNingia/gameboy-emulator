@@ -93,8 +93,19 @@ namespace gbemu::ui {
 
         // Breakpoints / Watchpoints panel inputs.
         char bp_input_buf[8]{};
+        char bp_cond_buf[128]{};
+        std::string bp_parse_error{}; // last parse error from the Add row
         char wp_input_buf[8]{};
         int wp_len_input{1};
+
+        // Per-row edit state for the conditional-breakpoint list.  When the
+        // user clicks "Edit" on a row, `bp_edit_addr` holds the bp address
+        // and `bp_edit_buf` is seeded with the current condition; clicking
+        // Apply re-parses + reattaches, Cancel discards.  Only one row can
+        // be in edit mode at a time.
+        int bp_edit_addr{-1};
+        char bp_edit_buf[128]{};
+        std::string bp_edit_error{};
 
         // PPU panel: streaming presenters for the VRAM tile grid (128x192
         // px, 16x24 tiles of 8x8) and the BG tile map viewer (256x256 px).
@@ -806,28 +817,95 @@ namespace gbemu::ui {
             ImGui::SetNextItemWidth(80);
             ImGui::InputText("Addr##bp", c.bp_input_buf, sizeof(c.bp_input_buf), ImGuiInputTextFlags_CharsHexadecimal);
             ImGui::SameLine();
+            ImGui::SetNextItemWidth(220);
+            ImGui::InputTextWithHint("Cond##bp", "e.g. A==0x7F && (HL)>=0xC000", c.bp_cond_buf, sizeof(c.bp_cond_buf));
+            ImGui::SameLine();
             if (ImGui::Button("Add##bp")) {
+                c.bp_parse_error.clear();
                 try {
                     if (c.bp_input_buf[0]) {
                         const auto addr = static_cast<std::uint16_t>(std::stoul(c.bp_input_buf, nullptr, 16));
-                        dbg.breakpoint_set(addr);
-                        c.bp_input_buf[0] = '\0';
+                        // Empty condition -> unconditional bp.
+                        std::string err;
+                        if (auto p = gbemu::parse_bp_predicate(c.bp_cond_buf, err)) {
+                            if (p->terms.empty())
+                                dbg.breakpoint_set(addr);
+                            else
+                                dbg.breakpoint_set(addr, std::move(*p));
+                            c.bp_input_buf[0] = '\0';
+                            c.bp_cond_buf[0] = '\0';
+                        } else {
+                            c.bp_parse_error = err;
+                        }
                     }
-                } catch (...) {}
+                } catch (...) {
+                    c.bp_parse_error = "invalid address";
+                }
             }
             ImGui::SameLine();
             if (ImGui::Button("Clear all##bp")) {
                 for (auto a : dbg.breakpoint_list())
                     dbg.breakpoint_clear(a);
+                c.bp_edit_addr = -1;
+                c.bp_parse_error.clear();
+            }
+            if (!c.bp_parse_error.empty()) {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "parse error: %s", c.bp_parse_error.c_str());
             }
 
             if (ImGui::BeginListBox("##bp_list", ImVec2(-FLT_MIN, 6 * ImGui::GetTextLineHeightWithSpacing()))) {
                 for (auto a : dbg.breakpoint_list()) {
                     ImGui::PushID(static_cast<int>(a));
-                    if (ImGui::SmallButton("X"))
+                    if (ImGui::SmallButton("X")) {
                         dbg.breakpoint_clear(a);
+                        if (c.bp_edit_addr == static_cast<int>(a))
+                            c.bp_edit_addr = -1;
+                    }
                     ImGui::SameLine();
-                    ImGui::Text("$%04X", a);
+                    if (c.bp_edit_addr == static_cast<int>(a)) {
+                        ImGui::Text("$%04X if", a);
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(220);
+                        const bool apply = ImGui::InputText("##bp_edit", c.bp_edit_buf, sizeof(c.bp_edit_buf),
+                                                            ImGuiInputTextFlags_EnterReturnsTrue);
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Apply") || apply) {
+                            std::string err;
+                            if (auto p = gbemu::parse_bp_predicate(c.bp_edit_buf, err)) {
+                                if (p->terms.empty())
+                                    dbg.breakpoint_set(a);
+                                else
+                                    dbg.breakpoint_set(a, std::move(*p));
+                                c.bp_edit_addr = -1;
+                                c.bp_edit_error.clear();
+                            } else {
+                                c.bp_edit_error = err;
+                            }
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Cancel")) {
+                            c.bp_edit_addr = -1;
+                            c.bp_edit_error.clear();
+                        }
+                        if (!c.bp_edit_error.empty()) {
+                            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "  %s", c.bp_edit_error.c_str());
+                        }
+                    } else {
+                        if (const auto* pred = dbg.breakpoint_predicate(a))
+                            ImGui::Text("$%04X if %s", a, pred->source.c_str());
+                        else
+                            ImGui::Text("$%04X", a);
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Edit")) {
+                            c.bp_edit_addr = static_cast<int>(a);
+                            c.bp_edit_error.clear();
+                            if (const auto* pred = dbg.breakpoint_predicate(a)) {
+                                std::snprintf(c.bp_edit_buf, sizeof(c.bp_edit_buf), "%s", pred->source.c_str());
+                            } else {
+                                c.bp_edit_buf[0] = '\0';
+                            }
+                        }
+                    }
                     ImGui::PopID();
                 }
                 ImGui::EndListBox();

@@ -1145,6 +1145,178 @@ Passo 3 (persistenza + parsing libconfig) ~2-3 ore. Passo 4 (UI rebinding)
 
 ---
 
+## 18. Debugger gaps per compatibility hunting
+
+I bug "il gioco gira ma…" stanno quasi sempre fuori dal piano CPU
+(coperto dai Blargg). Lista degli strumenti che ancora mancano per
+diagnosticare glitch grafici, audio strani, timing-sensitive freezes,
+ordinata per costo/beneficio.
+
+**Già chiusi in questa serie** (riferimento incrociato):
+
+- **Writer-PC nei watchpoint** — `debugger::sample_watchpoints` ora
+  registra il PC dell'istruzione che ha causato il cambio; UI
+  ("Breakpoints") e headless (`watch-list`) lo mostrano. `inc/debugger.h`
+  + `src/debugger.cpp` + `src/ui.cpp` + `src/script_runner.cpp`.
+- **OAM viewer** — pannello "OAM" con grid 8×5 a 4× zoom (rispetta 8x8 /
+  8x16, x/y flip, palette DMG OBP0/OBP1 e palette CGB 0-7, VRAM bank
+  CGB) + tabella per-sprite (Y/X decoded+raw, tile, attr, flags). Sprite
+  off-screen dimmate. `src/ui.cpp`.
+
+### 18.1 APU panel
+
+Visualizzare lo stato live dei 4 canali: per ciascuno frequency timer
+corrente, length counter, envelope volume+step+direction, sweep
+(CH1), wave RAM (CH3, già letta dall'MMU), LFSR (CH4). Plus i registri
+NR50/NR51/NR52 con decode dei mixer.
+
+Backing: `inc/apu.h` già espone le struct `square_channel`,
+`wave_channel`, `noise_channel`. Aggiungere getter pubblici
+`channel_state` (o passare i membri direttamente) e leggerli dal
+pannello. Niente da cambiare nel timing.
+
+Costo: ~2-3 ore. Sblocca "il rumore strano dura due frame poi sparisce" e
+"questo gioco scrive NRx2 e si sente piano".
+
+### 18.2 Timer / IRQ panel
+
+Pannello con DIV/TIMA/TMA/TAC live + IE/IF live (decoded per bit), più
+uno **storico circolare degli IRQ serviti**: timestamp (T-cycle), vector
+($40/$48/$50/$58/$60), PC di ritorno. La parte timer rivela
+desincronizzazioni TIMA-overflow → Timer IRQ, la parte IRQ rivela "STAT
+fire continuamente" oppure "VBlank non parte da N cicli" — molto comune
+nei giochi timing-sensitive (Pokémon, Prehistorik Man).
+
+Implementazione: nuovo ring `irq_event_log` in `gbemu::irq` (32-64 entry,
+push in `irq::dispatch` post-clear-IF, pre-push-PC). UI legge il ring +
+i registri timer via MMU.
+
+Costo: ~mezza giornata. La parte registri è banale; il ring richiede un
+piccolo schema.
+
+### 18.3 Instruction trace lungo
+
+Il `pc_ring` corrente è 256 entry (~150 istruzioni di CPU normale, una
+frazione di frame). Per "cos'è successo nei 60 frame prima del glitch"
+serve un ring molto più grande con PC + opcode + registri.
+
+Opzioni:
+
+- **Estendere `pc_ring`** a N entry configurabile (256k? 1M?), con
+  payload `{ pc, opcode_first_byte, af, bc, de, hl, sp }` (= 16 byte
+  l'una; 1M entry = 16 MB, accettabile come opt-in).
+- **On-demand**: bottone "Start recording" / "Stop recording", con un
+  cap massimo di memoria; "Dump to file" per ispezionare con grep/awk
+  offline. Header `inc/trace.h` + nuova UI panel.
+
+Costo: 3-4 ore per l'opt-in con dump-to-file. Memorizzare *sempre* tutto
+costa ~5% in throughput, non vale la pena se non si registra a
+richiesta.
+
+### 18.4 MMIO write log
+
+Buffer circolare delle write a $FF00-$FF7F + $FFFF, con campi
+`{ addr, value, pc, total_cycles }`. Filtrabile per range
+(es. "solo write a $FF40-$FF4B" → PPU registers). Sostituisce il
+workaround attuale "watchpoint a $FF40 + step a mano".
+
+Implementazione: piggyback sull'`mmu::add_mmio_write_handler` (gancio
+già esistente e usato da APU/timer/IRQ). Aggiungere un handler
+"taps-all" condizionale che pusha in un ring di `debugger`. Filter UI
+side.
+
+Costo: ~2 ore. La parte costosa è la UI (filter + scroll + decode delle
+addr a nome registro).
+
+### 18.5 Conditional breakpoints — **fatto**
+
+`debugger::breakpoint_set(addr)` ora ha un overload
+`breakpoint_set(addr, bp_predicate)` che attacca una condizione di
+arresto al bp. `run_until` / `step_over` consultano il nuovo
+`breakpoint_should_fire(pc)` (bitmap + predicate eval); il vecchio
+`breakpoint_has(pc)` resta come "esiste un bp a questa addr?" (usato
+dalla margin button della Disassembly per il pallino rosso).
+
+**Grammatica v1** (in `inc/bp_predicate.h`): `predicate := term ("&&"
+term)*`. Niente OR, niente parentesi se non per memory deref, niente
+precedence. Un `term` è `lhs op rhs`:
+
+- `lhs` ∈ { A, F, B, C, D, E, H, L, AF, BC, DE, HL, SP, PC,
+  `(BC)`, `(DE)`, `(HL)`, `(SP)`, `($ADDR)` } — case-insensitive,
+  `(ADDR)` accetta decimal / `0xNN` / `$NN`.
+- `op` ∈ { `==`, `=`, `!=`, `<=`, `>=`, `<`, `>` }.
+- `rhs` literal numerico (stessa sintassi di lhs).
+
+Confronti su lhs a 8 bit (registri singoli o memory deref) maskano
+anche rhs a `0xFF` per evitare che `A == 0x1FF` non spari mai
+silenziosamente. La predicate vuota → "always true" (= bp
+incondizionato), così il parser è simmetrico al campo UI vuoto.
+
+**File toccati**:
+
+- `inc/bp_predicate.h` + `src/bp_predicate.cpp` — tipi `bp_term` /
+  `bp_predicate`, `parse_bp_predicate` (~200 righe) e
+  `eval_bp_predicate`. Modulo isolato perché il codice non dipende dal
+  resto del debugger.
+- `inc/debugger.h` + `src/debugger.cpp` — overload `breakpoint_set(addr,
+  predicate)`, `breakpoint_should_fire(addr)`, `breakpoint_predicate(addr)`.
+  Storage: `std::vector<pair<uint16_t, bp_predicate>>` accanto al
+  bitmap esistente — scanata solo dopo che il bitmap fast-path ha
+  matchato il PC. `breakpoint_clear` / `breakpoint_set` (la forma
+  unconditional) rimuovono qualsiasi predicate al medesimo addr.
+- `src/script_runner.cpp` — `break ADDR [COND...]` (tutto il resto
+  della linea è la condition); `break-list` ora emette `$ADDR if COND`
+  per le entry condizionate.
+- `src/ui.cpp` — pannello Breakpoints: input box "Cond" accanto a
+  "Addr" con hint inline (`A==0x7F && (HL)>=0xC000`), parse error in
+  rosso sotto il pulsante Add. Ogni riga della list mostra
+  `$ADDR if "cond"` (quando attaccata) + bottone "Edit" inline per
+  ri-parsare e rimpiazzare la predicate senza dover ricreare il bp.
+
+**Limitazioni v1 (deliberate)**:
+
+- No OR, no `!`, no parentesi su term, no aritmetica (`A + 1 == B` /
+  `(HL+0x10) == 0`). Si chiudono solo "è X in stato Y a questa PC".
+- No flag bit accessors (`Z`, `NZ`, `cy`). Si possono già esprimere
+  via `F`, ma è scomodo. Da aggiungere in v2 se serve.
+- Predicate non persistite in `user.conf` — vivono solo per la durata
+  della sessione. Persisterle servirebbe a poco finché i bp non sono
+  legati a label simboliche; oggi sono indirizzi hex riproducibili
+  dallo script runner.
+
+### 18.6 Reference diff harness
+
+Quando SameBoy/mGBA fa la cosa giusta e noi no, oggi non c'è un modo
+strutturato per confrontare. Idea: tracer compatibile con il "Gameboy
+Doctor"-style log (https://github.com/robert/gameboy-doctor) — formato
+testo "A:01 F:B0 B:00 C:13 D:00 E:D8 H:01 L:4D SP:FFFE PC:0100 PCMEM:..."
+una riga per istruzione. SameBoy ha già un'opzione per produrlo. Il
+nostro script runner aggiunge un comando `trace LOGPATH N` che produce
+il file in formato compatibile per N istruzioni; poi `diff` finds the
+first divergence.
+
+Implementazione: in `script_runner.cpp` (e/o `debugger`) emettere una
+riga per step. Niente ring buffer — output diretto a stdout/file. Per
+matcharsi a SameBoy serve attenzione al campo `PCMEM` (4 byte di
+memoria a PC) e al formato esatto dei flag.
+
+Costo: ~3-4 ore se il formato non ha sorprese. Pagamento: una volta
+funzionante, *ogni* divergenza CPU/MMU si trova in minuti con `diff`.
+
+### Priorità suggerita
+
+Ordine cost/value (§18.5 chiuso):
+
+1. **§18.4 MMIO log** — utile sempre, copre molti casi PPU/audio.
+2. **§18.2 Timer/IRQ panel** — il prossimo gioco timing-sensitive lo
+   richiederà.
+3. **§18.1 APU panel** — sblocca audio debugging quando salterà fuori.
+4. **§18.3 Instruction trace lungo** — utile ma solo per glitch storici.
+5. **§18.6 Reference diff** — il più potente, ma anche il più impegnativo
+   per setup (serve scaricare/configurare SameBoy in trace-mode).
+
+---
+
 ## Note tecniche permanenti
 
 - **Path config**: `cfg/gbemu.conf` non ha più path assoluti — il portable

@@ -9,7 +9,7 @@
 //   step-cycles N
 //   run-until pc ADDR | cycles N | serial-match "TEXT" | vblank | bp |
 //              instr-count N    [max-cycles N]
-//   break ADDR  /  break-clear ADDR  /  break-clear-all  /  break-list
+//   break ADDR [COND...]  /  break-clear ADDR  /  break-clear-all  /  break-list
 //   watch ADDR [LEN]  /  watch-clear ADDR  /  watch-clear-all  /  watch-list
 //   dump regs | mem ADDR LEN | ppu | mbc | pc-ring [N] | stack [N]
 //   disasm pc [N]  /  disasm ADDR [N]
@@ -210,8 +210,24 @@ namespace gbemu {
             out << " cycles_consumed=" << rr.cycles_consumed << " instructions=" << rr.instructions << "\n";
         }
 
-        void cmd_break(debugger& dbg, tokenizer& ts, std::ostream&) {
-            dbg.breakpoint_set(parse_addr(ts.next()));
+        void cmd_break(debugger& dbg, tokenizer& ts, std::ostream& out) {
+            const auto addr = parse_addr(ts.next());
+            // Anything left on the line is treated as the predicate text.
+            // Empty -> unconditional breakpoint (matches the old behaviour).
+            const auto cond = ts.rest();
+            if (cond.empty()) {
+                dbg.breakpoint_set(addr);
+                return;
+            }
+            std::string err;
+            if (auto p = parse_bp_predicate(cond, err)) {
+                if (p->terms.empty())
+                    dbg.breakpoint_set(addr);
+                else
+                    dbg.breakpoint_set(addr, std::move(*p));
+            } else {
+                out << "ERROR: break: " << err << "\n";
+            }
         }
 
         void cmd_break_clear(debugger& dbg, tokenizer& ts, std::ostream&) {
@@ -221,8 +237,12 @@ namespace gbemu {
         void cmd_break_list(debugger& dbg, tokenizer&, std::ostream& out) {
             const auto bps = dbg.breakpoint_list();
             out << "=== breakpoints " << bps.size() << " ===\n";
-            for (auto a : bps)
-                out << hex_addr(a) << "\n";
+            for (auto a : bps) {
+                out << hex_addr(a);
+                if (const auto* pred = dbg.breakpoint_predicate(a))
+                    out << " if " << pred->source;
+                out << "\n";
+            }
         }
 
         void cmd_watch(debugger& dbg, tokenizer& ts, std::ostream&) {

@@ -58,7 +58,7 @@ run_result debugger::step_over() {
         if (sr.watchpoint_hit) {
             r.outcome = run_outcome::watchpoint;
             r.hit_addr = sr.watchpoint_addr;
-        } else if (breakpoint_has(core_.regs.pc)) {
+        } else if (breakpoint_should_fire(core_.regs.pc)) {
             r.outcome = run_outcome::breakpoint;
             r.hit_addr = core_.regs.pc;
         } else {
@@ -97,7 +97,7 @@ run_result debugger::run_until(const stop_condition& cond, std::uint64_t max_cyc
             r.hit_addr = sr.watchpoint_addr;
             return r;
         }
-        if (breakpoint_has(core_.regs.pc)) {
+        if (breakpoint_should_fire(core_.regs.pc)) {
             r.outcome = run_outcome::breakpoint;
             r.hit_addr = core_.regs.pc;
             return r;
@@ -166,18 +166,67 @@ std::uint16_t debugger::current_pc() const {
 
 void debugger::breakpoint_set(std::uint16_t addr) {
     bp_bitmap_[addr >> 3] |= static_cast<std::uint8_t>(1u << (addr & 7));
+    // A plain `breakpoint_set(addr)` re-arms unconditional behaviour: any
+    // previously-attached predicate at the same address is dropped.
+    bp_predicates_.erase(
+        std::remove_if(bp_predicates_.begin(), bp_predicates_.end(), [&](const auto& kv) { return kv.first == addr; }),
+        bp_predicates_.end());
+}
+
+void debugger::breakpoint_set(std::uint16_t addr, bp_predicate pred) {
+    bp_bitmap_[addr >> 3] |= static_cast<std::uint8_t>(1u << (addr & 7));
+    if (pred.terms.empty()) {
+        // Empty predicate -> unconditional; do not insert a redundant entry.
+        bp_predicates_.erase(std::remove_if(bp_predicates_.begin(), bp_predicates_.end(),
+                                            [&](const auto& kv) { return kv.first == addr; }),
+                             bp_predicates_.end());
+        return;
+    }
+    for (auto& kv : bp_predicates_) {
+        if (kv.first == addr) {
+            kv.second = std::move(pred);
+            return;
+        }
+    }
+    bp_predicates_.emplace_back(addr, std::move(pred));
 }
 
 void debugger::breakpoint_clear(std::uint16_t addr) {
     bp_bitmap_[addr >> 3] &= static_cast<std::uint8_t>(~(1u << (addr & 7)));
+    bp_predicates_.erase(
+        std::remove_if(bp_predicates_.begin(), bp_predicates_.end(), [&](const auto& kv) { return kv.first == addr; }),
+        bp_predicates_.end());
 }
 
 void debugger::breakpoint_toggle(std::uint16_t addr) {
-    bp_bitmap_[addr >> 3] ^= static_cast<std::uint8_t>(1u << (addr & 7));
+    const bool now_set = ((bp_bitmap_[addr >> 3] >> (addr & 7)) & 1) != 0;
+    if (now_set) {
+        breakpoint_clear(addr);
+    } else {
+        breakpoint_set(addr);
+    }
 }
 
 bool debugger::breakpoint_has(std::uint16_t addr) const {
     return (bp_bitmap_[addr >> 3] & (1u << (addr & 7))) != 0;
+}
+
+bool debugger::breakpoint_should_fire(std::uint16_t addr) const {
+    if (!breakpoint_has(addr))
+        return false;
+    for (const auto& kv : bp_predicates_) {
+        if (kv.first == addr)
+            return eval_bp_predicate(kv.second, core_);
+    }
+    return true; // unconditional breakpoint
+}
+
+const bp_predicate* debugger::breakpoint_predicate(std::uint16_t addr) const {
+    for (const auto& kv : bp_predicates_) {
+        if (kv.first == addr)
+            return &kv.second;
+    }
+    return nullptr;
 }
 
 std::vector<std::uint16_t> debugger::breakpoint_list() const {

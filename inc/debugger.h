@@ -9,6 +9,7 @@
 #    include <vector>
 
 #    include <absl/container/inlined_vector.h>
+#    include <bp_predicate.h>
 
 namespace gbemu {
     struct core;
@@ -115,11 +116,26 @@ namespace gbemu {
         std::uint16_t current_pc() const;
 
         // Breakpoints — backed by an 8 KB bitmap (1 bit per 16-bit address),
-        // so the per-step check is one load + one bit test.
+        // so the per-step check is one load + one bit test.  Conditional
+        // breakpoints attach a parsed `bp_predicate` to the address via a
+        // small side table; `breakpoint_should_fire` evaluates it when the
+        // bitmap matches.  The bitmap is also the truth for the disassembly
+        // panel's red-square marker (`breakpoint_has`) — both conditional
+        // and unconditional breakpoints display identically there.
         void breakpoint_set(std::uint16_t addr);
+        void breakpoint_set(std::uint16_t addr, bp_predicate pred);
         void breakpoint_clear(std::uint16_t addr);
         void breakpoint_toggle(std::uint16_t addr);
         bool breakpoint_has(std::uint16_t addr) const;
+        // True iff a breakpoint at `addr` should pause execution now.  When
+        // the address carries a predicate, the predicate is evaluated
+        // against the current core state.  A bitmap-only breakpoint always
+        // fires; an unknown address never fires.
+        bool breakpoint_should_fire(std::uint16_t addr) const;
+        // Returns the predicate attached to `addr`, or nullptr when the
+        // breakpoint is unconditional or absent.  The pointer is borrowed
+        // and invalidated by the next breakpoint mutation.
+        const bp_predicate* breakpoint_predicate(std::uint16_t addr) const;
         std::vector<std::uint16_t> breakpoint_list() const;
 
         // Watchpoints.
@@ -159,6 +175,10 @@ namespace gbemu {
         core& core_;
         std::vector<char> serial_buf_;
         std::array<std::uint8_t, 8192> bp_bitmap_{};
+        // Predicates attached to conditional breakpoints.  Linear-scanned —
+        // expected count is small (handful of bps at most), and entries are
+        // only consulted when the bitmap fast-path already matched the PC.
+        std::vector<std::pair<std::uint16_t, bp_predicate>> bp_predicates_{};
         absl::InlinedVector<watchpoint, 2> watchpoints_{};
         run_state state_{run_state::Running};
     };
