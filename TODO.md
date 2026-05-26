@@ -885,7 +885,7 @@ modello dentro la stessa lambda (window di 2 T-cycle + blackout 0xFF).
 
 ---
 
-## 17. Input refactor — hotkey manager + bindings configurabili — **step 1-2 fatti**
+## 17. Input refactor — hotkey manager + bindings configurabili — **step 1-3 fatti**
 
 **Stato**: il refactor del dispatcher è chiuso (passi 1 e 2 della sezione
 "Ordine consigliato" sotto). `inc/input.h` + `src/input.cpp` ospitano il
@@ -901,12 +901,21 @@ senza un edit parallelo. Modifier mask ora è **strict** (`Ctrl+Shift+R`
 non triggera `reset` — comportamento intenzionale, diverso dal vecchio
 loose match).
 
+**Step 3 — fatto.** Persistenza sotto il sub-block `input` in
+`<base>/user/user.conf` come tre liste indipendenti (`hotkeys`,
+`joypad_keyboard`, `joypad_controller`). `user_state_.input_bindings` è il
+campo di sponda; `Application::run` chiama `input_.set_cfg(...)` subito
+dopo `user_state_.load` e fa il mirror inverso (`user_state_.input_bindings
+= input_.cfg()`) prima di ogni `save`. Round-trip stringhe via
+`SDL_GetKeyName`/`SDL_GetKeyFromName`, `SDL_GameControllerGetStringForButton`,
+tabelline statiche per action/joypad button/kind/gate/mod-mask in
+`src/input.cpp`. Semantica di merge su load: sub-block mancante → defaults;
+una lista figlia assente → defaults solo per quella lista (così un
+hand-edit che ridefinisce solo `joypad_keyboard` non azzera `hotkeys`).
+Entry invalide → log warning + skip, il resto del blocco passa.
+
 **Cosa resta:**
 
-- **Step 3** — persistenza in `user_state_.input` (libconfig sub-block
-  `input`). Default kicks in se mancante; binding invalidi → log + skip.
-  `SDL_GetKeyFromName` / `SDL_GetKeyName` chiudono la conversione
-  testo↔keycode. Stima ~2-3 ore.
 - **Step 4** — UI di rebinding (modal "Press a key…"). Deferita a §12
   così la Player UI può decidere dove vive il menu Settings.
 

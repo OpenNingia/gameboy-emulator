@@ -44,6 +44,16 @@ namespace gbemu {
         const palette_resolver& palette() const { return resolver_; }
         void set_palette(const std::array<std::uint32_t, 4>& p) { resolver_.set_palette(p); }
 
+        // Public dispatch wrapper around the DMG vs CGB resolver paths.
+        // The OAM viewer in ui.cpp uses this so the sprite preview honours
+        // CGB OBJ palettes (bits 0-2 of the attribute byte) without having
+        // to duplicate the cgb_mode() branch.  Used internally by the BG /
+        // window / sprite render passes as well — exposed here so the same
+        // entry point is reused rather than re-derived on the caller side.
+        std::uint32_t resolve_pixel(palette_id id, std::uint8_t color_index) const {
+            return mmu_.cgb_mode() ? resolver_.resolve_cgb(id, color_index) : resolver_.resolve(id, color_index);
+        }
+
     private:
         mmu& mmu_;
         irq& irq_;
@@ -67,15 +77,6 @@ namespace gbemu {
         // Window's own line counter: advances only on scanlines where at least
         // one window pixel was actually drawn. Not the same as LY-WY.
         std::uint8_t window_line{0};
-
-        // Single dispatch point between the DMG and CGB palette paths. The
-        // PPU owns this choice (per ROAD_TO_GBC.md step 5) so the resolver
-        // can keep `resolve()` and `resolve_cgb()` as two distinct entrypoints
-        // and the BG / window / OBJ scanline code does not have to thread
-        // cgb_mode through every call site.
-        std::uint32_t resolve_pixel(palette_id id, std::uint8_t color_index) const {
-            return mmu_.cgb_mode() ? resolver_.resolve_cgb(id, color_index) : resolver_.resolve(id, color_index);
-        }
 
         // State machine
         void advance(std::uint32_t t_cycles);

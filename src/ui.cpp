@@ -1,10 +1,11 @@
 // Panels: Display, CPU, Disassembly, Memory (per-region tabs via the vendored
 // imgui_memory_editor.h), Breakpoints + Watchpoints, PPU (LCDC/STAT decode +
-// palette swatches + VRAM tile viewer + BG tile-map viewer), MBC (banking
-// state via mbc::debug_state), Serial (scrollback of debugger serial buffer),
-// PC-ring (clickable history of recent PCs).  Kept in one file — the panel
-// count is high but each panel is small and the shared `context` lookup is
-// trivial.  If this grows past ~1.5kLOC consider splitting per-panel.
+// palette swatches + VRAM tile viewer + BG tile-map viewer), OAM (40-sprite
+// grid + decoded table), MBC (banking state via mbc::debug_state), Serial
+// (scrollback of debugger serial buffer), PC-ring (clickable history of
+// recent PCs).  Kept in one file — the panel count is high but each panel
+// is small and the shared `context` lookup is trivial.  If this grows past
+// ~1.5kLOC consider splitting per-panel.
 
 #include <algorithm>
 #include <array>
@@ -76,6 +77,7 @@ namespace gbemu::ui {
         bool show_memory{true};
         bool show_breakpoints{true};
         bool show_ppu{true};
+        bool show_oam{true};
         bool show_mbc{true};
         bool show_serial{true};
         bool show_pc_ring{true};
@@ -102,6 +104,13 @@ namespace gbemu::ui {
         gbemu::gfx::presenter* ppu_tiles_present{nullptr};
         gbemu::gfx::presenter* ppu_bgmap_present{nullptr};
         int ppu_bgmap_idx{0}; // 0 → $9800, 1 → $9C00
+
+        // OAM panel: a single streaming presenter for the 40-sprite grid
+        // (8 cols x 5 rows of 8x16 cells = 64 x 80 px).  Cells are always
+        // sized for the 8x16 case; in 8x8 mode the bottom half of each
+        // cell is filled with a checkerboard so the user can tell at a
+        // glance which mode is active.  Lazy-created on first paint.
+        gbemu::gfx::presenter* oam_present{nullptr};
 
         // Menu-bar / popup state.
         host_actions actions{};
@@ -168,6 +177,7 @@ namespace gbemu::ui {
             ImGui::DockBuilderDockWindow("Display", dock_left_top);
             ImGui::DockBuilderDockWindow("Memory", dock_left_bot);
             ImGui::DockBuilderDockWindow("PPU", dock_left_bot);
+            ImGui::DockBuilderDockWindow("OAM", dock_left_bot);
             ImGui::DockBuilderDockWindow("CPU", dock_middle_top);
             ImGui::DockBuilderDockWindow("Disassembly", dock_middle_bot);
             ImGui::DockBuilderDockWindow("Breakpoints", dock_right_top);
@@ -437,6 +447,7 @@ namespace gbemu::ui {
                 ImGui::MenuItem("Memory", nullptr, &c.show_memory);
                 ImGui::MenuItem("Breakpoints", nullptr, &c.show_breakpoints);
                 ImGui::MenuItem("PPU", nullptr, &c.show_ppu);
+                ImGui::MenuItem("OAM", nullptr, &c.show_oam);
                 ImGui::MenuItem("MBC", nullptr, &c.show_mbc);
                 ImGui::MenuItem("Serial", nullptr, &c.show_serial);
                 ImGui::MenuItem("PC ring", nullptr, &c.show_pc_ring);
@@ -869,7 +880,17 @@ namespace gbemu::ui {
                     if (w.len > display_len)
                         std::snprintf(val_buf + pos, sizeof(val_buf) - static_cast<std::size_t>(pos), " ...");
 
-                    ImGui::Text("$%04X len=%u = %s", w.addr, static_cast<unsigned>(w.len), val_buf);
+                    // Surface the writer PC inline once the watchpoint has
+                    // fired at least once — answers the "who wrote here?"
+                    // question without bouncing through PC ring + manual
+                    // disassembly. Hex-only is enough; the user can click
+                    // through Disassembly's "Go to" to inspect the instr.
+                    if (w.has_fired) {
+                        ImGui::Text("$%04X len=%u = %s  by PC=$%04X", w.addr, static_cast<unsigned>(w.len), val_buf,
+                                    w.last_writer_pc);
+                    } else {
+                        ImGui::Text("$%04X len=%u = %s  by PC=—", w.addr, static_cast<unsigned>(w.len), val_buf);
+                    }
                     ImGui::PopID();
                 }
                 ImGui::EndListBox();
@@ -1027,6 +1048,216 @@ namespace gbemu::ui {
             refresh_bgmap_viewer_texture(c);
             if (c.ppu_bgmap_present)
                 ImGui::Image(gbemu::gfx::presenter_imgui_id(c.ppu_bgmap_present), ImVec2(256, 256));
+
+            ImGui::End();
+        }
+
+        // ---------- OAM panel ----------
+
+        // OAM viewer grid geometry.  Each cell hosts a 8x16 area: the top
+        // 8x8 holds the (top-half) sprite tile, the bottom 8x8 holds the
+        // bottom-half tile in 8x16 mode or a "(no tile here)" checkerboard
+        // in 8x8 mode.  Total grid: 8 columns * 5 rows = 40 entries
+        // (matches gb::OAM_ENTRIES).
+        constexpr std::uint32_t OAM_GRID_COLS = 8;
+        constexpr std::uint32_t OAM_GRID_ROWS = 5;
+        constexpr std::uint32_t OAM_CELL_W = 8;
+        constexpr std::uint32_t OAM_CELL_H = 16;
+        constexpr std::uint32_t OAM_TEX_W = OAM_GRID_COLS * OAM_CELL_W; // 64
+        constexpr std::uint32_t OAM_TEX_H = OAM_GRID_ROWS * OAM_CELL_H; // 80
+
+        // Render a single 8x8 sprite tile into `out` honouring x_flip /
+        // y_flip.  Sprite color index 0 is transparent on real hardware,
+        // so we paint it as a dim checkerboard to distinguish the
+        // sprite's silhouette from genuine background.  Colors 1..3 go
+        // through `ppu.resolve_pixel` so DMG OBP0/OBP1 and CGB OBJ palette
+        // RAM are both honoured automatically.
+        void decode_sprite_tile_8x8(const std::uint8_t* vram, std::uint8_t tile_idx, std::uint32_t* out,
+                                    std::uint32_t dst_stride, std::uint32_t dst_x, std::uint32_t dst_y,
+                                    const gbemu::ppu& ppu, gbemu::palette_id pal_id, bool x_flip, bool y_flip) {
+            const std::uint32_t off = static_cast<std::uint32_t>(tile_idx) * gb::TILE_BYTES;
+            for (std::uint32_t row = 0; row < gb::TILE_PIXELS; ++row) {
+                const std::uint32_t sr = y_flip ? (gb::TILE_PIXELS - 1 - row) : row;
+                const std::uint8_t lo = vram[off + sr * 2];
+                const std::uint8_t hi = vram[off + sr * 2 + 1];
+                for (std::uint32_t col = 0; col < gb::TILE_PIXELS; ++col) {
+                    const std::uint32_t sc = x_flip ? (gb::TILE_PIXELS - 1 - col) : col;
+                    const std::uint8_t shift = static_cast<std::uint8_t>(7 - sc);
+                    const std::uint8_t ci = gbemu::tile_color_index(lo, hi, shift);
+                    std::uint32_t px;
+                    if (ci == 0) {
+                        const bool ck = (((row >> 1) ^ (col >> 1)) & 1) != 0;
+                        px = ck ? 0xFF353535u : 0xFF252525u;
+                    } else {
+                        px = ppu.resolve_pixel(pal_id, ci);
+                    }
+                    out[(dst_y + row) * dst_stride + (dst_x + col)] = px;
+                }
+            }
+        }
+
+        // Repaint the OAM grid (gb::OAM_ENTRIES cells).  Walks the live OAM
+        // bytes, resolves per-sprite tile data, palette, flips, then stamps
+        // each sprite into its cell.  In 8x8 mode the bottom half of every
+        // cell is filled with a checkerboard so the user can see the active
+        // sprite size at a glance.  Always reads VRAM bank 1 on CGB when
+        // OAM attribute bit 3 is set; on DMG that bit is ignored.
+        void refresh_oam_viewer_texture(context& c) {
+            if (!c.oam_present) {
+                c.oam_present = gbemu::gfx::presenter_create(c.backend, OAM_TEX_W, OAM_TEX_H);
+                if (!c.oam_present)
+                    return;
+            }
+            std::array<std::uint32_t, OAM_TEX_W * OAM_TEX_H> pixels{};
+            const auto& mmu = c.core->mmu;
+            const auto& ppu = c.core->ppu;
+            const std::uint8_t lcdc = mmu.hwr_lcdc();
+            const bool tall = (lcdc & gb::lcdc::obj_size_8x16) != 0;
+            const bool cgb = mmu.cgb_mode();
+            const std::uint8_t* vram0 = mmu.vram_bank(0).data();
+            const std::uint8_t* vram1 = cgb ? mmu.vram_bank(1).data() : vram0;
+
+            for (int s = 0; s < gb::OAM_ENTRIES; ++s) {
+                const std::uint8_t off = static_cast<std::uint8_t>(s * gb::OAM_BYTES_PER_ENTRY);
+                const std::uint8_t tile = mmu.oam_read(static_cast<std::uint8_t>(off + 2));
+                const std::uint8_t attr = mmu.oam_read(static_cast<std::uint8_t>(off + 3));
+                const bool x_flip = (attr & gb::oam_attr::x_flip) != 0;
+                const bool y_flip = (attr & gb::oam_attr::y_flip) != 0;
+                const std::uint8_t* vram = (cgb && (attr & gb::oam_attr::cgb_vram_bank)) ? vram1 : vram0;
+
+                gbemu::palette_id pal_id;
+                if (cgb) {
+                    const std::uint8_t cgb_pal = attr & gb::oam_attr::cgb_palette_mask;
+                    pal_id = static_cast<gbemu::palette_id>(static_cast<std::uint8_t>(gbemu::palette_id::cgb_obj0) +
+                                                            cgb_pal);
+                } else {
+                    pal_id =
+                        (attr & gb::oam_attr::dmg_palette_obp1) ? gbemu::palette_id::obj1 : gbemu::palette_id::obj0;
+                }
+
+                const std::uint32_t cell_x = (static_cast<std::uint32_t>(s) % OAM_GRID_COLS) * OAM_CELL_W;
+                const std::uint32_t cell_y = (static_cast<std::uint32_t>(s) / OAM_GRID_COLS) * OAM_CELL_H;
+
+                if (tall) {
+                    // In 8x16 the LSB of the tile index is ignored: even
+                    // index is the top half, odd is the bottom.  Y-flip
+                    // swaps which physical position gets which tile (and
+                    // the per-tile y_flip still applies inside each half).
+                    const std::uint8_t top_tile = static_cast<std::uint8_t>(tile & 0xFE);
+                    const std::uint8_t bot_tile = static_cast<std::uint8_t>(tile | 0x01);
+                    const std::uint8_t tile_a = y_flip ? bot_tile : top_tile;
+                    const std::uint8_t tile_b = y_flip ? top_tile : bot_tile;
+                    decode_sprite_tile_8x8(vram, tile_a, pixels.data(), OAM_TEX_W, cell_x, cell_y, ppu, pal_id, x_flip,
+                                           y_flip);
+                    decode_sprite_tile_8x8(vram, tile_b, pixels.data(), OAM_TEX_W, cell_x, cell_y + 8, ppu, pal_id,
+                                           x_flip, y_flip);
+                } else {
+                    decode_sprite_tile_8x8(vram, tile, pixels.data(), OAM_TEX_W, cell_x, cell_y, ppu, pal_id, x_flip,
+                                           y_flip);
+                    // Mark the unused bottom half so 8x8 mode is visually
+                    // distinguishable from 8x16 at a glance.
+                    for (std::uint32_t row = 8; row < OAM_CELL_H; ++row) {
+                        for (std::uint32_t col = 0; col < OAM_CELL_W; ++col) {
+                            const bool ck = (((row >> 1) ^ (col >> 1)) & 1) != 0;
+                            pixels[(cell_y + row) * OAM_TEX_W + (cell_x + col)] = ck ? 0xFF181818u : 0xFF0C0C0Cu;
+                        }
+                    }
+                }
+            }
+            gbemu::gfx::presenter_upload(c.oam_present, pixels.data());
+        }
+
+        void draw_oam_panel(context& c) {
+            if (!c.show_oam)
+                return;
+            if (!ImGui::Begin("OAM", &c.show_oam)) {
+                ImGui::End();
+                return;
+            }
+
+            const auto& mmu = c.core->mmu;
+            const std::uint8_t lcdc = mmu.hwr_lcdc();
+            const bool tall = (lcdc & gb::lcdc::obj_size_8x16) != 0;
+            const bool obj_en = (lcdc & gb::lcdc::obj_enable) != 0;
+            const bool cgb = mmu.cgb_mode();
+
+            ImGui::Text("OBJ size %s    OBJ enable %s    Mode %s", tall ? "8x16" : "8x8", obj_en ? "yes" : "no",
+                        cgb ? "CGB" : "DMG");
+
+            ImGui::SeparatorText("Sprite grid (4x zoom)");
+            refresh_oam_viewer_texture(c);
+            if (c.oam_present)
+                ImGui::Image(gbemu::gfx::presenter_imgui_id(c.oam_present),
+                             ImVec2(static_cast<float>(OAM_TEX_W * 4), static_cast<float>(OAM_TEX_H * 4)));
+
+            ImGui::SeparatorText("Sprite table");
+            if (ImGui::BeginTable("##oam_table", 6,
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                                      ImGuiTableFlags_SizingFixedFit,
+                                  ImVec2(0, 12 * ImGui::GetTextLineHeightWithSpacing()))) {
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableSetupColumn("#");
+                ImGui::TableSetupColumn("Y");
+                ImGui::TableSetupColumn("X");
+                ImGui::TableSetupColumn("Tile");
+                ImGui::TableSetupColumn("Attr");
+                ImGui::TableSetupColumn("Flags");
+                ImGui::TableHeadersRow();
+
+                for (int i = 0; i < gb::OAM_ENTRIES; ++i) {
+                    const std::uint8_t off = static_cast<std::uint8_t>(i * gb::OAM_BYTES_PER_ENTRY);
+                    const std::uint8_t y_raw = mmu.oam_read(static_cast<std::uint8_t>(off + 0));
+                    const std::uint8_t x_raw = mmu.oam_read(static_cast<std::uint8_t>(off + 1));
+                    const std::uint8_t tile = mmu.oam_read(static_cast<std::uint8_t>(off + 2));
+                    const std::uint8_t attr = mmu.oam_read(static_cast<std::uint8_t>(off + 3));
+
+                    const int screen_y = static_cast<int>(y_raw) - 16;
+                    const int screen_x = static_cast<int>(x_raw) - 8;
+
+                    // Off-screen sprites are dimmed so the eye skips them.
+                    // Hardware hides a sprite when X or Y is fully outside
+                    // the active window — we use the rectangle the sprite
+                    // would occupy (8 wide, 8 or 16 tall) and check overlap
+                    // with the LCD frame.
+                    const int height = tall ? 16 : 8;
+                    const bool on_screen = (screen_y + height > 0 && screen_y < gb::LCD_HEIGHT && screen_x + 8 > 0 &&
+                                            screen_x < gb::LCD_WIDTH);
+
+                    ImGui::TableNextRow();
+                    if (!on_screen)
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("%2d", i);
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%4d  $%02X", screen_y, y_raw);
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%4d  $%02X", screen_x, x_raw);
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("$%02X", tile);
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("$%02X", attr);
+                    ImGui::TableSetColumnIndex(5);
+                    const bool prio = (attr & gb::oam_attr::bg_priority) != 0;
+                    const bool yflip = (attr & gb::oam_attr::y_flip) != 0;
+                    const bool xflip = (attr & gb::oam_attr::x_flip) != 0;
+                    if (cgb) {
+                        // On CGB the palette is a 0..7 index from bits 0-2;
+                        // the VRAM bank for tile data is bit 3.
+                        ImGui::Text("%c%c%c  pal=%u  bank=%u", prio ? 'P' : '-', yflip ? 'Y' : '-', xflip ? 'X' : '-',
+                                    static_cast<unsigned>(attr & gb::oam_attr::cgb_palette_mask),
+                                    (attr & gb::oam_attr::cgb_vram_bank) ? 1u : 0u);
+                    } else {
+                        const bool dmg_p = (attr & gb::oam_attr::dmg_palette_obp1) != 0;
+                        ImGui::Text("%c%c%c  %s", prio ? 'P' : '-', yflip ? 'Y' : '-', xflip ? 'X' : '-',
+                                    dmg_p ? "OBP1" : "OBP0");
+                    }
+
+                    if (!on_screen)
+                        ImGui::PopStyleColor();
+                }
+                ImGui::EndTable();
+            }
 
             ImGui::End();
         }
@@ -1241,6 +1472,8 @@ namespace gbemu::ui {
         ctx->ppu_tiles_present = nullptr;
         gbemu::gfx::presenter_destroy(ctx->ppu_bgmap_present);
         ctx->ppu_bgmap_present = nullptr;
+        gbemu::gfx::presenter_destroy(ctx->oam_present);
+        ctx->oam_present = nullptr;
         gbemu::gfx::presenter_destroy(ctx->display_present);
         ctx->display_present = nullptr;
         ImGui_ImplSDLRenderer2_Shutdown();
@@ -1293,6 +1526,7 @@ namespace gbemu::ui {
         draw_memory_panel(*ctx);
         draw_breakpoints_panel(*ctx);
         draw_ppu_panel(*ctx);
+        draw_oam_panel(*ctx);
         draw_mbc_panel(*ctx);
         draw_serial_panel(*ctx);
         draw_pc_ring_panel(*ctx);

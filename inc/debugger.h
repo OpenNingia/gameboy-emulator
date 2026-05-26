@@ -14,11 +14,20 @@ namespace gbemu {
     struct core;
 
     // Watchpoint: range [addr, addr+len) sampled after every step.  When any
-    // byte differs from the last sample, the watchpoint fires
+    // byte differs from the last sample, the watchpoint fires.
+    //
+    // `last_writer_pc` captures the PC of the instruction that was about to
+    // execute when the change was observed (i.e. the writer).  It is the PC
+    // *before* the step that triggered the change, so a CALL/JP/IRQ that
+    // moved PC after the write still resolves to the originating instruction.
+    // Valid only when `has_fired` is true (a freshly seeded watchpoint has
+    // no writer yet).
     struct watchpoint {
         std::uint16_t addr;
         std::uint16_t len;
         absl::InlinedVector<std::uint8_t, 4> last;
+        std::uint16_t last_writer_pc{0};
+        bool has_fired{false};
     };
 
     enum class stop_kind {
@@ -40,6 +49,9 @@ namespace gbemu {
         std::uint32_t cycles{0};
         bool watchpoint_hit{false};
         std::uint16_t watchpoint_addr{0};
+        // PC of the instruction whose execution triggered the watchpoint
+        // (the pre-step PC).  Meaningful only when `watchpoint_hit` is true.
+        std::uint16_t watchpoint_writer_pc{0};
     };
 
     enum class run_outcome {
@@ -139,7 +151,10 @@ namespace gbemu {
     private:
         // Returns true and refreshes `last` if any watched byte changed.  Caller
         // gets the first changed watchpoint's base address via `out_addr`.
-        bool sample_watchpoints(std::uint16_t& out_addr);
+        // `writer_pc` is recorded into every changed watchpoint's
+        // `last_writer_pc` field — it is the PC of the instruction that just
+        // executed, captured by the caller before the step.
+        bool sample_watchpoints(std::uint16_t& out_addr, std::uint16_t writer_pc);
 
         core& core_;
         std::vector<char> serial_buf_;

@@ -42,12 +42,14 @@ uint8_t cpu::step() {
         return static_cast<std::uint8_t>(step_cycles);
     }
 
-    // EI delay: applica IME=true se EI eseguito allo step precedente
-    if (ime_pending && !ei_just_executed) {
-        interrupt_enabled = true;
-        ime_pending = false;
-    }
-    ei_just_executed = false;
+    // EI delay: the ime_pending → interrupt_enabled promotion used to live
+    // here (top of cpu::step).  It was moved to core::step, between this
+    // call and irq::dispatch(), so a "DI" landing one instruction after
+    // EI cannot mask the IRQ window that real hardware exposes between
+    // the EI-following instruction and the next one.  See core::step for
+    // the load-bearing ordering.  ei_just_executed is still mutated by
+    // the EI opcode body and cleared by core::step after the promotion
+    // check.
     extra_cycles = 0;
 
     auto op = fetch();

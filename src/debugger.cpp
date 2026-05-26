@@ -22,12 +22,19 @@ debugger::debugger(core& c) : core_(c) {
 
 step_result debugger::step() {
     step_result r{};
+    // Snapshot the PC *before* the step so we can credit any watchpoint
+    // change to the instruction that produced it.  Capturing here (rather
+    // than after core_.step()) is load-bearing: by the time the step
+    // returns, regs.pc has advanced past the writer (and a CALL/JP/RST/IRQ
+    // dispatch may have moved it somewhere completely unrelated).
+    const std::uint16_t pre_pc = core_.regs.pc;
     r.cycles = core_.step();
     if (!watchpoints_.empty()) {
         std::uint16_t hit_addr = 0;
-        if (sample_watchpoints(hit_addr)) {
+        if (sample_watchpoints(hit_addr, pre_pc)) {
             r.watchpoint_hit = true;
             r.watchpoint_addr = hit_addr;
+            r.watchpoint_writer_pc = pre_pc;
         }
     }
     return r;
@@ -207,7 +214,7 @@ void debugger::watchpoint_clear_all() {
     watchpoints_.clear();
 }
 
-bool debugger::sample_watchpoints(std::uint16_t& out_addr) {
+bool debugger::sample_watchpoints(std::uint16_t& out_addr, std::uint16_t writer_pc) {
     bool any = false;
     for (auto& w : watchpoints_) {
         bool changed = false;
@@ -218,9 +225,13 @@ bool debugger::sample_watchpoints(std::uint16_t& out_addr) {
                 changed = true;
             }
         }
-        if (changed && !any) {
-            out_addr = w.addr;
-            any = true;
+        if (changed) {
+            w.last_writer_pc = writer_pc;
+            w.has_fired = true;
+            if (!any) {
+                out_addr = w.addr;
+                any = true;
+            }
         }
     }
     return any;

@@ -240,8 +240,12 @@ namespace gbemu {
         void cmd_watch_list(debugger& dbg, tokenizer&, std::ostream& out) {
             const auto& ws = dbg.watchpoints();
             out << "=== watchpoints " << ws.size() << " ===\n";
-            for (const auto& w : ws)
-                out << hex_addr(w.addr) << " len=" << w.len << "\n";
+            for (const auto& w : ws) {
+                out << hex_addr(w.addr) << " len=" << w.len;
+                if (w.has_fired)
+                    out << " writer=" << hex_addr(w.last_writer_pc);
+                out << "\n";
+            }
         }
 
         void cmd_dump(debugger& dbg, tokenizer& ts, std::ostream& out) {

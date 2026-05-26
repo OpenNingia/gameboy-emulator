@@ -98,6 +98,27 @@ std::uint32_t core::step() {
         // relative order it would on the per-instruction model.  See the
         // callback comment in core.h for why.
         auto total = static_cast<std::uint32_t>(cpu.step());
+
+        // EI delay promotion lives HERE, between the just-executed
+        // instruction and the IRQ dispatch check.  The two-flag protocol:
+        // EI sets ime_pending + ei_just_executed in the same step; the
+        // first time this block runs after EI both flags are true so the
+        // condition is false (no promotion, IME stays off through the
+        // post-EI instruction).  ei_just_executed is then cleared, so on
+        // the NEXT pass through this block — i.e. after the second
+        // instruction past EI has executed — the check passes and IME
+        // goes high BEFORE irq.dispatch().  Doing this inside cpu.step
+        // (at the top of the next instruction) used to let a DI landing
+        // one instruction past EI clobber the freshly-set IME before the
+        // dispatch ran, masking the IRQ window that real hardware
+        // exposes.  Kirby's Dream Land 2 hangs on its idle loop without
+        // this ordering.
+        if (cpu.ime_pending && !cpu.ei_just_executed) {
+            cpu.interrupt_enabled = true;
+            cpu.ime_pending = false;
+        }
+        cpu.ei_just_executed = false;
+
         if (irq.dispatch()) {
             total += 20;
         }
