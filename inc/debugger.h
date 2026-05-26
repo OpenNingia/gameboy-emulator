@@ -38,18 +38,30 @@ namespace gbemu {
     };
 
     enum class stop_kind {
-        none,         // run until breakpoint / max_cycles (no user condition)
-        pc_eq,        // stop when PC reaches `value`
-        cycles_ge,    // stop when core.total_cycles >= value
-        serial_match, // stop when serial_buffer contains `serial_match`
-        vblank,       // stop on the next PPU frame-ready edge
-        instr_count,  // stop after `value` instructions executed in this run
+        none,          // run until breakpoint / max_cycles (no user condition)
+        pc_eq,         // stop when PC reaches `value`
+        cycles_ge,     // stop when core.total_cycles >= value
+        serial_match,  // stop when serial_buffer contains `serial_match`
+        vblank,        // stop on the next PPU frame-ready edge
+        instr_count,   // stop after `value` instructions executed in this run
+        bg_text_match, // stop when the BG tile map (read as ASCII) contains `text_match`.
+                       // Used by the Blargg "screen-only" tests (halt_bug, interrupt_time):
+                       // shell.inc writes ASCII codes directly into the tile map so the
+                       // tile-index byte at $9800/$9C00+n is the character at column n%32,
+                       // row n/32.  Scanned at each VBlank edge to keep the cost bounded.
+        ld_b_b,        // stop when the CPU executes opcode $40 (`LD B, B`).  This is a
+                       // no-op on real hardware but the Mooneye test-suite uses it as a
+                       // "test complete" marker — the script then dumps regs and the
+                       // EXPECT regex matches the Fibonacci pass fingerprint
+                       // (B=3, C=5, D=8, E=13, H=21, L=34 → "BC=0305 DE=080D HL=1522").
+                       // The opcode is sampled at PC before each step() call.
     };
 
     struct stop_condition {
         stop_kind kind{stop_kind::none};
         std::uint64_t value{0};
         std::string serial_match{};
+        std::string text_match{};
     };
 
     struct step_result {
@@ -159,6 +171,18 @@ namespace gbemu {
         void dump_ppu(std::ostream& os) const;
         void dump_mbc(std::ostream& os) const;
         void dump_stack(std::ostream& os, std::size_t n) const;
+        // Decode the BG tile map at $9800 or $9C00 (per LCDC bit 3) as a 32×32
+        // grid of ASCII characters and write it to `os`.  Useful for the Blargg
+        // "screen-only" test ROMs (halt_bug, interrupt_time), whose shell.inc
+        // backend writes the result text into the BG map by storing the ASCII
+        // code directly into each tile index.  Non-printable codes are rendered
+        // as spaces; each tile-map row is followed by a `\n`.  The decoded
+        // string is what `stop_kind::bg_text_match` searches in `text_match`.
+        void dump_bg_text(std::ostream& os) const;
+        // Build and return the same 32×32 ASCII grid `dump_bg_text` would
+        // print.  Exposed separately so `run_until` can substring-search it
+        // on every VBlank without round-tripping through an ostream.
+        std::string bg_text_snapshot() const;
 
         // Serial buffer (populated by handler installed in ctor on $FF02).
         const std::vector<char>& serial_buffer() const { return serial_buf_; }

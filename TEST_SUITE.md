@@ -29,7 +29,7 @@ see *Workflow* below for the configure flow and how to add a new test.
 |-------|------|----------|------------|
 | Blargg `cpu_instrs` | <https://github.com/retrio/gb-test-roms> | Every CPU opcode, semantics of flags and operands | Pass |
 | Blargg `instr_timing` | same | Per-opcode T-cycle count | Pass |
-| Blargg `mem_timing` / `mem_timing-2` | same | Sub-instruction timing of memory bus accesses (mid-opcode read/write cycles) | **Fail** — requires sub-instruction cycle accuracy (TODO §6) |
+| Blargg `mem_timing` / `mem_timing-2` | same | Sub-instruction timing of memory bus accesses (mid-opcode read/write cycles) | Pass |
 | Blargg `halt_bug` | same | HALT instruction edge case when IME=0 and pending IRQ | Pass |
 | Blargg `interrupt_time` | same | Number of cycles consumed by IRQ dispatch | Pass |
 | Blargg `oam_bug` | same | DMG-only OAM corruption when inc/dec near sprite RAM | Not implemented (DMG hardware bug we don't model) |

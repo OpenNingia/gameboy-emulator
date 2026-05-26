@@ -116,6 +116,14 @@ run_result debugger::run_until(const stop_condition& cond, std::uint64_t max_cyc
     std::size_t serial_scan_pos = 0;
 
     while (r.cycles_consumed < max_cycles) {
+        // Pre-step snapshot needed by `ld_b_b`: the opcode about to be fetched
+        // by this iteration's step().  After step() the PC has moved past the
+        // instruction (and a CALL/JP/IRQ may have rewritten it altogether), so
+        // the opcode byte has to be sampled here.  We only pay the mmu read
+        // for the kind that needs it — every other stop kind skips it.
+        const auto pre_pc = core_.regs.pc;
+        const std::uint8_t pre_op = (cond.kind == stop_kind::ld_b_b) ? core_.mmu.read_u8(pre_pc) : 0;
+
         const auto sr = step();
         r.cycles_consumed += sr.cycles;
         ++r.instructions;
@@ -174,6 +182,28 @@ run_result debugger::run_until(const stop_condition& cond, std::uint64_t max_cyc
             case stop_kind::instr_count:
                 if (r.instructions >= cond.value) {
                     r.outcome = run_outcome::condition;
+                    return r;
+                }
+                break;
+            case stop_kind::bg_text_match: {
+                // Throttle the (1024 mmu reads + substring search) scan to one
+                // pass per emulated frame — Blargg only repaints the result
+                // text at VBlank, so per-step scanning would burn cycles for
+                // no gain.  In headless mode no other consumer cares about
+                // the frame_ready edge, so consuming it here is fine.
+                if (cond.text_match.empty() || !core_.ppu.consume_frame_ready())
+                    break;
+                const auto s = bg_text_snapshot();
+                if (s.find(cond.text_match) != std::string::npos) {
+                    r.outcome = run_outcome::condition;
+                    return r;
+                }
+                break;
+            }
+            case stop_kind::ld_b_b:
+                if (pre_op == 0x40) {
+                    r.outcome = run_outcome::condition;
+                    r.hit_addr = pre_pc;
                     return r;
                 }
                 break;
@@ -425,6 +455,31 @@ void debugger::dump_mbc(std::ostream& os) const {
         os << buf;
         os << "bank_state=(no cartridge attached)\n";
     }
+}
+
+std::string debugger::bg_text_snapshot() const {
+    // Blargg's shell.inc text backend stores ASCII codes directly into the BG
+    // tile map (the matching font glyph is loaded into VRAM at the tile index
+    // == ASCII slot at boot), so reading the map back byte-for-byte yields
+    // the on-screen text.  The full 32×32 map is scanned even though only
+    // 20×18 tiles are visible: padding rows/columns contain Blargg's blank
+    // tile ($7F or $00) which we collapse to space below.
+    const auto lcdc = core_.mmu.hwr_lcdc();
+    const std::uint16_t map_base = (lcdc & 0x08) ? 0x9C00 : 0x9800;
+    std::string s;
+    s.reserve(33 * 32);
+    for (std::uint16_t row = 0; row < 32; ++row) {
+        for (std::uint16_t col = 0; col < 32; ++col) {
+            const auto t = core_.mmu.read_u8(static_cast<std::uint16_t>(map_base + row * 32 + col));
+            s.push_back((t >= 0x20 && t < 0x7F) ? static_cast<char>(t) : ' ');
+        }
+        s.push_back('\n');
+    }
+    return s;
+}
+
+void debugger::dump_bg_text(std::ostream& os) const {
+    os << bg_text_snapshot();
 }
 
 void debugger::dump_stack(std::ostream& os, std::size_t n) const {

@@ -1,0 +1,20 @@
+# Mooneye test-suite harness.
+#
+# Each Mooneye ROM ends by executing `LD B, B` (opcode $40) as a "test
+# complete" marker after computing its result.  On pass it sets the
+# Fibonacci fingerprint B=3, C=5, D=8, E=13, H=21, L=34 — see the
+# Mooneye howto: <C:\code\emu\gb-test-roms\mooneye-test-suite\
+# game-boy-test-roms-howto.md>.
+#
+# `run-until ld-b-b` stops on that opcode; `dump regs` writes the live
+# register line to the output file; CTest's EXPECT regex matches the
+# pass fingerprint substring "BC=0305 DE=080D HL=1522".  A fail test
+# lands on the same LD B, B with non-Fibonacci registers, so the regex
+# misses and ctest reports a fail.
+#
+# Mooneye's reference runner allows up to 120 emulated seconds per test
+# (~500M T-cycles).  Most tests finish in well under 1M cycles, so the
+# generous safety cap below only matters for a runaway emulator bug.
+run-until ld-b-b max-cycles 500000000
+dump regs
+exit

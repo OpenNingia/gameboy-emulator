@@ -8,11 +8,11 @@
 //   step N
 //   step-cycles N
 //   run-until pc ADDR | cycles N | serial-match "TEXT" | vblank | bp |
-//              instr-count N    [max-cycles N]
+//              instr-count N | bg-text-match "TEXT" | ld-b-b  [max-cycles N]
 //   break ADDR [COND...]  /  break-clear ADDR  /  break-clear-all  /  break-list
 //   watch ADDR [LEN]  /  watch-clear ADDR  /  watch-clear-all  /  watch-list
 //   dump regs | mem ADDR LEN | ppu | mbc | pc-ring [N] | stack [N] |
-//        framebuffer PATH.ppm
+//        framebuffer PATH.ppm | bg-text
 //   disasm pc [N]  /  disasm ADDR [N]
 //   serial-clear  /  serial-dump
 //   echo TEXT...
@@ -183,6 +183,11 @@ namespace gbemu {
             } else if (kind_tok == "instr-count") {
                 cond.kind = stop_kind::instr_count;
                 cond.value = parse_u64(ts.next());
+            } else if (kind_tok == "bg-text-match") {
+                cond.kind = stop_kind::bg_text_match;
+                cond.text_match = ts.next();
+            } else if (kind_tok == "ld-b-b") {
+                cond.kind = stop_kind::ld_b_b;
             } else {
                 out << "ERROR: run-until: unknown kind '" << kind_tok << "'\n";
                 return;
@@ -301,6 +306,9 @@ namespace gbemu {
                     n = static_cast<std::size_t>(parse_u64(ts.next()));
                 out << "=== stack " << n << " ===\n";
                 dbg.dump_stack(out, n);
+            } else if (kind == "bg-text") {
+                out << "=== bg-text @cycle=" << dbg.total_cycles() << " ===\n";
+                dbg.dump_bg_text(out);
             } else if (kind == "framebuffer") {
                 const auto path = ts.next();
                 if (path.empty()) {
