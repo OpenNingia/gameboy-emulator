@@ -14,19 +14,25 @@
 namespace gbemu {
     struct core;
 
-    // Watchpoint: range [addr, addr+len) sampled after every step.  When any
-    // byte differs from the last sample, the watchpoint fires.
+    // Watchpoint: range [addr, addr+len).  Driven by the mmu's bus_write
+    // observer (see mmu::add_bus_write_observer): any CPU-bus write that
+    // lands inside the range fires the watchpoint, regardless of whether
+    // the byte at that address is readable / actually mutated.  This is
+    // why a watchpoint on $2000 catches MBC bank-low writes that never
+    // touch a readable byte: the observer sees the write *before* the
+    // mmu dispatches it to the MBC.
     //
-    // `last_writer_pc` captures the PC of the instruction that was about to
-    // execute when the change was observed (i.e. the writer).  It is the PC
-    // *before* the step that triggered the change, so a CALL/JP/IRQ that
-    // moved PC after the write still resolves to the originating instruction.
-    // Valid only when `has_fired` is true (a freshly seeded watchpoint has
-    // no writer yet).
+    // `last_writer_pc` is the PC of the instruction whose execution
+    // produced the write (snapshotted by `debugger::step` before
+    // `core::step()`).  A CALL/JP/IRQ landing on the same step still
+    // resolves to the originating instruction.  `last_value` is the byte
+    // the writer actually wrote — useful for control registers where the
+    // value *is* the information (e.g. "MBC5 bank-low <- 0x20").  Both
+    // are meaningful only when `has_fired` is true.
     struct watchpoint {
         std::uint16_t addr;
         std::uint16_t len;
-        absl::InlinedVector<std::uint8_t, 4> last;
+        std::uint8_t last_value{0};
         std::uint16_t last_writer_pc{0};
         bool has_fired{false};
     };
@@ -158,6 +164,12 @@ namespace gbemu {
         const std::vector<char>& serial_buffer() const { return serial_buf_; }
         void serial_clear() { serial_buf_.clear(); }
 
+        // Last PPU framebuffer (160×144 ARGB8888).  Updated by the PPU on
+        // every HBlank-of-line-143; the pointer stays stable across frames
+        // (the underlying array lives inside the PPU).  Consumed by the
+        // script-runner `dump framebuffer PATH.ppm` command.
+        const std::uint32_t* framebuffer() const;
+
         // Run-state controls (interactive UI only).
         bool is_paused() const { return state_ == run_state::Paused; }
         void pause() { state_ = run_state::Paused; }
@@ -165,12 +177,13 @@ namespace gbemu {
         void toggle_running() { state_ = is_paused() ? run_state::Running : run_state::Paused; }
 
     private:
-        // Returns true and refreshes `last` if any watched byte changed.  Caller
-        // gets the first changed watchpoint's base address via `out_addr`.
-        // `writer_pc` is recorded into every changed watchpoint's
-        // `last_writer_pc` field — it is the PC of the instruction that just
-        // executed, captured by the caller before the step.
-        bool sample_watchpoints(std::uint16_t& out_addr, std::uint16_t writer_pc);
+        // Bus-write observer entry point — registered with mmu in the ctor.
+        // Scans `watchpoints_` for ranges that cover `addr` and records the
+        // hit (first hit per step wins, subsequent writes in the same step
+        // don't override it so the user sees the *originating* write).
+        // `pending_writer_pc_` is the PC snapshotted by `step()` immediately
+        // before `core_.step()`.
+        void on_bus_write(std::uint16_t addr, std::uint8_t val);
 
         core& core_;
         std::vector<char> serial_buf_;
@@ -180,6 +193,14 @@ namespace gbemu {
         // only consulted when the bitmap fast-path already matched the PC.
         std::vector<std::pair<std::uint16_t, bp_predicate>> bp_predicates_{};
         absl::InlinedVector<watchpoint, 2> watchpoints_{};
+        // Transient per-step state populated by `step()` / `on_bus_write`.
+        // `pending_writer_pc_` is the PC at the top of the current step (so
+        // the observer can credit any write to it); `pending_wp_hit_` tracks
+        // whether a watchpoint fired during the step, and `pending_wp_addr_`
+        // remembers which one (first wins).
+        std::uint16_t pending_writer_pc_{0};
+        bool pending_wp_hit_{false};
+        std::uint16_t pending_wp_addr_{0};
         run_state state_{run_state::Running};
     };
 

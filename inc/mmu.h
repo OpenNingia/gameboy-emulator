@@ -86,6 +86,18 @@ namespace gbemu {
         // redirect feeds the next.
         void add_mmio_write_redirect(std::uint16_t addr, mmio_write_redirect_fn fn);
 
+        // Bus-wide write observer: invoked at the top of write_u8 for *every*
+        // CPU-bus write, including control writes on $0000-$7FFF (MBC banking,
+        // RAM enable, mode select) that intercept at the cartridge and never
+        // mutate a readable byte.  Used by the debugger's watchpoints so they
+        // can fire on bank-switch and similar otherwise-invisible writes.
+        // Bypass accessors (`oam_write`, `io_store`, `vram_write`) do *not*
+        // route through this hook by design — chip-internal pokes (timer DIV
+        // increments, APU read-mask reapplication, OAM DMA copies) would
+        // otherwise drown the observer.
+        using bus_write_observer_fn = std::function<void(std::uint16_t /*addr*/, std::uint8_t /*val*/)>;
+        void add_bus_write_observer(bus_write_observer_fn fn);
+
         std::uint16_t read_u16(std::uint16_t addr) { return read_u8(addr) + (read_u8(addr + 1) << 8); }
 
         void write_u16(std::uint16_t addr, std::uint16_t val) {
@@ -254,5 +266,8 @@ namespace gbemu {
         // mmio byte) or one (a single subsystem-driven redirect).
         std::array<absl::InlinedVector<mmio_read_fn, 1>, 0x80> mmio_read_handlers_{};
         std::array<absl::InlinedVector<mmio_write_redirect_fn, 1>, 0x80> mmio_write_redirects_{};
+        // Bus-wide write observers — see add_bus_write_observer().  Typical
+        // occupancy is zero (release build) or one (debugger active).
+        absl::InlinedVector<bus_write_observer_fn, 1> bus_write_observers_{};
     };
 } // namespace gbemu

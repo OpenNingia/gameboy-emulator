@@ -11,7 +11,8 @@
 //              instr-count N    [max-cycles N]
 //   break ADDR [COND...]  /  break-clear ADDR  /  break-clear-all  /  break-list
 //   watch ADDR [LEN]  /  watch-clear ADDR  /  watch-clear-all  /  watch-list
-//   dump regs | mem ADDR LEN | ppu | mbc | pc-ring [N] | stack [N]
+//   dump regs | mem ADDR LEN | ppu | mbc | pc-ring [N] | stack [N] |
+//        framebuffer PATH.ppm
 //   disasm pc [N]  /  disasm ADDR [N]
 //   serial-clear  /  serial-dump
 //   echo TEXT...
@@ -28,6 +29,7 @@
 #include <string>
 
 #include <debugger.h>
+#include <gb_layout.h>
 
 namespace gbemu {
 
@@ -262,8 +264,11 @@ namespace gbemu {
             out << "=== watchpoints " << ws.size() << " ===\n";
             for (const auto& w : ws) {
                 out << hex_addr(w.addr) << " len=" << w.len;
-                if (w.has_fired)
-                    out << " writer=" << hex_addr(w.last_writer_pc);
+                if (w.has_fired) {
+                    char vb[8];
+                    std::snprintf(vb, sizeof(vb), "$%02X", w.last_value);
+                    out << " wrote=" << vb << " writer=" << hex_addr(w.last_writer_pc);
+                }
                 out << "\n";
             }
         }
@@ -296,6 +301,31 @@ namespace gbemu {
                     n = static_cast<std::size_t>(parse_u64(ts.next()));
                 out << "=== stack " << n << " ===\n";
                 dbg.dump_stack(out, n);
+            } else if (kind == "framebuffer") {
+                const auto path = ts.next();
+                if (path.empty()) {
+                    out << "ERROR: dump framebuffer: missing PATH\n";
+                    return;
+                }
+                // PPM "P6" binary: ASCII header (magic, width, height, max-val)
+                // followed by 3 raw bytes per pixel.  We dump the PPU's
+                // ARGB8888 framebuffer, dropping the alpha byte.
+                std::ofstream ppm(path, std::ios::binary);
+                if (!ppm) {
+                    out << "ERROR: dump framebuffer: cannot open '" << path << "' for writing\n";
+                    return;
+                }
+                ppm << "P6\n" << gb::LCD_WIDTH << " " << gb::LCD_HEIGHT << "\n255\n";
+                const std::uint32_t* fb = dbg.framebuffer();
+                for (int i = 0; i < gb::LCD_WIDTH * gb::LCD_HEIGHT; ++i) {
+                    const std::uint32_t p = fb[i];
+                    const unsigned char rgb[3] = {static_cast<unsigned char>((p >> 16) & 0xFF),
+                                                  static_cast<unsigned char>((p >> 8) & 0xFF),
+                                                  static_cast<unsigned char>(p & 0xFF)};
+                    ppm.write(reinterpret_cast<const char*>(rgb), 3);
+                }
+                out << "=== framebuffer @cycle=" << dbg.total_cycles() << " ===\n"
+                    << gb::LCD_WIDTH << "x" << gb::LCD_HEIGHT << " saved to " << path << "\n";
             } else {
                 out << "ERROR: dump: unknown kind '" << kind << "'\n";
             }

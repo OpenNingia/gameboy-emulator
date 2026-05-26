@@ -114,7 +114,8 @@ namespace gbemu::ui {
         // vs $9C00); independent of LCDC.3 so the user can inspect either.
         gbemu::gfx::presenter* ppu_tiles_present{nullptr};
         gbemu::gfx::presenter* ppu_bgmap_present{nullptr};
-        int ppu_bgmap_idx{0}; // 0 → $9800, 1 → $9C00
+        int ppu_bgmap_idx{0};  // 0 → $9800, 1 → $9C00
+        int ppu_tiles_bank{0}; // CGB: 0 → VRAM bank 0, 1 → VRAM bank 1
 
         // OAM panel: a single streaming presenter for the 40-sprite grid
         // (8 cols x 5 rows of 8x16 cells = 64 x 80 px).  Cells are always
@@ -958,14 +959,15 @@ namespace gbemu::ui {
                     if (w.len > display_len)
                         std::snprintf(val_buf + pos, sizeof(val_buf) - static_cast<std::size_t>(pos), " ...");
 
-                    // Surface the writer PC inline once the watchpoint has
-                    // fired at least once — answers the "who wrote here?"
-                    // question without bouncing through PC ring + manual
-                    // disassembly. Hex-only is enough; the user can click
-                    // through Disassembly's "Go to" to inspect the instr.
+                    // Surface the writer PC + the byte the writer actually
+                    // wrote inline once the watchpoint has fired.  Showing
+                    // the written value is load-bearing for control
+                    // registers (MBC bank-switch, HDMA5 trigger, etc.)
+                    // where the visible byte under "= " may differ from
+                    // what the program wrote.
                     if (w.has_fired) {
-                        ImGui::Text("$%04X len=%u = %s  by PC=$%04X", w.addr, static_cast<unsigned>(w.len), val_buf,
-                                    w.last_writer_pc);
+                        ImGui::Text("$%04X len=%u = %s  wrote $%02X by PC=$%04X", w.addr, static_cast<unsigned>(w.len),
+                                    val_buf, w.last_value, w.last_writer_pc);
                     } else {
                         ImGui::Text("$%04X len=%u = %s  by PC=—", w.addr, static_cast<unsigned>(w.len), val_buf);
                     }
@@ -1010,7 +1012,12 @@ namespace gbemu::ui {
             }
             std::array<std::uint32_t, 128 * 192> pixels{};
             const auto& resolver = c.core->ppu.palette();
-            const std::uint8_t* vram = c.core->mmu.vram_bank().data();
+            // CGB carts can stash pixel data in VRAM bank 1 (selected via the
+            // BG attribute byte's bit 3); the viewer's `ppu_tiles_bank` toggle
+            // lets the user inspect either bank independently of what the
+            // game has VBK latched to right now.
+            const std::uint8_t bank = static_cast<std::uint8_t>(c.ppu_tiles_bank ? 1 : 0);
+            const std::uint8_t* vram = c.core->mmu.vram_bank(bank).data();
             // The viewer covers $8000-$97FF: 384 tiles laid out 16 wide × 24 tall.
             constexpr std::uint32_t tiles_per_row = 16;
             constexpr std::uint32_t total_tiles = 384;
@@ -1115,6 +1122,15 @@ namespace gbemu::ui {
             // docked-but-hidden PPU panel stays cheap.  Textures live across
             // hides (only freed in ui::shutdown) so reopening is instant.
             ImGui::SeparatorText("VRAM tiles ($8000-$97FF)");
+            // Bank toggle is only meaningful on CGB; on DMG bank 1 is always
+            // empty so the radio is hidden to keep the panel clean.
+            if (c.core->mmu.cgb_mode()) {
+                ImGui::RadioButton("Bank 0##tiles", &c.ppu_tiles_bank, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton("Bank 1##tiles", &c.ppu_tiles_bank, 1);
+            } else {
+                c.ppu_tiles_bank = 0;
+            }
             refresh_tile_viewer_texture(c);
             if (c.ppu_tiles_present)
                 ImGui::Image(gbemu::gfx::presenter_imgui_id(c.ppu_tiles_present), ImVec2(128 * 2, 192 * 2));

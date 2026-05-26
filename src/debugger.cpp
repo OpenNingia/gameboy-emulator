@@ -18,26 +18,54 @@ debugger::debugger(core& c) : core_(c) {
             serial_buf_.push_back(static_cast<char>(core_.mmu.hwr_sb()));
         }
     });
+    // Bus-wide write observer — drives watchpoints.  Installing this from
+    // the ctor (after core has been constructed) means the post-BIOS
+    // initialize_registers() pokes have already run and won't generate
+    // spurious watchpoint fires; subsequent core.reset()s, however, will
+    // observably fire any watchpoint that covers the reset's writes
+    // (acceptable trade — the alternative is suppressing observers around
+    // reset, which adds complexity for a corner case).
+    c.mmu.add_bus_write_observer([this](std::uint16_t a, std::uint8_t v) { on_bus_write(a, v); });
 }
 
 step_result debugger::step() {
     step_result r{};
-    // Snapshot the PC *before* the step so we can credit any watchpoint
-    // change to the instruction that produced it.  Capturing here (rather
-    // than after core_.step()) is load-bearing: by the time the step
-    // returns, regs.pc has advanced past the writer (and a CALL/JP/RST/IRQ
-    // dispatch may have moved it somewhere completely unrelated).
-    const std::uint16_t pre_pc = core_.regs.pc;
+    // Snapshot the PC *before* the step so the observer can credit any
+    // watchpoint write to the originating instruction.  Capturing here
+    // (rather than after core_.step()) is load-bearing: by the time the
+    // step returns, regs.pc has advanced past the writer (and a CALL/JP/
+    // RST/IRQ dispatch may have moved it somewhere completely unrelated).
+    pending_writer_pc_ = core_.regs.pc;
+    pending_wp_hit_ = false;
+    pending_wp_addr_ = 0;
     r.cycles = core_.step();
-    if (!watchpoints_.empty()) {
-        std::uint16_t hit_addr = 0;
-        if (sample_watchpoints(hit_addr, pre_pc)) {
-            r.watchpoint_hit = true;
-            r.watchpoint_addr = hit_addr;
-            r.watchpoint_writer_pc = pre_pc;
-        }
+    if (pending_wp_hit_) {
+        r.watchpoint_hit = true;
+        r.watchpoint_addr = pending_wp_addr_;
+        r.watchpoint_writer_pc = pending_writer_pc_;
     }
     return r;
+}
+
+void debugger::on_bus_write(std::uint16_t addr, std::uint8_t val) {
+    if (watchpoints_.empty())
+        return;
+    for (auto& w : watchpoints_) {
+        // Range check (handle wrap defensively: `addr + len` can pass 0xFFFF
+        // for a watchpoint at the very top of the address space, but len is
+        // small in practice so the unsigned compare is enough).
+        if (addr < w.addr)
+            continue;
+        if (static_cast<std::uint32_t>(addr) >= static_cast<std::uint32_t>(w.addr) + w.len)
+            continue;
+        w.last_value = val;
+        w.last_writer_pc = pending_writer_pc_;
+        w.has_fired = true;
+        if (!pending_wp_hit_) {
+            pending_wp_hit_ = true;
+            pending_wp_addr_ = w.addr;
+        }
+    }
 }
 
 run_result debugger::step_over() {
@@ -246,11 +274,7 @@ void debugger::watchpoint_set(std::uint16_t addr, std::uint16_t len) {
     if (len == 0)
         return;
     watchpoint_clear(addr);
-    watchpoint w{addr, len, {}};
-    w.last.reserve(len);
-    for (std::uint16_t i = 0; i < len; ++i)
-        w.last.push_back(core_.mmu.read_u8(static_cast<std::uint16_t>(addr + i)));
-    watchpoints_.push_back(std::move(w));
+    watchpoints_.push_back(watchpoint{addr, len, 0, 0, false});
 }
 
 void debugger::watchpoint_clear(std::uint16_t addr) {
@@ -263,27 +287,8 @@ void debugger::watchpoint_clear_all() {
     watchpoints_.clear();
 }
 
-bool debugger::sample_watchpoints(std::uint16_t& out_addr, std::uint16_t writer_pc) {
-    bool any = false;
-    for (auto& w : watchpoints_) {
-        bool changed = false;
-        for (std::uint16_t i = 0; i < w.len; ++i) {
-            const auto cur = core_.mmu.read_u8(static_cast<std::uint16_t>(w.addr + i));
-            if (cur != w.last[i]) {
-                w.last[i] = cur;
-                changed = true;
-            }
-        }
-        if (changed) {
-            w.last_writer_pc = writer_pc;
-            w.has_fired = true;
-            if (!any) {
-                out_addr = w.addr;
-                any = true;
-            }
-        }
-    }
-    return any;
+const std::uint32_t* debugger::framebuffer() const {
+    return core_.ppu.framebuffer();
 }
 
 void debugger::dump_regs(std::ostream& os) const {

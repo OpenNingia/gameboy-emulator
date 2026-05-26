@@ -80,6 +80,10 @@ void gbemu::mmu::add_mmio_write_redirect(std::uint16_t addr, mmio_write_redirect
     mmio_write_redirects_[gb::io_offset(addr)].push_back(std::move(fn));
 }
 
+void gbemu::mmu::add_bus_write_observer(bus_write_observer_fn fn) {
+    bus_write_observers_.push_back(std::move(fn));
+}
+
 std::uint8_t gbemu::mmu::read_u8(std::uint16_t addr) const {
     switch (addr & 0xF000) {
             // CGB BIOS overlay spans $0000-$08FF with a "hole" at
@@ -232,6 +236,12 @@ std::uint8_t gbemu::mmu::mmio_read_masked(std::uint16_t addr) const {
 }
 
 void gbemu::mmu::write_u8(std::uint16_t addr, std::uint8_t val) {
+    // Bus-wide observers fire *before* the region dispatch so MBC control
+    // writes ($0000-$7FFF), which never mutate a readable byte, are still
+    // visible to watchpoints / future MMIO-log taps.
+    for (auto const& obs : bus_write_observers_)
+        obs(addr, val);
+
     switch (addr & 0xF000) {
             // cartridge ROM area — writes drive MBC control registers
         case 0x0000:

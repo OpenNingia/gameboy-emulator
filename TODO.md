@@ -1154,10 +1154,17 @@ ordinata per costo/beneficio.
 
 **Già chiusi in questa serie** (riferimento incrociato):
 
-- **Writer-PC nei watchpoint** — `debugger::sample_watchpoints` ora
-  registra il PC dell'istruzione che ha causato il cambio; UI
-  ("Breakpoints") e headless (`watch-list`) lo mostrano. `inc/debugger.h`
-  + `src/debugger.cpp` + `src/ui.cpp` + `src/script_runner.cpp`.
+- **Writer-PC nei watchpoint** — `debugger::sample_watchpoints` (poi
+  sostituito da `on_bus_write`, vedi §18.4.5) registra il PC
+  dell'istruzione che ha causato il cambio; UI ("Breakpoints") e headless
+  (`watch-list`) lo mostrano. `inc/debugger.h` + `src/debugger.cpp` +
+  `src/ui.cpp` + `src/script_runner.cpp`.
+- **Watchpoint write-event-driven** — i watchpoint ora reagiscono al
+  bus-write reale (`mmu::add_bus_write_observer`) invece di un diff
+  post-step. Visibili anche le write su area ROM (MBC bank-switch / RAM
+  enable / mode select) e i write-only MMIO (`$FF55` HDMA5, `$FF46` DMA).
+  UI/headless mostrano anche il valore scritto (`wrote $XX`).
+  Vedi §18.4.5 per i dettagli.
 - **OAM viewer** — pannello "OAM" con grid 8×5 a 4× zoom (rispetta 8x8 /
   8x16, x/y flip, palette DMG OBP0/OBP1 e palette CGB 0-7, VRAM bank
   CGB) + tabella per-sprite (Y/X decoded+raw, tile, attr, flags). Sprite
@@ -1228,6 +1235,66 @@ side.
 Costo: ~2 ore. La parte costosa è la UI (filter + scroll + decode delle
 addr a nome registro).
 
+### 18.4.5 Watchpoint write-event-driven (fix limite noto) — **fatto**
+
+`mmu::add_bus_write_observer` espone un hook che il debugger usa per
+guidare i watchpoint via evento ("ho appena visto una write a `addr`
+val `v`"), non più via diff-sampling post-step. La chiamata avviene in
+cima a `mmu::write_u8`, prima del region dispatch, così catturano anche
+le control write su area ROM e i write-only MMIO. Il valore scritto
+diventa parte dello stato del watchpoint (`watchpoint::last_value`,
+visualizzato come `wrote $XX` nel pannello Breakpoints e nello script
+runner `watch-list`).
+
+Bypass accessors (`oam_write`, `io_store`, `vram_write`) **non** firano
+l'observer — chip-internal pokes (timer DIV, APU read-mask reapply, OAM
+DMA copies via `dma.cpp`) sarebbero rumore senza valore diagnostico.
+Trade-off: un watchpoint su OAM non scatta più sul completion di OAM
+DMA; per quel caso si mette il watchpoint su `$FF46` (DMA register) che
+è il trigger reale.
+
+File toccati: `inc/mmu.h` + `src/mmu.cpp` (hook + lista observer),
+`inc/debugger.h` + `src/debugger.cpp` (registrazione observer in ctor,
+`on_bus_write`, drop `sample_watchpoints`, struct `watchpoint`
+semplificata: niente più `last[]` InlinedVector, solo `last_value`),
+`src/ui.cpp` + `src/script_runner.cpp` (display "wrote $XX").
+
+---
+
+#### Storico — bug noto del meccanismo precedente
+
+I watchpoint in `debugger.cpp:266`
+campionano `mmu.read_u8(addr)` post-step e confrontano col valore
+precedente. Conseguenze:
+
+- **Write su area ROM `$0000-$7FFF` invisibili** — sono control writes
+  intercettate dall'MBC (bank switch, RAM enable, mode select). Il byte
+  leggibile alla stessa addr non cambia mai (è la ROM, immutabile),
+  quindi il watchpoint non scatta. Tipico falso negativo: "watchpoint
+  su `$2000` per spiare i bank switch MBC5 non scatta mai" — il gioco
+  *sta* scrivendo, ma il diff-sampling non lo vede.
+- **MMIO write-only / auto-reset invisibili o intermittenti** — registri
+  il cui read-back è ricalcolato (es. `$FF55` HDMA5 → `status_byte()`)
+  o azzerati subito (es. `$FF46` post-DMA): il sampling vede stesso
+  valore prima/dopo e non scatta.
+- **Manca il valore scritto** — il watchpoint riporta solo "qualcosa è
+  cambiato", non il byte effettivamente scritto. Per i registri di
+  controllo (dove il "valore" *è* l'informazione) è invalidante.
+
+**Fix**: cambiare i watchpoint da diff-sampled a write-event-driven.
+Hook in `mmu::write_u8` *prima* del dispatch all'MBC/MMIO handler, che
+notifica il debugger con `(addr, value, writer_pc)`. Il debugger fa
+match contro le entry di `watchpoints_` e setta `watchpoint_hit` come
+oggi. Bonus: cattura il valore scritto (visibile nel pannello
+Breakpoints accanto al PC writer), e funziona ugualmente bene per VRAM/
+WRAM/HRAM (dove oggi già funzionava col sampling).
+
+Costo: ~1h. Tocca `mmu::write_u8` (un punto, prima del switch), un
+metodo `debugger::on_bus_write` e la rimozione di `sample_watchpoints`
+dal `debugger::step`. Compatibile con la struttura `watchpoint`
+esistente — solo `last[]` può sparire e al suo posto sta un `value
+ultimo scritto`.
+
 ### 18.5 Conditional breakpoints — **fatto**
 
 `debugger::breakpoint_set(addr)` ora ha un overload
@@ -1283,6 +1350,16 @@ incondizionato), così il parser è simmetrico al campo UI vuoto.
   della sessione. Persisterle servirebbe a poco finché i bp non sono
   legati a label simboliche; oggi sono indirizzi hex riproducibili
   dallo script runner.
+- **No MMIO alias** — oggi per fermarsi su `LY == 0x90` bisogna scrivere
+  `($FF44) == 0x90`. Estendere la grammatica con un set di alias noti
+  (`LY`, `LYC`, `LCDC`, `STAT`, `SCX`, `SCY`, `WX`, `WY`, `BGP`, `OBP0`,
+  `OBP1`, `IF`, `IE`, `VBK`, `BGPI`, `BGPD`, `OBPI`, `OBPD`, `HDMA1..5`,
+  `SVBK`, `KEY1`, `DIV`, `TIMA`, `TMA`, `TAC`, `JOYP`, `SB`, `SC`, `DMA`)
+  che il parser tratta come deref assoluto al loro `$FFxx`. Implementazione
+  banale: tabella `string_view → uint16_t` consultata in
+  `parse_bp_predicate` prima del fallback "registro CPU". Costo ~30 minuti;
+  rimuove l'ostacolo principale per scrivere predicate utili senza dover
+  ricordare gli indirizzi MMIO.
 
 ### 18.6 Reference diff harness
 
@@ -1303,17 +1380,130 @@ memoria a PC) e al formato esatto dei flag.
 Costo: ~3-4 ore se il formato non ha sorprese. Pagamento: una volta
 funzionante, *ogni* divergenza CPU/MMU si trova in minuti con `diff`.
 
+### 18.7 PPU scanline trace
+
+Strumento dedicato per i bug di rendering CGB (mappa attributi VRAM bank 1
+non letta, effetti raster mid-frame via STAT IRQ, HDMA HBlank che parte ma
+copia da source sbagliata, palette/BGPI cambiate scanline-by-scanline,
+SCX/SCY toccati dentro mode 2/3). Hanno tutti la stessa firma sintomatica:
+"il frame finale è scartoffato ma il PPU sta in qualche modo girando" — e
+oggi non c'è modo di guardare *cosa* il PPU pensava di renderizzare a una
+data LY.
+
+**Storage**: un ring/buffer da 154 entry (uno slot per scanline del frame
+appena chiuso), salvato a ogni transizione HBlank dentro `ppu::tick`. Ogni
+entry è una struct compatta:
+
+```
+struct ppu_scanline_snapshot {
+    uint8_t  ly;
+    uint8_t  lcdc, stat, scx, scy, wx, wy;
+    uint8_t  bgp, obp0, obp1;
+    uint8_t  vbk;        // CGB: VRAM bank selected at end of mode 3
+    uint8_t  bgpi, obpi; // CGB palette indices
+    uint8_t  last_hdma5; // ultimo valore visto su $FF55 dentro la riga
+    uint16_t hdma_blocks_xferred_this_line; // 0 se non HBlank-DMA in corso
+};
+```
+
+Doppio buffer ("current" che si riempie + "last completed" che il
+debugger/UI legge), swap su VBlank-edge, così l'inspector non vede mai un
+frame parziale.
+
+**Surface**:
+
+1. **Pannello "PPU trace"** in `src/ui.cpp` — una list-box scrollabile
+   con una riga per scanline, colonne `LY | LCDC | STAT | SCX | SCY | BGP
+   | VBK | BGPI | HDMA`. Filtro "solo righe in cui qualcosa è cambiato vs.
+   la precedente" per ridurre il rumore (90% delle 154 righe sarà
+   identica). Eventuale highlight su LY corrente quando in pausa.
+2. **Script runner**: comando `dump ppu-trace` che emette la trace
+   tabulare su file. Permette il workflow "run-until vblank → dump
+   ppu-trace → diff contro la stessa trace da SameBoy/BGB" (vedi §18.6,
+   stesso pattern di reference-diff ma per il PPU).
+
+**Costo**: 4-6 ore, isolato (struct + buffer in `ppu.cpp`, lettore
+read-only nel debugger, pannello UI nuovo, comando script runner).
+**Valore**: prima del prossimo bug CGB di rendering è il primo strumento
+che si apre — confrontare 154 righe vs. una reference è O(secondi),
+mentre oggi "trovare quale registro è sbagliato a quale LY" richiede
+sessioni di watchpoint + breakpoint manuali. Sblocca anche il debug di
+sprite-window flicker e di effetti tipo health-bar split-screen che
+arriveranno con i giochi più ambiziosi.
+
 ### Priorità suggerita
 
-Ordine cost/value (§18.5 chiuso):
+Ordine cost/value (§18.4.5 e §18.5 chiusi):
 
-1. **§18.4 MMIO log** — utile sempre, copre molti casi PPU/audio.
-2. **§18.2 Timer/IRQ panel** — il prossimo gioco timing-sensitive lo
+1. **§18.7 PPU scanline trace** — sbloccato dal lavoro CGB in corso;
+   appena entra il prossimo gioco con rendering glitch, è il primo
+   strumento da avere pronto.
+2. **§18.4 MMIO log** — utile sempre, copre molti casi PPU/audio.
+3. **§18.2 Timer/IRQ panel** — il prossimo gioco timing-sensitive lo
    richiederà.
-3. **§18.1 APU panel** — sblocca audio debugging quando salterà fuori.
-4. **§18.3 Instruction trace lungo** — utile ma solo per glitch storici.
-5. **§18.6 Reference diff** — il più potente, ma anche il più impegnativo
+4. **§18.1 APU panel** — sblocca audio debugging quando salterà fuori.
+5. **§18.3 Instruction trace lungo** — utile ma solo per glitch storici.
+6. **§18.6 Reference diff** — il più potente, ma anche il più impegnativo
    per setup (serve scaricare/configurare SameBoy in trace-mode).
+
+---
+
+## 19. Pixel-FIFO PPU refactor (dot-accurate rendering)
+
+**Limite architetturale noto del PPU attuale**. `ppu::enter_hblank` (riga
+92) renderizza l'intera scanline in un colpo solo leggendo
+SCX/SCY/LCDC/BGP/palette CGB UNA volta, alla fine della linea. Funziona
+per giochi che non toccano i registri PPU mid-frame, fallisce
+visibilmente sui giochi che usano effetti raster scanline-by-scanline
+via STAT IRQ (LYC=LY match o mode 0).
+
+**Sintomi tipici**:
+
+- Aladdin DX (CGB): logo del title screen "strappato" orizzontalmente,
+  righe di testo con offset diversi tra loro. Causa: gli handler STAT
+  cambiano SCX e BGPI/BGPD per riga e noi applichiamo solo l'ultimo
+  valore alla riga sbagliata. Replicato anche da wasmboy (stessa
+  architettura scanline). mGBA / SameBoy passano grazie al pixel-FIFO.
+- Prince of Persia (CGB): scroll parallasse multistrato sul background.
+- Tutti i demo / homebrew che fanno "raster bar" o "split screen".
+
+**Architettura target**:
+
+- `ppu::tick(t_cycles)` diventa una state machine dot-accurata che
+  consuma 1 T-cycle per chiamata interna invece di accumulare e fare
+  flush alla fine.
+- Per ogni linea visibile:
+  - **Mode 2 (dot 0-79)**: OAM scan dot-by-dot (oggi è bulk).
+  - **Mode 3 (dot 80-N)**: pixel-FIFO con fetcher BG + window + sprite
+    pipelinato. SCX/SCY/LCDC/palette letti **per pixel** (in pratica
+    alla cadenza che ciascun registro influenza: SCX al fetcher start,
+    palette al pixel-out stage). Durata variabile per via di SCX fine-
+    scroll discard, sprite penalty, window restart.
+  - **Mode 0 (dot N-455)**: HBlank, scrittura sul framebuffer del
+    pixel-FIFO accumulato.
+
+**Costo**: 1-2 settimane di lavoro full-time. È il refactor più grosso
+che resta da fare al PPU. Richiede di rivedere anche
+`render_bg_scanline` / `render_window_scanline` /
+`render_sprites_scanline` (oggi separati e seriali) per fonderli in un
+unico fetcher pipeline.
+
+**Resa**: oltre a chiudere bug come Aladdin DX, sblocca i test rom
+"acid2" (`dmg-acid2` / `cgb-acid2`) che ad oggi non possiamo passare per
+limite architetturale, e i test di timing PPU precisi
+(`mooneye-test-suite/acceptance/ppu/*`).
+
+**Step preparatorio**: §18.7 (PPU scanline trace) è il prerequisito
+diagnostico — senza poter confrontare scanline-by-scanline contro
+SameBoy non si sa quali dot-timing dettagli sono critici per QUEL gioco
+e quali sono noise.
+
+**Workaround intermedio "A"** (1-2 giorni, riduzione del divario, non
+fix): spostare il rendering da `enter_hblank` a `enter_drawing` (inizio
+mode 3 invece di fine). Cattura i cambi di registri fatti dall'handler
+STAT che gira durante mode 2 (OAM scan, dot 0-79). Non cattura cambi
+durante mode 3, che restano off-by-line. Approssimazione decente per
+giochi che fanno LYC=LY → handler → write SCX, ma niente di più.
 
 ---
 
