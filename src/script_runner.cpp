@@ -8,10 +8,11 @@
 //   step N
 //   step-cycles N
 //   run-until pc ADDR | cycles N | serial-match "TEXT" | vblank | bp |
-//              instr-count N    [max-cycles N]
-//   break ADDR  /  break-clear ADDR  /  break-clear-all  /  break-list
+//              instr-count N | bg-text-match "TEXT" | ld-b-b  [max-cycles N]
+//   break ADDR [COND...]  /  break-clear ADDR  /  break-clear-all  /  break-list
 //   watch ADDR [LEN]  /  watch-clear ADDR  /  watch-clear-all  /  watch-list
-//   dump regs | mem ADDR LEN | ppu | mbc | pc-ring [N] | stack [N]
+//   dump regs | mem ADDR LEN | ppu | mbc | pc-ring [N] | stack [N] |
+//        framebuffer PATH.ppm | bg-text
 //   disasm pc [N]  /  disasm ADDR [N]
 //   serial-clear  /  serial-dump
 //   echo TEXT...
@@ -28,6 +29,7 @@
 #include <string>
 
 #include <debugger.h>
+#include <gb_layout.h>
 
 namespace gbemu {
 
@@ -181,6 +183,11 @@ namespace gbemu {
             } else if (kind_tok == "instr-count") {
                 cond.kind = stop_kind::instr_count;
                 cond.value = parse_u64(ts.next());
+            } else if (kind_tok == "bg-text-match") {
+                cond.kind = stop_kind::bg_text_match;
+                cond.text_match = ts.next();
+            } else if (kind_tok == "ld-b-b") {
+                cond.kind = stop_kind::ld_b_b;
             } else {
                 out << "ERROR: run-until: unknown kind '" << kind_tok << "'\n";
                 return;
@@ -210,8 +217,24 @@ namespace gbemu {
             out << " cycles_consumed=" << rr.cycles_consumed << " instructions=" << rr.instructions << "\n";
         }
 
-        void cmd_break(debugger& dbg, tokenizer& ts, std::ostream&) {
-            dbg.breakpoint_set(parse_addr(ts.next()));
+        void cmd_break(debugger& dbg, tokenizer& ts, std::ostream& out) {
+            const auto addr = parse_addr(ts.next());
+            // Anything left on the line is treated as the predicate text.
+            // Empty -> unconditional breakpoint (matches the old behaviour).
+            const auto cond = ts.rest();
+            if (cond.empty()) {
+                dbg.breakpoint_set(addr);
+                return;
+            }
+            std::string err;
+            if (auto p = parse_bp_predicate(cond, err)) {
+                if (p->terms.empty())
+                    dbg.breakpoint_set(addr);
+                else
+                    dbg.breakpoint_set(addr, std::move(*p));
+            } else {
+                out << "ERROR: break: " << err << "\n";
+            }
         }
 
         void cmd_break_clear(debugger& dbg, tokenizer& ts, std::ostream&) {
@@ -221,8 +244,12 @@ namespace gbemu {
         void cmd_break_list(debugger& dbg, tokenizer&, std::ostream& out) {
             const auto bps = dbg.breakpoint_list();
             out << "=== breakpoints " << bps.size() << " ===\n";
-            for (auto a : bps)
-                out << hex_addr(a) << "\n";
+            for (auto a : bps) {
+                out << hex_addr(a);
+                if (const auto* pred = dbg.breakpoint_predicate(a))
+                    out << " if " << pred->source;
+                out << "\n";
+            }
         }
 
         void cmd_watch(debugger& dbg, tokenizer& ts, std::ostream&) {
@@ -240,8 +267,15 @@ namespace gbemu {
         void cmd_watch_list(debugger& dbg, tokenizer&, std::ostream& out) {
             const auto& ws = dbg.watchpoints();
             out << "=== watchpoints " << ws.size() << " ===\n";
-            for (const auto& w : ws)
-                out << hex_addr(w.addr) << " len=" << w.len << "\n";
+            for (const auto& w : ws) {
+                out << hex_addr(w.addr) << " len=" << w.len;
+                if (w.has_fired) {
+                    char vb[8];
+                    std::snprintf(vb, sizeof(vb), "$%02X", w.last_value);
+                    out << " wrote=" << vb << " writer=" << hex_addr(w.last_writer_pc);
+                }
+                out << "\n";
+            }
         }
 
         void cmd_dump(debugger& dbg, tokenizer& ts, std::ostream& out) {
@@ -272,6 +306,34 @@ namespace gbemu {
                     n = static_cast<std::size_t>(parse_u64(ts.next()));
                 out << "=== stack " << n << " ===\n";
                 dbg.dump_stack(out, n);
+            } else if (kind == "bg-text") {
+                out << "=== bg-text @cycle=" << dbg.total_cycles() << " ===\n";
+                dbg.dump_bg_text(out);
+            } else if (kind == "framebuffer") {
+                const auto path = ts.next();
+                if (path.empty()) {
+                    out << "ERROR: dump framebuffer: missing PATH\n";
+                    return;
+                }
+                // PPM "P6" binary: ASCII header (magic, width, height, max-val)
+                // followed by 3 raw bytes per pixel.  We dump the PPU's
+                // ARGB8888 framebuffer, dropping the alpha byte.
+                std::ofstream ppm(path, std::ios::binary);
+                if (!ppm) {
+                    out << "ERROR: dump framebuffer: cannot open '" << path << "' for writing\n";
+                    return;
+                }
+                ppm << "P6\n" << gb::LCD_WIDTH << " " << gb::LCD_HEIGHT << "\n255\n";
+                const std::uint32_t* fb = dbg.framebuffer();
+                for (int i = 0; i < gb::LCD_WIDTH * gb::LCD_HEIGHT; ++i) {
+                    const std::uint32_t p = fb[i];
+                    const unsigned char rgb[3] = {static_cast<unsigned char>((p >> 16) & 0xFF),
+                                                  static_cast<unsigned char>((p >> 8) & 0xFF),
+                                                  static_cast<unsigned char>(p & 0xFF)};
+                    ppm.write(reinterpret_cast<const char*>(rgb), 3);
+                }
+                out << "=== framebuffer @cycle=" << dbg.total_cycles() << " ===\n"
+                    << gb::LCD_WIDTH << "x" << gb::LCD_HEIGHT << " saved to " << path << "\n";
             } else {
                 out << "ERROR: dump: unknown kind '" << kind << "'\n";
             }

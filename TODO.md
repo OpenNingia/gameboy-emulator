@@ -6,17 +6,21 @@ abstraction).
 
 ---
 
-## 1. Debugger — stub minori
+## 1. Debugger — stub minori — **fatto**
 
-Lasciati indietro da PR5; non bloccano nulla ma sono evidenti nel pannello CPU.
+Lasciati indietro da PR5; ora entrambi chiusi.
 
-- **Reset button** (pannello CPU) — oggi è disabilitato. Deve fare re-init del
-  `core` + clear RAM/VRAM. Il commento nel codice cita "PR5: re-init core + clear
-  RAM/VRAM" ma non era nello scope ufficiale di PR5.
-- **Step Over** (pannello CPU) — attualmente alias di Step. Per uno step-over
-  vero serve `disasm_one` che restituisca la lunghezza dell'istruzione corrente,
-  così da settare un breakpoint temporaneo a `PC + len` quando si è su
-  `CALL` / `RST`.
+- **Reset button** — **fatto** (commit `c3173df`). `reset()` è esposto da
+  `core`, `cpu`, `mmu`, `ppu`, `apu`, `timer`, `mbc` e `debugger`; chiamato dal
+  pulsante Reset del pannello CPU, da `Emulation → Reset` e dalla hotkey
+  `Ctrl+R`. Su reset MBC corrente, RAM/VRAM/OAM/HRAM, registri PPU e flag CPU
+  tornano allo stato post-BIOS (o zero quando il BIOS è caricato).
+- **Step Over** — **fatto** (`debugger::step_over()` in `src/debugger.cpp:36`).
+  Usa `disasm_one` per ottenere la lunghezza dell'istruzione e imposta una
+  `stop_condition{pc_eq, PC+len}` con cap a 1M T-cycle quando l'opcode è
+  `CALL` (incl. cc: `$CD`/`$C4`/`$CC`/`$D4`/`$DC`) o `RST` (`(op & 0xC7) ==
+  0xC7`). Per tutto il resto (HALT, JR, JP, RET) si riduce a un singolo
+  `step()`. Wired al pulsante "Step Over" del pannello CPU (`src/ui.cpp:415`).
 
 ---
 
@@ -31,38 +35,55 @@ mmio + flag `bios_accessible`), `cpu` (flag `halted`/`stopped`/`halt_bug`/
 corrente (current ROM/RAM bank, RAM-enable, mode bit). Formato: blob binario
 versionato (`magic + version + sezioni`). Slot multipli + hotkey F5/F9.
 
+Rispettare la specifica BESS: https://github.com/LIJI32/SameBoy/blob/master/BESS.md
+
 ---
 
-## 3. Moltiplicatore di velocità
+## 3. Moltiplicatore di velocità — **fatto**
 
-Feature UX: x0.25, x0.5, x1.0, x1.5, x2.0, x4.0. Più fast-forward uncapped
-"tieni premuto" come modalità separata.
+Sei preset discreti (0.25 / 0.5 / 1.0 / 1.5 / 2.0 / 4.0) selezionabili da
+`Emulation → Speed`, hotkey `+` / `-` per step e `0` per snap a 1.0x; il
+moltiplicatore corrente è persistito in `<base>/user/user.conf` sotto un
+nuovo sub-block `emulation.speed`. **Fast-forward** legato a `Tab` (held):
+flag transitorio su `Application::fast_forward_active_`, non persistito
+(uno shutdown con Tab "stuck" non boot-pa a 8x al riavvio).
 
-**Stato**: vive sull'`Application` (è frame-pacing, non emulation state).
-Hotkey suggerite: `+` / `-` per step discreti, `Tab` (tieni premuto) per
-fast-forward uncapped. Entry esposta anche come combo nel menu ImGui
-("Emulation → Speed") + indicatore corrente in titlebar.
+**Pacing** (in `Application::run`):
+- `speed > 1.0` → `budget = round(CYCLES_PER_FRAME * speed)` passato a
+  `debugger.run_until` (più emulazione per frame vsynced reale).
+- `speed < 1.0` → `budget = CYCLES_PER_FRAME` e `SDL_Delay((1/speed - 1) *
+  16.667 ms)` post run_until (cap del millisecondo OK per i bucket esposti).
+- `fast_forward_active_` → `SDL_RenderSetVSync(renderer, 0)` (toggle solo
+  sull'edge), poi loop interno che esegue fino a 64 frame nominali o
+  10 ms wall-clock per iterazione del main loop, quale dei due arriva
+  prima.  Il "cap" effettivo è la throughput dell'host.
 
-**Implementazione**:
-- Il main loop oggi esegue `frame_cycles = 70224` T-cycle per VSync tick.
-  Per `multiplier > 1.0` → `frame_cycles = round(70224 * multiplier)` (più
-  emulazione per frame reale). Per `multiplier < 1.0` → si lascia
-  `frame_cycles = 70224` e si introduce un `SDL_Delay` di
-  `(1/multiplier - 1) * frame_time_ms` (meno emulazione per frame reale).
-- Fast-forward uncapped: scollegare dal VSync (`SDL_RenderSetVSync(0)` o
-  swap-interval 0) e iterare quante volte possibile entro un budget wall-clock
-  (es. 16 ms).
+**Audio**: auto-mute quando `speed != 1.0 || fast_forward_active_`. Pattern
+"due flag": `user_state_.audio_muted` (preferenza dell'utente, persistita) e
+il flag derivato in `apply_effective_mute_(core)` che ORizza i due e pusha
+nel APU.  Un Mute attivo a 2x rimane attivo dopo il ritorno a 1x.
 
-**Audio**: a velocità ≠ 1.0 il pitch cambia se non si resample. Scelta v1 =
-mute automatico quando `multiplier != 1.0` (semplice e accettata). Resampling
-(SoundTouch o simile) resta come follow-up.
+**UI**:
+- `Emulation → Speed` con 6 voci radio + voce informativa
+  "Fast-forward (hold Tab)" disabilitata (Tab è catturato dal SDL event loop,
+  non da ImGui, quindi cliccarla non avrebbe senso).
+- Titlebar dinamica: `GbEmu` (a 1.0x, no FF), `GbEmu - 2.0x` (preset != 1),
+  `GbEmu - FF` (fast-forward attivo).  Aggiornata in `apply_speed_state_`.
 
-**Interazione con il debugger**: in modalità Paused il moltiplicatore non ha
-effetto (lo step è manuale). Su `Step` singolo idem. Il moltiplicatore si
-applica solo nel ramo `run_until(stop_kind::none, frame_cycles)` del main loop.
+**Watcher di coerenza UI/main-loop**: il submenu Speed scrive direttamente
+`user_state_.speed_multiplier`; il main loop confronta con
+`last_applied_speed_` ogni iterazione e richiama `apply_speed_state_` se
+diverso (one-frame-lag per il menu, zero-lag per le hotkey che già chiamano
+il helper inline).
 
-**Headless**: non si applica — `script_runner` gira sempre full-speed (è il
-suo punto).
+**Headless**: non toccato — `script_runner` gira sempre alla velocità
+naturale, il branch fast-path nel main loop non si attiva.
+
+**Out of scope (follow-up)**:
+- Resampling audio a multiplier ≠ 1.0 (SoundTouch o simile).  Today il mute
+  evita la sgradevole pitch-shift.
+- Persistenza dello stato fast-forward su shutdown — deliberatamente
+  *non* persistito.
 
 ---
 
@@ -102,7 +123,7 @@ del canale alpha attraverso i pass 1-3, Y-flip delle texcoord).
 
 ---
 
-## 5. MBC2 / MBC3 / MBC5 — **fatto (RTC stubbed)**
+## 5. MBC2 / MBC3 / MBC5 — **fatto**
 
 `src/mbc.cpp` ora implementa `no_mbc`, `mbc1`, `mbc2`, `mbc3`, `mbc5`. Tutti i
 cartridge type 0x00-0x1E mappati nel factory `make_mbc`. Pokémon Red/Blue
@@ -113,11 +134,15 @@ solo in RAM finché il processo è vivo (battery save → sezione 6).
 dell'addr distingue RAM-enable vs ROM-select.
 
 **MBC3** (0x0F-0x13): 7-bit ROM bank con 0→1 remap, RAM/RTC select a
-$4000-$5FFF (banks 0-3 oppure RTC reg 0x08-0x0C), latch a $6000-$7FFF.
-**RTC = stub**: read ritorna 0, write ignorate, no time-keeping. Gold/Crystal
-girano con day/night cycle congelato — accettabile per la v1. RTC vero
-richiede `time(NULL)` baseline + emulazione del DIV interno → addendum
-opzionale che vive insieme alla battery-save (`.rtc` file).
+$4000-$5FFF (banks 0-3 oppure RTC reg 0x08-0x0C), latch a $6000-$7FFF. **RTC
+live**: `rtc_total_secs_` ancorato a `std::chrono::system_clock`, `catch_up()`
+somma `(now - last_real_unix_)` nell'accumulatore quando non halted; 9-bit day
+counter con wrap mod 512 e sticky carry su DH.7; halt su DH.6 freeza
+l'accumulatore. Letture passano sempre per lo shadow latched ($6000-$7FFF
+edge 0→1 lo aggiorna). Pokémon Gold/Silver/Crystal day/night cycle ora avanza
+correttamente in real-time. **Persistenza fra restart del processo** → vedi
+sezione 6 (lo stato live non viene serializzato oggi, quindi ogni avvio l'epoch
+torna al system_clock corrente).
 
 **MBC5** (0x19-0x1E): 9-bit ROM bank (low8 a $2000-$2FFF, bit9 a $3000-$3FFF,
 bank 0 valido, no remap), 4-bit RAM bank a $4000-$5FFF. Bit di rumble
@@ -127,52 +152,94 @@ ignorato (no haptics).
 selezionare fino a bank 511. UI / debugger `dump mbc` già castano a
 `unsigned` quindi nessun consumer rotto.
 
-**Cosa resta:**
-- Battery save persistente → sezione 6 (essenziale per giocare seriamente a
-  Pokémon).
-- RTC reale per MBC3 timer carts → addendum di sezione 6.
+Battery save + RTC persistence → chiusi in §6 (formato BESS).
 
 ---
 
-## 6. Battery save (SRAM persistente su cartuccia)
+## 6. Battery save (SRAM persistente su cartuccia) — **fatto**
 
 Giochi come Zelda: Link's Awakening (MBC1+RAM+BATTERY, type `0x03`), Pokémon
 (MBC3+RAM+BATTERY+RTC) e in generale tutti i titoli con salvataggio interno
 scrivono il progresso in RAM esterna mantenuta da una batteria sulla cartuccia.
-Oggi `src/mbc.cpp:207-219` distingue già nei commenti i tipi BATTERY (0x03,
-0x09) ma la RAM è solo allocata in memoria e muore al process exit.
+Implementato in formato **BESS** (Best Effort Save State, SameBoy spec:
+<https://github.com/LIJI32/SameBoy/blob/master/BESS.md>) — un solo file `.sav`
+per cartuccia contenente SRAM raw + footer BESS opzionale con blocco RTC.
 
-**Cosa serve:**
+**Layout `.sav`:**
 
-- Rilevamento header: tipi battery-backed da gestire sono `0x03`, `0x06`,
-  `0x09`, `0x0F`, `0x10`, `0x13`, `0x1B`, `0x1E` (alcuni dipendono da MBC
-  ancora da implementare in sezione 5 — si avanza in parallelo).
-- API sull'`mbc`: `ram_load(span<const uint8_t>)`, `ram_data() const`,
-  `ram_dirty() const` (flag settato da ogni write a `$A000-$BFFF`),
-  `ram_clear_dirty()`. Già virtuali sulla base in modo che no_mbc/mbc1/…
-  possano fare override.
-- All'avvio (`core::load(rom_file)`): se l'MBC è battery, cercare
-  `<rom_path>.sav` accanto al ROM e caricarlo via `ram_load`. Dimensione
-  attesa = quella decodificata da `ram_size_code`; mismatch → log warning +
-  ignore.
-- Persistenza: flush a chiusura applicazione (sempre) + flush periodico
-  (~2 s se `ram_dirty`) per sopravvivere ai crash. Scrittura atomica
-  (`.sav.tmp` + rename).
-- Path: di default accanto al ROM (`zelda.gb` → `zelda.sav`); opzionale
-  override via `cfg/gbemu.conf` (`save.directory`).
+```
+[ SRAM raw, byte-per-byte ]                  ← prefix interop-compatibile
+[ NAME block ]   id="NAME", payload "GbEmu vX.Y"
+[ RTC  block ]   id="RTC ", payload 48 byte (solo MBC3+TIMER, type 0x0F/0x10)
+[ END  block ]   id="END ", size = 0
+[ u32 LE: offset al primo blocco ]
+[ "BESS" 4 byte ASCII ]                      ← ultimi 8 byte del file
+```
 
-**Formato**: `.sav` = dump raw della SRAM, byte-per-byte. Compatibile con
-BGB, mGBA, SameBoy, VBA-M, ecc. — il giocatore può portarsi il salvataggio
-fra emulatori.
+Il footer probe è all'estremità del file, quindi un emulatore che non
+conosce BESS (BGB/mGBA/VBA-M) legge il `.sav` come SRAM raw e ignora la
+coda. Analogamente noi accettiamo `.sav` di altri emulatori: se il footer
+magic manca o l'offset è bogus, `bess::parse_sav` fa fallback a
+"tutto-il-file-è-SRAM".
 
-**RTC (MBC3)**: addendum opzionale, file `.rtc` separato (base time + ultimi
-valori dei registri RTC). Molti emulatori non lo fanno e la RTC riparte da
-zero — rimandabile, non blocca i giochi.
+**File:**
+
+- `inc/bess.h` + `src/bess.cpp` — modulo BESS minimale (NAME / RTC / END).
+- API estesa su `inc/mbc.h`: `has_battery()`, `ram_data()`, `ram_load()`,
+  `ram_dirty()`, `ram_clear_dirty()`, e per MBC3+TIMER: `rtc_blob() ->
+  optional<array<uint8_t, 48>>`, `rtc_load_blob()`. Le ultime due tornano
+  `nullopt` / no-op sugli altri MBC.
+- `Application::load_rom_` (in `src/app.cpp`) calcola FNV1a sul ROM
+  *prima* di `core::load()` (che fa `std::move(rf.data)` in `make_mbc`),
+  risolve `<base>/<savs_dir>/<fnv1a>.sav`, fa parse_sav e applica
+  `ram_load` + `rtc_load_blob`.
+- `Application::flush_battery_save_` scrive il blob via `bess::write_sav`
+  in modo atomico (`.sav.tmp` + `std::filesystem::rename`).
+- Trigger flush:
+  - ogni ~2 s nel main loop se `ram_dirty()` (gated su SDL_GetTicks64);
+  - sempre a shutdown (anche se non dirty — sposta l'anchor `saved_unix`
+    della RTC al momento di uscita);
+  - in headless mode prima del return da `Application::run`;
+  - prima di un hot-swap ROM (per scrivere il vecchio cart prima di
+    sostituirlo).
+
+**RTC blob (48 byte, layout BESS)**:
+
+- 0x00, 0x04, 0x08, 0x0C, 0x10: S/M/H/DL/DH live (1 byte + 3 padding ciascuno).
+- 0x14, 0x18, 0x1C, 0x20, 0x24: S/M/H/DL/DH latched.
+- 0x28: int64 LE = `last_real_unix_` (timestamp UNIX al momento del dump).
+
+Al load (`rtc_load_blob`): si ricostruisce `rtc_total_secs_` dai
+S/M/H/DL/DH live, si ripristinano i `latched_*`, si legge `saved_unix` e
+si calcola `wall_gap = now - saved_unix`. Se la RTC non era halted al
+momento del dump, il gap viene foldato nel total — così l'orologio ha
+"continuato a girare" mentre il processo era spento. Halted → time
+congelato. **Comportamento simmetrico fra pausa overnight e shutdown
+overnight**: in entrambi i casi il gioco vede l'ora corretta al resume.
+
+**Edit collaterale**: `mbc3::reset()` non azzera più `latched_*` —
+nell'hardware reale lo shadow è battery-backed sul chip RTC del cart e
+sopravvive a un soft reset CPU. Necessario perché l'hot-swap path è
+`load_rom_` (che chiama `rtc_load_blob`) → `core::reset()` (che chiama
+`mbc::reset()`), e se quest'ultimo azzerasse i latched perderemmo i
+valori appena caricati. Nessun gioco osserva la differenza perché tutti
+fanno una sequenza di latch prima di leggere.
+
+**Interop**:
+
+- Contenuto SRAM compatibile con BGB / mGBA / VBA-M / SameBoy.
+- Nome file specifico (`<fnv1a>.sav` invece di `<rom_basename>.sav`) →
+  l'import/export richiede un rename manuale. Decisione consapevole: il
+  rename-stable di FNV1a vale la perdita di drop-in compat sul nome.
+- L'RTC block in formato BESS è leggibile da SameBoy. BGB/mGBA usano
+  formati proprietari → l'orologio non si trasferisce automaticamente
+  ma SRAM sì.
 
 **Distinzione da Save State (sezione 2)**: il battery save è solo la SRAM
 del cart, è il salvataggio *del gioco* (il giocatore lo crea via menu
-in-game, "Save and continue"). Save state = snapshot completo dell'emulatore
-(hotkey). Le due feature coesistono.
+in-game). Save state = snapshot completo dell'emulatore (hotkey). Le due
+feature coesistono e §2 può riusare lo stesso reader/writer BESS aggiungendo
+i blocchi CORE/MBC/IORG.
 
 ---
 
@@ -320,9 +387,13 @@ rewrite della pipeline.
 - `mem_timing-2.gb` ✅
 - `halt_bug.gb` ✅
 - `oam_bug.gb` ❌ — quirk DMG indipendente dall'M-cycle, vedi §7.
-- `interrupt_time/interrupt_time.gb` ❌ — `REQUIRE_CGB 1`, indipendente.
+- `interrupt_time/interrupt_time.gb` ✅ (richiede CGB; passa ora che il branch `gbc` ha attivato il path CGB).
 - `dmg_sound` 09:01 / 10:01 / 12:01 ❌ — wave RAM access bug del CH3,
   indipendente dall'M-cycle, vedi §8.
+- `cgb_sound` 08:01 / 09:01 / 11:04 / 12:02 ✅ — chiusi dai branch CGB-gate
+  su `power_off`, dal redirect MMU $FF30-$FF3F installato dall'APU e dal
+  ramo CGB di `wave_channel::trigger`. Dettaglio in §16. I sotto-test `:02+`
+  di altri gruppi `cgb_sound` non sono ancora stati ispezionati.
 
 ---
 
@@ -346,70 +417,69 @@ Tutto da fare; vanno fatti in quest'ordine perché ognuno dipende dal precedente
 
 ---
 
-## 11. Menù bar funzionale
+## 11. Menù bar funzionale — **scaffolding fatto, voci §2/§3 ancora da popolare**
 
-Oggi `src/ui.cpp` (`draw_main_dockspace`, ~riga 167) ha una sola voce **View**
-che toggla i pannelli ImGui + Reset layout. Mancano tutte le entry "da
-emulatore": caricamento ROM, controllo emulazione, slot di salvataggio, info.
+Stato attuale (commit `b756075` + `c3173df` + `40eb54f`): menu bar a quattro voci
+in `src/ui.cpp` (`draw_menu_bar`), hotkey nel main loop di `Application::run`,
+boundary UI→host via `ui::host_actions` (drained ogni frame dopo
+`SDL_RenderPresent`).
 
-**Struttura proposta** (in ordine, da sinistra a destra):
+**Fatto:**
 
 - **File**
-  - `Load ROM…` — apre file dialog nativo (Windows: `GetOpenFileNameW`;
-    portabile: `nfd` / `tinyfiledialogs` da aggiungere a `vcpkg.json`).
-    Filtro `*.gb;*.gbc`. Selezione → ricostruzione del `core` con la nuova
-    ROM (oggi il path è fisso in `cfg/gbemu.conf`, va spezzato il vincolo:
-    `core` deve poter essere ri-inizializzato a runtime — interagisce con
-    il `Reset` button della sezione 1).
-  - `Recent ROMs ▸` — submenu con gli ultimi N (8?) ROM caricati. Persistenza
-    in un file accanto a `imgui.ini` (es. `gbemu_recent.txt`, una riga per
-    path); aggiornato dopo ogni `Load ROM`. Voce `Clear list` in fondo.
-  - `Exit` — `SDL_PushEvent(SDL_QUIT)`. Hotkey `Alt+F4` resta nativo.
+  - `Load ROM…` (`Ctrl+O`) — apre `GetOpenFileNameW` nativo Windows,
+    parented alla SDL window. Filtro `*.gb;*.gbc`. Selezione → propaga
+    `host_actions::pending_rom_load`; Application fa `core.load(rf);
+    core.reset();` e `ui::add_recent_rom(...)`. Niente dipendenza
+    `nfd`/`tinyfiledialogs` (Windows-only finché non serve Linux/macOS
+    in §10).
+  - `Recent ROMs ▸` — MRU a 8 entry, persistita in `gbemu_recent.txt`
+    accanto a `imgui.ini` (una riga per path). Submenu disabled +
+    "(none)" quando la lista è vuota. Voce `Clear list` in fondo.
+  - `Exit` — push `SDL_QUIT` via `host_actions::quit_requested`.
 
 - **Emulation**
-  - `Start` / `Pause` — toggle che riusa `debugger::pause()` /
-    `debugger::resume()` (oggi guidati dai pulsanti del pannello CPU).
-    Hotkey `F5` o `Space` (configurabile).
-  - `Reset` — re-init `core` + clear RAM/VRAM. Stessa azione del Reset
-    button (sezione 1) — le due UI devono chiamare la *stessa* funzione,
-    non duplicarla. Hotkey `Ctrl+R`.
-  - `Speed ▸` — sub-menu con radio entries `0.25x` / `0.5x` / `1.0x` /
-    `1.5x` / `2.0x` / `4.0x`. Indicatore corrente in titlebar. Dipende
-    dalla sezione 3 (moltiplicatore di velocità).
-  - `Save State ▸` / `Load State ▸` — sub-menu con slot `0..9`.
-    Dipende dalla sezione 2 (save & load state). Hotkey `F5` (save) /
-    `F9` (load) sullo slot corrente; `Shift+0..9` per cambiare slot.
-    Le voci del menu mostrano timestamp / "empty" per ogni slot.
-  - `Toggle Fullscreen` — `SDL_SetWindowFullscreen` con
-    `SDL_WINDOW_FULLSCREEN_DESKTOP`. Hotkey `F11`.
+  - `Resume`/`Pause` (`Space`) — toggle su `debugger::pause()` /
+    `debugger::resume()`. Gated su `has_rom(c)` (`mmu.cart() != nullptr`)
+    — senza cartuccia il MMU restituisce open-bus, "Run" eseguirebbe
+    solo 0xFF (RST 38h).
+  - `Reset` (`Ctrl+R`) — `debugger::reset()` → `core::reset()` (vedi §1).
+    Gated su `has_rom(c)`.
+  - `Speed ▸` — submenu **disabled** (placeholder, attende §3).
+  - `Save State ▸` / `Load State ▸` — submenu **disabled** (attendono §2).
+  - `Toggle Fullscreen` (`F11`) — `SDL_SetWindowFullscreen` con
+    `SDL_WINDOW_FULLSCREEN_DESKTOP`, checkmark sullo stato corrente.
+
+- **View** — toggle per i 9 pannelli (Display, CPU, Disassembly, Memory,
+  Breakpoints, PPU, MBC, Serial, PC ring) + `Reset layout`. Era già in
+  piedi.
 
 - **About**
-  - `About GbEmu…` — popup modale con nome, versione (dalla sezione 10),
-    repo URL, build date, copyright. Pulsante `OK` + `Copy version info`
-    che mette in clipboard una stringa diagnostica
-    (`gbemu vX.Y.Z, SDL2 a.b.c, ImGui d.e.f, ...`) utile per le bug
-    report.
+  - `About GbEmu…` — popup modale con nome ("GbEmu"), tagline ("Game Boy
+    emulator"), versione hardcoded `0.1.0-dev`, build timestamp
+    (`__DATE__ __TIME__`), versione runtime SDL2 e ImGui. Pulsante
+    `Copy version info` (clipboard stringa diagnostica) + `OK`. Pattern
+    "request flag → OpenPopup nel frame" per non finire in conflitto con
+    lo scope del DockSpace.
 
-**Considerazioni implementative:**
+**Cosa resta:**
 
-- Le hotkey vivono nello stesso punto in cui oggi è gestito F12 (interactive
-  toggle): `Application::run` event loop. ImGui captura i tasti quando un
-  text field ha focus — la branch va dopo `process_event` returning false.
-- `Recent ROMs` e `Save State` slot list vanno costruiti dinamicamente in
-  `BeginMenu` con `ImGui::MenuItem(label.c_str(), shortcut, false, enabled)`
-  — il flag `enabled = false` per slot vuoti rende il menu auto-esplicativo.
-- File dialog **non** può girare in fase di render ImGui se il dialog è
-  modale-bloccante (rischia di starvare il loop e la GPU). Pattern:
-  settare un flag (`c.load_rom_requested = true`), aprire il dialog
-  fuori dal blocco `NewFrame / Render`, all'inizio del frame successivo.
-- Tutte le voci che dipendono da feature non ancora implementate (Speed,
-  Save State) vanno mostrate `disabled` finché la rispettiva sezione è
-  chiusa — meglio che farle sparire (l'utente non capisce dove sono).
+- ~~Popolare `Speed ▸` con le radio entries (`0.25x`…`4.0x`) — dipende §3.~~
+  **fatto** insieme a §3 (vedi sopra).
+- Popolare `Save State ▸` / `Load State ▸` con slot 0..9 + timestamp /
+  "empty" — dipende §2. Hotkey suggerite: `F5` save / `F9` load sullo
+  slot corrente; `Shift+0..9` per cambiare slot.
+- Versione hardcoded `0.1.0-dev`: va sostituita con un define generato
+  dal CMake (dipende §10 versioning).
 
-**Dipendenze**: sezione 1 (Reset), sezione 2 (save state), sezione 3
-(speed). Lo scaffolding del menu si può fare prima — voci stub disabled
-+ Load ROM + Exit + About — e popolare il resto man mano che le feature
-sottostanti atterrano.
+**Note implementative (per non perdere il pattern):**
+
+- File dialog **non** può girare dentro `NewFrame/Render`: si setta
+  `host_actions::load_rom_dialog_requested`, Application lo apre dopo
+  `SDL_RenderPresent`. Pattern simmetrico per `pending_rom_load`.
+- Le hotkey nel main loop sono gated su `!imgui_captured` (restituito da
+  `ui::process_event`) per non triggerare quando un text field ImGui ha
+  focus.
 
 ---
 
@@ -608,10 +678,842 @@ dedicati). Va chiuso prima di queste tre.
 
 ---
 
+## 14. Cartella `user/` per i file di sessione — **fatto**
+
+Prima di questo intervento i file di stato della sessione vivevano nel
+**CWD** del processo: `gbemu_window.state` (window pose) e
+`gbemu_recent.txt` (MRU recents) come bare filenames, `imgui.ini` per
+default sempre relativo al CWD. Conseguenza: lanciando l'eseguibile da una
+directory diversa, finestra/recents/layout si "perdevano". Incoerente col
+portable layout già in piedi per `cfg/`, `bios/`, `roms/`, `savs/`,
+`sslots/`, `palettes/`.
+
+**Layout finale:**
+
+```
+<base>/user/
+  user.conf      # libconfig — window pose + recent_roms + display.active_palette
+  imgui.ini      # ImGui dock/window layout (formato proprietario ImGui)
+```
+
+**File:**
+
+- `inc/cfg.h` + `src/cfg.cpp`: nuovo `cfg.paths.user_dir{"user"}`, parsato
+  nel blocco `paths` (default kicks in se mancante). `cfg/gbemu.conf`
+  espone la riga `user_dir = "user"`.
+- `src/CMakeLists.txt`: aggiunto `${CMAKE_CURRENT_BINARY_DIR}/user` al
+  `file(MAKE_DIRECTORY ...)`.
+- `inc/user_state.h` + `src/user_state.cpp`: nuovo modulo `gbemu::user_state`
+  con `window_w`, `window_h`, `recent_roms`, `active_palette`. `load(path)`
+  swallows missing-file/parse errors (ritorna false, lascia defaults).
+  `save(path)` scrive atomicamente via libconfig `.tmp` +
+  `std::filesystem::rename`, best-effort (logga e ritorna false su failure
+  — niente throw).
+- `Application` (in `inc/app.h` + `src/app.cpp`): nuovo membro
+  `user_state_` + `user_conf_path_` risolto in `run()` via
+  `paths::resolve_data_path(base_, cfg.paths.user_dir, "user.conf")`. Load
+  all'avvio (prima della `SDL_CreateWindow`), save a shutdown con
+  `SDL_GetWindowSize` → `user_state_.window_*`. `WINDOW_STATE_FILE`,
+  `load_window_state`, `save_window_state` rimossi.
+- `gbemu::ui::init` ora prende `user_state&` + `std::string const& imgui_ini_path`.
+  `context::user` punta a `Application::user_state_`. Il path imgui.ini è
+  stoccato in `context::imgui_ini_path` (string owned, ImGui salva il
+  puntatore) e applicato a `ImGui::GetIO().IniFilename` subito dopo
+  `ImGui::CreateContext()`. `RECENT_ROMS_FILE`, `load_recent_roms`,
+  `save_recent_roms` rimossi; il menu "Recent ROMs" ora opera su
+  `c.user->recent_roms`.
+
+**Trigger di salvataggio:**
+
+- Window pose: solo a shutdown (`Application::run` snapshotta `SDL_GetWindowSize`
+  e chiama `user_state_.save`).
+- Recents: `ui::add_recent_rom` muta `user->recent_roms` e setta
+  `host_actions::save_user_state_requested`. Application drena il flag
+  dopo il blocco `pending_rom_load` (così un add_recent_rom triggerato
+  da un ROM hot-swap nel frame corrente persiste nello stesso frame
+  invece di aspettare il successivo).
+- Active palette: schema esposto ma non ancora wirato — il futuro palette
+  switcher setterà `user_state_.active_palette` e alzerà lo stesso flag.
+
+**Eccezione `imgui.ini`**: formato proprietario di ImGui, non foldable in
+`user.conf`. Spostato sotto `user/` settando `io.IniFilename =
+ctx->imgui_ini_path.c_str()` dopo `CreateContext` ma prima del primo
+`NewFrame` (ImGui carica le settings lazily da `Initialize()` dentro
+`NewFrame`). Il backing `std::string` vive sul `context` per outliveare
+ImGui stesso.
+
+**Migrazione**: rottura compat accettata (è v0.x). Niente fallback / move
+automatico — chi aveva `gbemu_window.state` / `gbemu_recent.txt` /
+`imgui.ini` in CWD li ricrea al primo avvio. Documentato in `CLAUDE.md`
+§ Portable layout.
+
+**Distinzione da `cfg/`**: `cfg/gbemu.conf` è la **configurazione** editata
+dall'utente (preferenze esplicite). `user/` è **stato di sessione**
+generato e gestito dall'app (window pose, MRU, dock layout, palette
+selezionata). Tenerli separati evita di mescolare "cose che l'utente
+edita" con "cose che l'app riscrive in continuazione".
+
+**Estensione futura §12 (Player/Debugger UI split)**: il sub-block
+`window` di `user.conf` può crescere in `window_player` / `window_debugger`
+senza migrazione (sub-block mancante → default). `imgui.ini` si splitterà
+in `user/imgui_player.ini` / `user/imgui_debug.ini` passando la stringa
+giusta a `ui::init` in base al flag CLI `--debug`.
+
+---
+
+## 15. Menu Audio — abilita/disabilita audio — **fatto**
+
+Menu **Audio** fra **Emulation** e **View** (`src/ui.cpp` `draw_menu_bar`):
+
+- `Mute` checkable — hotkey `M` (gated su `!imgui_captured`, niente collisione
+  con i tasti joypad).
+- `Volume ▸` — slider 0-100%, hotkey `Ctrl+Up`/`Ctrl+Down` che fanno snap al
+  bucket 10% strettamente superiore/inferiore (47% → UP → 50%; 50% → UP → 60%).
+- `Highpass Filter ▸` — radio `Off` / `Accurate` / `Preserve waveform`.
+
+Stato persistito sotto un sub-block `audio` in `<base>/user/user.conf`:
+
+```
+audio: { muted = false; volume = 1.0; highpass = "off"|"accurate"|"preserve"; };
+```
+
+Default: non muted, volume 100%, filtro `accurate` (~60 Hz su DMG, ~120 Hz su
+CGB — il branch viene scelto in `apu::recompute_hp_alpha` consultando
+`mmu.cgb_mode()`).
+
+**Implementazione attuale (produttore-gate):** mute è un hard-zero nel push del
+ring (`apu::emit_sample` in `src/apu.cpp`), il consumer SDL non viene mai
+messo in pausa. Niente drain del ring necessario, niente pop a unmute (il
+ring si svuota naturalmente con campioni a 0). Volume = slider lineare 0-1 →
+APU riceve `volume²` per una curva percettivamente lineare (-12 dB al
+midpoint). Highpass = IIR 1° ordine `y[n] = α (y[n-1] + x[n] - x[n-1])` con
+α derivata da `exp(-1/(SAMPLE_RATE · τ))`. La memoria del filtro viene
+azzerata da `apu::reset` (incluso quindi hot-swap) ma sopravvive al cambio
+di modalità (il decadimento naturale assorbe il salto di α senza pop).
+
+**Cosa NON è stato fatto rispetto al piano originale:**
+
+- Toggle per-canale (CH1..CH4) — restano da §15 follow-up, utile solo per
+  debug APU.
+- Persistenza con §3 (speed multiplier): quando arriverà §3, l'auto-mute a
+  multiplier ≠ 1.0 dovrà coesistere con `user_state_.audio_muted`. Pattern
+  suggerito (non implementato): tenere due flag separati (`user_muted` vs
+  `speed_muted`), OR per il gating in APU. Oggi c'è solo il primo.
+
+---
+
+## 16. CGB APU quirks — **fatto** (08:01 / 09:01 / 11:04 / 12:02 chiusi sul ramo `:01`)
+
+Sul branch `gbc` il bring-up CGB ha lasciato l'APU come copia 1:1 della DMG.
+Blargg `cgb_sound` esercita quattro divergenze hardware DMG → CGB che oggi non
+modelliamo. Tutte risolvibili interrogando `mmu_.cgb_mode()` (già usato in
+PPU/HDMA): la knob esiste, manca solo applicarla nei posti giusti dentro
+`src/apu.cpp`.
+
+**08-len_ctr_during_power:01 — length counters azzerati a power-off — fatto**
+
+- Su DMG i length counters dei 4 canali sopravvivono al clear di NR52 bit 7 e
+  continuano a contare; su CGB vengono **azzerati**.
+- `apu::power_off()` ora calcola `preserve_lengths = !mmu_.cgb_mode()` e
+  reinietta i quattro `length` solo nel ramo DMG; su CGB cadono a zero con
+  il resto dello stato di canale.
+
+**09-wave_read_while_on:01 / 12-wave_write_while_on — accesso wave RAM con CH3 attivo — fatto**
+
+- Su DMG la read/write di `$FF30-$FF3F` mentre CH3 è on restituisce/scrive
+  fuori target salvo durante la finestra di 2 T-cycle del prossimo fetch CH3
+  (cfr. §8 per la versione DMG, ancora aperta).
+- Su CGB l'accesso **redirige sempre** al byte che CH3 sta correntemente
+  fetchando, cioè `wave_ram[wave_pos >> 1]`, indipendentemente dall'indirizzo
+  richiesto. Non c'è la finestra di blackout DMG.
+- Implementazione (read): `mmu::add_mmio_read_handler(addr, fn)` simmetrico
+  al write handler — `mmio_read_fn(addr, current) -> uint8_t`, chained in
+  `read_u8` dopo `mmio_read_masked`.
+- Implementazione (write): `mmu::add_mmio_write_redirect(addr, fn)` con
+  signature `(uint16_t addr) -> uint16_t` — viene consultata in `write_u8`
+  prima dello store mmio e ritorna l'eventuale indirizzo redirezionato (i
+  write handler post-store firano sul target redirezionato). L'APU registra
+  entrambe le hook su tutto `$FF30-$FF3F`: in modalità CGB con
+  `ch3_.channel_enabled`, read e write puntano a `wave_ram[wave_pos >> 1]`,
+  altrimenti pass-through. Lo stesso entrypoint può poi chiudere il lato DMG
+  di §8 con un branch sul modello (window di 2 T-cycle + blackout 0xFF /
+  ignore della write).
+
+**11-regs_after_power:04 — NRx1 ignorato a power-off su CGB — fatto**
+
+- Su DMG le scritture *solo della length* a `NR11`/`NR21`/`NR31`/`NR41`
+  sono accettate anche con APU spenta (Pan Docs / Blargg note "length is
+  unaffected by power"). Su CGB **anche** NRx1 è ignorata mentre la APU è
+  off.
+- I quattro `on_nrX1` ora skippano la length write nel ramo `!powered_`
+  quando `mmu_.cgb_mode()`: il valore di `length` non viene toccato e
+  l'mmio byte resta forzato al suo read-mask come prima.
+
+**12-wave_write_while_on — accesso CGB con CH3 attivo — fatto**
+
+Tre fix combinati per chiudere 09:01 + 12:0x:
+
+1. **Increment-after-fetch in `wave_channel::tick_frequency`** — prima
+   `wave_pos` veniva incrementato PRIMA della fetch, quindi byte 0 veniva
+   letto una sola volta per ciclo (solo low nibble a `wave_pos=1`), mentre
+   tutti gli altri byte due volte. SameBoy / Pan Docs: ogni byte high+low
+   nibble, partendo da byte 0 high.
+
+2. **`current_sample_byte` / `current_sample_byte_idx` separati** — il
+   redirect non può più usare `wave_ram[wave_pos>>1]` perché dopo il flip
+   dell'increment quel valore punta al PROSSIMO byte da fetchare; quindi
+   il channel registra il byte appena letto + il suo indice e il redirect
+   read/write li consuma.
+
+3. **Trigger: `freq_timer = 6` su CGB** — invece di `(2048-freq)*2`. Il
+   primo fetch avviene 6 T-cycle dopo trigger (non un periodo intero),
+   poi i fetch successivi si svolgono ogni `(2048-freq)*2`. Senza questo,
+   il pre-fetch tiene `current_sample_byte` a 0 (residual) per un periodo
+   intero di nibble, producendo ~2 read di residual extra che spostano il
+   pattern leading di 09:01 (visto come 6×00 invece di 4×00). Su DMG il
+   formato resta `(2048-freq)*2`: il quirk di gating della wave RAM (§8)
+   interagisce diversamente con il timing di trigger e i test dmg_sound
+   che passano oggi non sopravviverebbero al cambio.
+
+Su trigger CGB anche `current_sample_byte` e `_idx` vengono azzerati
+oltre a `sample_buffer` (simmetria); su DMG tutti restano al valore
+precedente (residual), com'è stato sempre.
+
+**Interazione con §8**: il read-handler MMU per $FF30-$FF3F è ora in piedi
+(registrato dall'APU); chiudere il lato DMG di §8 si riduce a un branch sul
+modello dentro la stessa lambda (window di 2 T-cycle + blackout 0xFF).
+
+---
+
+## 17. Input refactor — hotkey manager + bindings configurabili — **step 1-3 fatti**
+
+**Stato**: il refactor del dispatcher è chiuso (passi 1 e 2 della sezione
+"Ordine consigliato" sotto). `inc/input.h` + `src/input.cpp` ospitano il
+modulo `gbemu::input::manager` con `action` enum, `key_binding` (con
+`kind::oneshot|hold` e `gate::always|rom_only`) e `joypad_binding`.
+`Application::run` ora delega ogni `SDL_KEYDOWN/KEYUP/CONTROLLER*` al
+manager e instrada il risultato attraverso `Application::handle_action_`,
+sostituendo le ~90 righe inline che mescolavano hotkey applicativi e
+joypad mapping. Le voci della menu bar (`src/ui.cpp::draw_menu_bar`)
+leggono le shortcut label da `input::manager::shortcut_label(action)`
+invece che da stringhe hardcoded, così un rebinding aggiorna le hint
+senza un edit parallelo. Modifier mask ora è **strict** (`Ctrl+Shift+R`
+non triggera `reset` — comportamento intenzionale, diverso dal vecchio
+loose match).
+
+**Step 3 — fatto.** Persistenza sotto il sub-block `input` in
+`<base>/user/user.conf` come tre liste indipendenti (`hotkeys`,
+`joypad_keyboard`, `joypad_controller`). `user_state_.input_bindings` è il
+campo di sponda; `Application::run` chiama `input_.set_cfg(...)` subito
+dopo `user_state_.load` e fa il mirror inverso (`user_state_.input_bindings
+= input_.cfg()`) prima di ogni `save`. Round-trip stringhe via
+`SDL_GetKeyName`/`SDL_GetKeyFromName`, `SDL_GameControllerGetStringForButton`,
+tabelline statiche per action/joypad button/kind/gate/mod-mask in
+`src/input.cpp`. Semantica di merge su load: sub-block mancante → defaults;
+una lista figlia assente → defaults solo per quella lista (così un
+hand-edit che ridefinisce solo `joypad_keyboard` non azzera `hotkeys`).
+Entry invalide → log warning + skip, il resto del blocco passa.
+
+**Cosa resta:**
+
+- **Step 4** — UI di rebinding (modal "Press a key…"). Deferita a §12
+  così la Player UI può decidere dove vive il menu Settings.
+
+**Discrepanza spec/codice trovata durante l'implementazione**: §17 spec
+originale diceva "joypad ignora ImGui focus", ma il codice precedente
+gating-eva il joypad su `!imgui_captured` esattamente come gli hotkey.
+La versione refactorata preserva il comportamento attuale (joypad
+gated su `!imgui_captured`). Riconciliare in un follow-up se il
+"joypad pass-through senza gate" è il comportamento desiderato.
+
+---
+
+## 17-archived (specs originali, mantenute per memoria storica)
+
+`Application::run` oggi mescola in un unico `while (SDL_PollEvent)` (~90 righe
+in `src/app.cpp:498-592`) **quattro responsabilità diverse**:
+
+1. **Hotkey applicativi** inline: F11 (fullscreen), Space (pause toggle),
+   Ctrl+R (reset), Ctrl+O (load ROM), M (mute), Ctrl+Up/Down (volume nudge).
+   Ognuno è un `else if` annidato con il proprio gating (`!imgui_captured`,
+   `!e.key.repeat`, `rom_loaded`, modifier mask) e tocca direttamente
+   `debugger`, `core.apu`, `user_state_`, `ui::actions(ui_ctx)`,
+   `SDL_SetWindowFullscreen` — l'orchestrazione vive a mano nel main loop.
+2. **Mapping joypad keyboard → GB button** in `map_keycode_to_button`
+   (`src/app.cpp:126-156`): switch hardcoded su `SDLK_UP`/`Z`/`X`/…
+3. **Mapping joypad controller → GB button** in
+   `map_controller_button_to_button` (`src/app.cpp:164-194`): switch
+   hardcoded su `SDL_CONTROLLER_BUTTON_*`.
+4. **Hot-plug controller** (`SDL_CONTROLLERDEVICEADDED/REMOVED`): apri/chiudi
+   `SDL_GameController*`.
+
+**Problemi attuali:**
+
+- Le shortcut sono *replicate* nei tooltip della menu bar (`src/ui.cpp`
+  `draw_menu_bar`): qualunque rebinding richiederebbe due edit sincronizzati.
+- Nessun supporto per modifiers diversi da Ctrl, niente chord (es. `G,P` per
+  "Goto PC"), niente disambiguazione fra hotkey con/senza ROM caricata
+  (oggi `rom_loaded` è hardcoded a poche voci).
+- Le mappe joypad sono *fisse*: chi vuole WASD invece delle frecce, o
+  rimappare A/B sulla tastiera, deve ricompilare. Speedrun layout (rebind
+  Start/Select) idem.
+- L'API `Application` non ha un punto di osservazione per "questa azione è
+  stata invocata": telemetria/log delle hotkey non c'è (utile per
+  debuggare "perché l'utente dice che la pause non funziona?").
+- Pre-requisito **non bloccante ma fortemente correlato** a §12 (Player UI
+  vs Debugger UI): la Player UI dovrà esporre un menu "Settings → Input"
+  per il rebinding, e i due frontend condivideranno lo stesso input
+  manager. Meglio chiudere §17 prima così §12 non duplica scaffolding.
+
+**Architettura proposta:**
+
+Nuovo modulo `inc/input.h` + `src/input.cpp` con tre concetti separati:
+
+```cpp
+namespace gbemu::input {
+
+    // (1) Azioni applicative semantiche — l'enum vive in input.h e
+    // viene consumata sia dall'event dispatcher (questo modulo) sia
+    // dalla UI per labellare le voci di menu / disegnare le shortcut.
+    enum class action {
+        toggle_pause, reset, load_rom, toggle_fullscreen,
+        toggle_mute, volume_up, volume_down,
+        // futuri (§3): speed_up, speed_down, speed_reset, fast_forward_hold
+        // futuri (§2): save_state, load_state, slot_next, slot_prev
+        // futuri (§12): toggle_frame
+    };
+
+    // (2) Binding: chiave SDL + modifier mask -> action.  Modifier mask
+    // è uint16 (SDL_Keymod), permette Shift/Ctrl/Alt/Gui in qualunque
+    // combinazione.  `kind` discrimina hotkey one-shot dal "tieni
+    // premuto" (fast_forward).
+    struct key_binding {
+        SDL_Keycode key;
+        std::uint16_t mod_mask;
+        action act;
+        enum class kind { oneshot, hold } kind = kind::oneshot;
+    };
+
+    // (3) Binding joypad: SDL key/controller button -> GB joypad button.
+    // Due tabelle separate (keyboard vs controller).
+    struct joypad_binding {
+        SDL_Keycode key;                          // 0 se controller-only
+        SDL_GameControllerButton ctrl_btn;        // _INVALID se keyboard-only
+        gbemu::joypad::button gb_btn;
+    };
+
+    // Configurazione completa, serializzata in user.conf (sezione 14).
+    struct config {
+        std::vector<key_binding> hotkeys;     // default popolato da defaults()
+        std::vector<joypad_binding> joypad;   // idem
+        static config defaults();             // valori hardcoded di oggi
+    };
+
+    // Dispatcher: prende SDL_Event + stato (ROM caricato? imgui catturato?)
+    // e ritorna `optional<action>` per gli hotkey, oppure aggiorna lo stato
+    // del joypad direttamente (callback-based per non ricostruire l'enum).
+    class manager {
+    public:
+        explicit manager(config cfg);
+        // Ritorna l'azione triggerata (se ce n'è una), altrimenti nullopt.
+        // `imgui_captured` salta le hotkey ma lascia passare il joypad
+        // pass-through (lo facciamo già oggi).
+        std::optional<action> on_key_down(SDL_Keycode, std::uint16_t mod,
+                                          bool repeat, bool imgui_captured,
+                                          bool rom_loaded);
+        // I joypad event chiamano direttamente joypad::set_button via
+        // callback installato a costruzione (evita di accoppiare input
+        // manager a core).
+        bool on_key_for_joypad(SDL_Keycode, bool pressed);
+        bool on_controller_button(SDL_GameControllerButton, bool pressed);
+        // Per il rebinding UI: enumerare/sostituire/aggiungere binding.
+        config const& cfg() const;
+        void set_cfg(config);
+    private:
+        config cfg_;
+        std::function<void(gbemu::joypad::button, bool)> joypad_sink_;
+    };
+
+} // namespace gbemu::input
+```
+
+**Wiring in `Application::run`:**
+
+- Costruire `input::manager mgr{ input::config::defaults() }` (più avanti:
+  load da `user_state_.input` se presente).
+- Sostituire i ~90 righe dell'event loop con un dispatch table:
+  ```cpp
+  if (e.type == SDL_KEYDOWN) {
+      const auto act = mgr.on_key_down(e.key.keysym.sym, e.key.keysym.mod,
+                                       e.key.repeat, imgui_captured,
+                                       core.mmu.cart() != nullptr);
+      if (act) handle_action(*act);     // switch su action enum
+      mgr.on_key_for_joypad(e.key.keysym.sym, true);
+  }
+  ```
+  Il `handle_action(action)` è una funzione membro/lambda con il `switch`
+  che oggi vive inline — concentra tutta l'orchestrazione (debugger /
+  apu / user_state / ui::actions) in un punto solo.
+
+**Persistenza (dipende da §14, già chiusa):**
+
+Nuovo sub-block `input` in `user/user.conf`:
+```
+input: {
+  hotkeys = (
+    { key = "F11";       mod = "";     action = "toggle_fullscreen"; },
+    { key = "Space";     mod = "";     action = "toggle_pause"; },
+    { key = "R";         mod = "Ctrl"; action = "reset"; },
+    ...
+  );
+  joypad_keyboard = (
+    { key = "Up";        gb = "up"; },
+    { key = "Z";         gb = "a";  },
+    ...
+  );
+};
+```
+
+Sub-block mancante → `config::defaults()` (no migration needed).
+`SDL_GetKeyFromName(string)` / `SDL_GetKeyName(SDL_Keycode)` chiudono la
+conversione testo↔keycode.
+
+**UI di rebinding (deferred a §12 / dopo):**
+
+- Pannello/finestra "Settings → Input" con tabella `[action | shortcut |
+  Rebind…]`. Click su "Rebind…" → modal "Press a key…", il prossimo
+  `SDL_KEYDOWN` cattura la combinazione e aggiorna `config`.
+- Per joypad, stessa idea con `SDL_CONTROLLERBUTTONDOWN`.
+- "Reset to defaults" overwrita con `config::defaults()`.
+- Non bloccante per il refactor: i default fanno girare tutto come oggi,
+  la UI può atterrare in un secondo momento (priorità più bassa dopo che
+  §12 ha deciso dove vive il menu Settings).
+
+**Conflitti / vincoli:**
+
+- Hotkey *non devono* collidere con le hotkey joypad (oggi è verificato a
+  mano: arrows/Z/X/Backspace/Enter non sono mappati a hotkey). Il
+  manager va difeso con una validazione a load (se un binding hotkey usa
+  una key già mappata sul joypad → log warning, skip). Stessa logica
+  inversa.
+- ImGui-captured: hotkey applicativi *sì* skippano (text field con focus),
+  joypad *no* (il joypad pass-through ignora il focus ImGui — match con
+  l'attuale comportamento).
+- Modifier mask: oggi `Ctrl+R` controlla solo `KMOD_CTRL`, non discrimina
+  Shift/Alt aggiuntivi. Decidere se il check è "mod == required_mask"
+  (strict) o "(mod & required_mask) == required_mask" (allow extras).
+  Strict è il default ragionevole — `Ctrl+Shift+R` *non* deve triggerare
+  reset.
+
+**Cosa NON è in scope:**
+
+- Gesture multi-tasto / chord (`G,P` style) — overkill per v1, si può
+  aggiungere come campo `key_binding.next` (key successiva) quando serve.
+- Macro / replay input — feature separata, niente a che fare con
+  bindings.
+- Touch input (Android/iOS) — non shippiamo lì.
+
+**Ordine consigliato:**
+
+1. Estrarre `input::config` + `input::manager` con i default hardcoded di
+   oggi (no persistenza). Sostituire le ~90 righe in `Application::run`
+   con il nuovo dispatch. Verifica: hotkey + joypad si comportano
+   identici a prima.
+2. Spostare i tooltip di shortcut nella menu bar (`src/ui.cpp`) a leggere
+   da `input::config` invece di stringhe hardcoded (es. `View →
+   shortcut_label(mgr.cfg(), action::toggle_pause)` → `"Space"`). Tutto
+   pronto per il rebinding UI senza duplicare verità.
+3. Persistenza in `user_state_.input` (legge/scrive sub-block libconfig).
+   Default kicks in se mancante; binding invalidi → log + skip.
+4. (Più avanti, dopo §12) UI di rebinding nel menu Settings.
+
+**Dipendenze:**
+
+- Nessuna *in ingresso*: il refactor è autonomo. §14 (`user/user.conf`)
+  facilita la persistenza ma non è bloccante — i passi 1-2 si chiudono
+  senza toccare il filesystem.
+- *In uscita*: §3 (speed multiplier) e §2 (save/load state) aggiungeranno
+  facilmente le proprie `action` (`speed_up`/`speed_down`/`fast_forward_hold`,
+  `save_state`/`load_state`/`slot_*`) senza altri edit in `app.cpp`. §12
+  (Player UI) eredita lo stesso input manager senza scaffolding extra.
+
+**Costo stimato**: ~mezza giornata per i passi 1-2 (refactor meccanico,
+copertura test = "le hotkey funzionano come prima" verificata manualmente).
+Passo 3 (persistenza + parsing libconfig) ~2-3 ore. Passo 4 (UI rebinding)
+~mezza giornata, da fare insieme alla scelta del posto in cui vivere
+(Settings panel? menu Edit → Preferences?).
+
+---
+
+## 18. Debugger gaps per compatibility hunting
+
+I bug "il gioco gira ma…" stanno quasi sempre fuori dal piano CPU
+(coperto dai Blargg). Lista degli strumenti che ancora mancano per
+diagnosticare glitch grafici, audio strani, timing-sensitive freezes,
+ordinata per costo/beneficio.
+
+**Già chiusi in questa serie** (riferimento incrociato):
+
+- **Writer-PC nei watchpoint** — `debugger::sample_watchpoints` (poi
+  sostituito da `on_bus_write`, vedi §18.4.5) registra il PC
+  dell'istruzione che ha causato il cambio; UI ("Breakpoints") e headless
+  (`watch-list`) lo mostrano. `inc/debugger.h` + `src/debugger.cpp` +
+  `src/ui.cpp` + `src/script_runner.cpp`.
+- **Watchpoint write-event-driven** — i watchpoint ora reagiscono al
+  bus-write reale (`mmu::add_bus_write_observer`) invece di un diff
+  post-step. Visibili anche le write su area ROM (MBC bank-switch / RAM
+  enable / mode select) e i write-only MMIO (`$FF55` HDMA5, `$FF46` DMA).
+  UI/headless mostrano anche il valore scritto (`wrote $XX`).
+  Vedi §18.4.5 per i dettagli.
+- **OAM viewer** — pannello "OAM" con grid 8×5 a 4× zoom (rispetta 8x8 /
+  8x16, x/y flip, palette DMG OBP0/OBP1 e palette CGB 0-7, VRAM bank
+  CGB) + tabella per-sprite (Y/X decoded+raw, tile, attr, flags). Sprite
+  off-screen dimmate. `src/ui.cpp`.
+
+### 18.1 APU panel
+
+Visualizzare lo stato live dei 4 canali: per ciascuno frequency timer
+corrente, length counter, envelope volume+step+direction, sweep
+(CH1), wave RAM (CH3, già letta dall'MMU), LFSR (CH4). Plus i registri
+NR50/NR51/NR52 con decode dei mixer.
+
+Backing: `inc/apu.h` già espone le struct `square_channel`,
+`wave_channel`, `noise_channel`. Aggiungere getter pubblici
+`channel_state` (o passare i membri direttamente) e leggerli dal
+pannello. Niente da cambiare nel timing.
+
+Costo: ~2-3 ore. Sblocca "il rumore strano dura due frame poi sparisce" e
+"questo gioco scrive NRx2 e si sente piano".
+
+### 18.2 Timer / IRQ panel
+
+Pannello con DIV/TIMA/TMA/TAC live + IE/IF live (decoded per bit), più
+uno **storico circolare degli IRQ serviti**: timestamp (T-cycle), vector
+($40/$48/$50/$58/$60), PC di ritorno. La parte timer rivela
+desincronizzazioni TIMA-overflow → Timer IRQ, la parte IRQ rivela "STAT
+fire continuamente" oppure "VBlank non parte da N cicli" — molto comune
+nei giochi timing-sensitive (Pokémon, Prehistorik Man).
+
+Implementazione: nuovo ring `irq_event_log` in `gbemu::irq` (32-64 entry,
+push in `irq::dispatch` post-clear-IF, pre-push-PC). UI legge il ring +
+i registri timer via MMU.
+
+Costo: ~mezza giornata. La parte registri è banale; il ring richiede un
+piccolo schema.
+
+### 18.3 Instruction trace lungo
+
+Il `pc_ring` corrente è 256 entry (~150 istruzioni di CPU normale, una
+frazione di frame). Per "cos'è successo nei 60 frame prima del glitch"
+serve un ring molto più grande con PC + opcode + registri.
+
+Opzioni:
+
+- **Estendere `pc_ring`** a N entry configurabile (256k? 1M?), con
+  payload `{ pc, opcode_first_byte, af, bc, de, hl, sp }` (= 16 byte
+  l'una; 1M entry = 16 MB, accettabile come opt-in).
+- **On-demand**: bottone "Start recording" / "Stop recording", con un
+  cap massimo di memoria; "Dump to file" per ispezionare con grep/awk
+  offline. Header `inc/trace.h` + nuova UI panel.
+
+Costo: 3-4 ore per l'opt-in con dump-to-file. Memorizzare *sempre* tutto
+costa ~5% in throughput, non vale la pena se non si registra a
+richiesta.
+
+### 18.4 MMIO write log
+
+Buffer circolare delle write a $FF00-$FF7F + $FFFF, con campi
+`{ addr, value, pc, total_cycles }`. Filtrabile per range
+(es. "solo write a $FF40-$FF4B" → PPU registers). Sostituisce il
+workaround attuale "watchpoint a $FF40 + step a mano".
+
+Implementazione: piggyback sull'`mmu::add_mmio_write_handler` (gancio
+già esistente e usato da APU/timer/IRQ). Aggiungere un handler
+"taps-all" condizionale che pusha in un ring di `debugger`. Filter UI
+side.
+
+Costo: ~2 ore. La parte costosa è la UI (filter + scroll + decode delle
+addr a nome registro).
+
+### 18.4.5 Watchpoint write-event-driven (fix limite noto) — **fatto**
+
+`mmu::add_bus_write_observer` espone un hook che il debugger usa per
+guidare i watchpoint via evento ("ho appena visto una write a `addr`
+val `v`"), non più via diff-sampling post-step. La chiamata avviene in
+cima a `mmu::write_u8`, prima del region dispatch, così catturano anche
+le control write su area ROM e i write-only MMIO. Il valore scritto
+diventa parte dello stato del watchpoint (`watchpoint::last_value`,
+visualizzato come `wrote $XX` nel pannello Breakpoints e nello script
+runner `watch-list`).
+
+Bypass accessors (`oam_write`, `io_store`, `vram_write`) **non** firano
+l'observer — chip-internal pokes (timer DIV, APU read-mask reapply, OAM
+DMA copies via `dma.cpp`) sarebbero rumore senza valore diagnostico.
+Trade-off: un watchpoint su OAM non scatta più sul completion di OAM
+DMA; per quel caso si mette il watchpoint su `$FF46` (DMA register) che
+è il trigger reale.
+
+File toccati: `inc/mmu.h` + `src/mmu.cpp` (hook + lista observer),
+`inc/debugger.h` + `src/debugger.cpp` (registrazione observer in ctor,
+`on_bus_write`, drop `sample_watchpoints`, struct `watchpoint`
+semplificata: niente più `last[]` InlinedVector, solo `last_value`),
+`src/ui.cpp` + `src/script_runner.cpp` (display "wrote $XX").
+
+---
+
+#### Storico — bug noto del meccanismo precedente
+
+I watchpoint in `debugger.cpp:266`
+campionano `mmu.read_u8(addr)` post-step e confrontano col valore
+precedente. Conseguenze:
+
+- **Write su area ROM `$0000-$7FFF` invisibili** — sono control writes
+  intercettate dall'MBC (bank switch, RAM enable, mode select). Il byte
+  leggibile alla stessa addr non cambia mai (è la ROM, immutabile),
+  quindi il watchpoint non scatta. Tipico falso negativo: "watchpoint
+  su `$2000` per spiare i bank switch MBC5 non scatta mai" — il gioco
+  *sta* scrivendo, ma il diff-sampling non lo vede.
+- **MMIO write-only / auto-reset invisibili o intermittenti** — registri
+  il cui read-back è ricalcolato (es. `$FF55` HDMA5 → `status_byte()`)
+  o azzerati subito (es. `$FF46` post-DMA): il sampling vede stesso
+  valore prima/dopo e non scatta.
+- **Manca il valore scritto** — il watchpoint riporta solo "qualcosa è
+  cambiato", non il byte effettivamente scritto. Per i registri di
+  controllo (dove il "valore" *è* l'informazione) è invalidante.
+
+**Fix**: cambiare i watchpoint da diff-sampled a write-event-driven.
+Hook in `mmu::write_u8` *prima* del dispatch all'MBC/MMIO handler, che
+notifica il debugger con `(addr, value, writer_pc)`. Il debugger fa
+match contro le entry di `watchpoints_` e setta `watchpoint_hit` come
+oggi. Bonus: cattura il valore scritto (visibile nel pannello
+Breakpoints accanto al PC writer), e funziona ugualmente bene per VRAM/
+WRAM/HRAM (dove oggi già funzionava col sampling).
+
+Costo: ~1h. Tocca `mmu::write_u8` (un punto, prima del switch), un
+metodo `debugger::on_bus_write` e la rimozione di `sample_watchpoints`
+dal `debugger::step`. Compatibile con la struttura `watchpoint`
+esistente — solo `last[]` può sparire e al suo posto sta un `value
+ultimo scritto`.
+
+### 18.5 Conditional breakpoints — **fatto**
+
+`debugger::breakpoint_set(addr)` ora ha un overload
+`breakpoint_set(addr, bp_predicate)` che attacca una condizione di
+arresto al bp. `run_until` / `step_over` consultano il nuovo
+`breakpoint_should_fire(pc)` (bitmap + predicate eval); il vecchio
+`breakpoint_has(pc)` resta come "esiste un bp a questa addr?" (usato
+dalla margin button della Disassembly per il pallino rosso).
+
+**Grammatica v1** (in `inc/bp_predicate.h`): `predicate := term ("&&"
+term)*`. Niente OR, niente parentesi se non per memory deref, niente
+precedence. Un `term` è `lhs op rhs`:
+
+- `lhs` ∈ { A, F, B, C, D, E, H, L, AF, BC, DE, HL, SP, PC,
+  `(BC)`, `(DE)`, `(HL)`, `(SP)`, `($ADDR)` } — case-insensitive,
+  `(ADDR)` accetta decimal / `0xNN` / `$NN`.
+- `op` ∈ { `==`, `=`, `!=`, `<=`, `>=`, `<`, `>` }.
+- `rhs` literal numerico (stessa sintassi di lhs).
+
+Confronti su lhs a 8 bit (registri singoli o memory deref) maskano
+anche rhs a `0xFF` per evitare che `A == 0x1FF` non spari mai
+silenziosamente. La predicate vuota → "always true" (= bp
+incondizionato), così il parser è simmetrico al campo UI vuoto.
+
+**File toccati**:
+
+- `inc/bp_predicate.h` + `src/bp_predicate.cpp` — tipi `bp_term` /
+  `bp_predicate`, `parse_bp_predicate` (~200 righe) e
+  `eval_bp_predicate`. Modulo isolato perché il codice non dipende dal
+  resto del debugger.
+- `inc/debugger.h` + `src/debugger.cpp` — overload `breakpoint_set(addr,
+  predicate)`, `breakpoint_should_fire(addr)`, `breakpoint_predicate(addr)`.
+  Storage: `std::vector<pair<uint16_t, bp_predicate>>` accanto al
+  bitmap esistente — scanata solo dopo che il bitmap fast-path ha
+  matchato il PC. `breakpoint_clear` / `breakpoint_set` (la forma
+  unconditional) rimuovono qualsiasi predicate al medesimo addr.
+- `src/script_runner.cpp` — `break ADDR [COND...]` (tutto il resto
+  della linea è la condition); `break-list` ora emette `$ADDR if COND`
+  per le entry condizionate.
+- `src/ui.cpp` — pannello Breakpoints: input box "Cond" accanto a
+  "Addr" con hint inline (`A==0x7F && (HL)>=0xC000`), parse error in
+  rosso sotto il pulsante Add. Ogni riga della list mostra
+  `$ADDR if "cond"` (quando attaccata) + bottone "Edit" inline per
+  ri-parsare e rimpiazzare la predicate senza dover ricreare il bp.
+
+**Limitazioni v1 (deliberate)**:
+
+- No OR, no `!`, no parentesi su term, no aritmetica (`A + 1 == B` /
+  `(HL+0x10) == 0`). Si chiudono solo "è X in stato Y a questa PC".
+- No flag bit accessors (`Z`, `NZ`, `cy`). Si possono già esprimere
+  via `F`, ma è scomodo. Da aggiungere in v2 se serve.
+- Predicate non persistite in `user.conf` — vivono solo per la durata
+  della sessione. Persisterle servirebbe a poco finché i bp non sono
+  legati a label simboliche; oggi sono indirizzi hex riproducibili
+  dallo script runner.
+- **No MMIO alias** — oggi per fermarsi su `LY == 0x90` bisogna scrivere
+  `($FF44) == 0x90`. Estendere la grammatica con un set di alias noti
+  (`LY`, `LYC`, `LCDC`, `STAT`, `SCX`, `SCY`, `WX`, `WY`, `BGP`, `OBP0`,
+  `OBP1`, `IF`, `IE`, `VBK`, `BGPI`, `BGPD`, `OBPI`, `OBPD`, `HDMA1..5`,
+  `SVBK`, `KEY1`, `DIV`, `TIMA`, `TMA`, `TAC`, `JOYP`, `SB`, `SC`, `DMA`)
+  che il parser tratta come deref assoluto al loro `$FFxx`. Implementazione
+  banale: tabella `string_view → uint16_t` consultata in
+  `parse_bp_predicate` prima del fallback "registro CPU". Costo ~30 minuti;
+  rimuove l'ostacolo principale per scrivere predicate utili senza dover
+  ricordare gli indirizzi MMIO.
+
+### 18.6 Reference diff harness
+
+Quando SameBoy/mGBA fa la cosa giusta e noi no, oggi non c'è un modo
+strutturato per confrontare. Idea: tracer compatibile con il "Gameboy
+Doctor"-style log (https://github.com/robert/gameboy-doctor) — formato
+testo "A:01 F:B0 B:00 C:13 D:00 E:D8 H:01 L:4D SP:FFFE PC:0100 PCMEM:..."
+una riga per istruzione. SameBoy ha già un'opzione per produrlo. Il
+nostro script runner aggiunge un comando `trace LOGPATH N` che produce
+il file in formato compatibile per N istruzioni; poi `diff` finds the
+first divergence.
+
+Implementazione: in `script_runner.cpp` (e/o `debugger`) emettere una
+riga per step. Niente ring buffer — output diretto a stdout/file. Per
+matcharsi a SameBoy serve attenzione al campo `PCMEM` (4 byte di
+memoria a PC) e al formato esatto dei flag.
+
+Costo: ~3-4 ore se il formato non ha sorprese. Pagamento: una volta
+funzionante, *ogni* divergenza CPU/MMU si trova in minuti con `diff`.
+
+### 18.7 PPU scanline trace
+
+Strumento dedicato per i bug di rendering CGB (mappa attributi VRAM bank 1
+non letta, effetti raster mid-frame via STAT IRQ, HDMA HBlank che parte ma
+copia da source sbagliata, palette/BGPI cambiate scanline-by-scanline,
+SCX/SCY toccati dentro mode 2/3). Hanno tutti la stessa firma sintomatica:
+"il frame finale è scartoffato ma il PPU sta in qualche modo girando" — e
+oggi non c'è modo di guardare *cosa* il PPU pensava di renderizzare a una
+data LY.
+
+**Storage**: un ring/buffer da 154 entry (uno slot per scanline del frame
+appena chiuso), salvato a ogni transizione HBlank dentro `ppu::tick`. Ogni
+entry è una struct compatta:
+
+```
+struct ppu_scanline_snapshot {
+    uint8_t  ly;
+    uint8_t  lcdc, stat, scx, scy, wx, wy;
+    uint8_t  bgp, obp0, obp1;
+    uint8_t  vbk;        // CGB: VRAM bank selected at end of mode 3
+    uint8_t  bgpi, obpi; // CGB palette indices
+    uint8_t  last_hdma5; // ultimo valore visto su $FF55 dentro la riga
+    uint16_t hdma_blocks_xferred_this_line; // 0 se non HBlank-DMA in corso
+};
+```
+
+Doppio buffer ("current" che si riempie + "last completed" che il
+debugger/UI legge), swap su VBlank-edge, così l'inspector non vede mai un
+frame parziale.
+
+**Surface**:
+
+1. **Pannello "PPU trace"** in `src/ui.cpp` — una list-box scrollabile
+   con una riga per scanline, colonne `LY | LCDC | STAT | SCX | SCY | BGP
+   | VBK | BGPI | HDMA`. Filtro "solo righe in cui qualcosa è cambiato vs.
+   la precedente" per ridurre il rumore (90% delle 154 righe sarà
+   identica). Eventuale highlight su LY corrente quando in pausa.
+2. **Script runner**: comando `dump ppu-trace` che emette la trace
+   tabulare su file. Permette il workflow "run-until vblank → dump
+   ppu-trace → diff contro la stessa trace da SameBoy/BGB" (vedi §18.6,
+   stesso pattern di reference-diff ma per il PPU).
+
+**Costo**: 4-6 ore, isolato (struct + buffer in `ppu.cpp`, lettore
+read-only nel debugger, pannello UI nuovo, comando script runner).
+**Valore**: prima del prossimo bug CGB di rendering è il primo strumento
+che si apre — confrontare 154 righe vs. una reference è O(secondi),
+mentre oggi "trovare quale registro è sbagliato a quale LY" richiede
+sessioni di watchpoint + breakpoint manuali. Sblocca anche il debug di
+sprite-window flicker e di effetti tipo health-bar split-screen che
+arriveranno con i giochi più ambiziosi.
+
+### Priorità suggerita
+
+Ordine cost/value (§18.4.5 e §18.5 chiusi):
+
+1. **§18.7 PPU scanline trace** — sbloccato dal lavoro CGB in corso;
+   appena entra il prossimo gioco con rendering glitch, è il primo
+   strumento da avere pronto.
+2. **§18.4 MMIO log** — utile sempre, copre molti casi PPU/audio.
+3. **§18.2 Timer/IRQ panel** — il prossimo gioco timing-sensitive lo
+   richiederà.
+4. **§18.1 APU panel** — sblocca audio debugging quando salterà fuori.
+5. **§18.3 Instruction trace lungo** — utile ma solo per glitch storici.
+6. **§18.6 Reference diff** — il più potente, ma anche il più impegnativo
+   per setup (serve scaricare/configurare SameBoy in trace-mode).
+
+---
+
+## 19. Pixel-FIFO PPU refactor (dot-accurate rendering)
+
+**Limite architetturale noto del PPU attuale**. `ppu::enter_hblank` (riga
+92) renderizza l'intera scanline in un colpo solo leggendo
+SCX/SCY/LCDC/BGP/palette CGB UNA volta, alla fine della linea. Funziona
+per giochi che non toccano i registri PPU mid-frame, fallisce
+visibilmente sui giochi che usano effetti raster scanline-by-scanline
+via STAT IRQ (LYC=LY match o mode 0).
+
+**Sintomi tipici**:
+
+- Aladdin DX (CGB): logo del title screen "strappato" orizzontalmente,
+  righe di testo con offset diversi tra loro. Causa: gli handler STAT
+  cambiano SCX e BGPI/BGPD per riga e noi applichiamo solo l'ultimo
+  valore alla riga sbagliata. Replicato anche da wasmboy (stessa
+  architettura scanline). mGBA / SameBoy passano grazie al pixel-FIFO.
+- Prince of Persia (CGB): scroll parallasse multistrato sul background.
+- Tutti i demo / homebrew che fanno "raster bar" o "split screen".
+
+**Architettura target**:
+
+- `ppu::tick(t_cycles)` diventa una state machine dot-accurata che
+  consuma 1 T-cycle per chiamata interna invece di accumulare e fare
+  flush alla fine.
+- Per ogni linea visibile:
+  - **Mode 2 (dot 0-79)**: OAM scan dot-by-dot (oggi è bulk).
+  - **Mode 3 (dot 80-N)**: pixel-FIFO con fetcher BG + window + sprite
+    pipelinato. SCX/SCY/LCDC/palette letti **per pixel** (in pratica
+    alla cadenza che ciascun registro influenza: SCX al fetcher start,
+    palette al pixel-out stage). Durata variabile per via di SCX fine-
+    scroll discard, sprite penalty, window restart.
+  - **Mode 0 (dot N-455)**: HBlank, scrittura sul framebuffer del
+    pixel-FIFO accumulato.
+
+**Costo**: 1-2 settimane di lavoro full-time. È il refactor più grosso
+che resta da fare al PPU. Richiede di rivedere anche
+`render_bg_scanline` / `render_window_scanline` /
+`render_sprites_scanline` (oggi separati e seriali) per fonderli in un
+unico fetcher pipeline.
+
+**Resa**: oltre a chiudere bug come Aladdin DX, sblocca i test rom
+"acid2" (`dmg-acid2` / `cgb-acid2`) che ad oggi non possiamo passare per
+limite architetturale, e i test di timing PPU precisi
+(`mooneye-test-suite/acceptance/ppu/*`).
+
+**Step preparatorio**: §18.7 (PPU scanline trace) è il prerequisito
+diagnostico — senza poter confrontare scanline-by-scanline contro
+SameBoy non si sa quali dot-timing dettagli sono critici per QUEL gioco
+e quali sono noise.
+
+**Workaround intermedio "A"** (1-2 giorni, riduzione del divario, non
+fix): spostare il rendering da `enter_hblank` a `enter_drawing` (inizio
+mode 3 invece di fine). Cattura i cambi di registri fatti dall'handler
+STAT che gira durante mode 2 (OAM scan, dot 0-79). Non cattura cambi
+durante mode 3, che restano off-by-line. Approssimazione decente per
+giochi che fanno LYC=LY → handler → write SCX, ma niente di più.
+
+---
+
 ## Note tecniche permanenti
 
-- `cfg/gbemu.conf` shipped ha path **assoluti** Windows per ROM e BIOS — va
-  reso relativo prima del packaging.
+- **Path config**: `cfg/gbemu.conf` non ha più path assoluti — il portable
+  layout (`<base>/{cfg,bios,roms,savs,sslots}/`) è in piedi via
+  `gbemu::paths::resolve_base_dir()` + `resolve_data_path()` (commit
+  `ab7bb97`). Le quattro sub-directory sono user-overridable in
+  `cfg.paths.{bios,roms,savs,sslots}_dir`.
 - `CMakeUserPresets.json` pinna `VCPKG_ROOT` locale: tenere fuori dai workflow
   cross-machine (già menzionato in `CLAUDE.md`).
 - `inc/opcodes.hpp` è generato — modificare solo `scripts/gen_ops.py` o

@@ -12,7 +12,15 @@ using namespace gbemu;
 void core::load(rom_file& c) {
     // Hand the ROM bytes off to a freshly-built MBC; the MMU keeps the
     // owning pointer and routes cartridge accesses through it.
-    mmu.attach_cartridge(make_mbc(std::move(c.data)));
+    auto cart = make_mbc(std::move(c.data));
+    // Latch the hardware-model selection from the cartridge's CGB flag
+    // ($0143) before the MBC moves into the MMU. Foothold for the upcoming
+    // CGB refactors — no consumer reads cgb_mode yet on DMG-only carts.
+    cgb_mode = classify_cgb_flag(cart->cgb_flag()) != cgb_support::none;
+    mmu.attach_cartridge(std::move(cart));
+    // Mirror the model selection onto the MMU so its MMIO read masks and the
+    // VBK/SVBK/KEY1 write handlers know whether to act as DMG or CGB hardware.
+    mmu.set_cgb_mode(cgb_mode);
 
     // reset registers
     memset(&regs, 0, sizeof(regs));
@@ -40,10 +48,24 @@ void core::init() {
         // initial registry values
         mmu.initialize_registers();
 
-        regs.af.u16 = 0x01B0;
-        regs.bc.u16 = 0x0013;
-        regs.de.u16 = 0x00D8;
-        regs.hl.u16 = 0x014D;
+        if (cgb_mode) {
+            // Post-CGB-BIOS snapshot: A=$11 is the CGB signature games
+            // check at boot (Pokémon Crystal hangs on a black screen
+            // without it because the CGB palette init path keys off
+            // A==$11 to seed BCPD); F=$80 carries the carry bit a real
+            // CGB leaves set after the logo check.  DE=$FF56 and
+            // HL=$000D mirror the values the actual boot ROM leaves
+            // behind.
+            regs.af.u16 = 0x1180;
+            regs.bc.u16 = 0x0000;
+            regs.de.u16 = 0xFF56;
+            regs.hl.u16 = 0x000D;
+        } else {
+            regs.af.u16 = 0x01B0;
+            regs.bc.u16 = 0x0013;
+            regs.de.u16 = 0x00D8;
+            regs.hl.u16 = 0x014D;
+        }
         regs.sp = 0xFFFE;
         regs.pc = 0x100;
     }
@@ -56,6 +78,7 @@ void core::reset() {
     ppu.reset();
     timer.reset();
     apu.reset();
+    hdma.reset();
     pc_ring.fill(0);
     pc_idx = 0;
     total_cycles = 0;
@@ -75,12 +98,38 @@ std::uint32_t core::step() {
         // relative order it would on the per-instruction model.  See the
         // callback comment in core.h for why.
         auto total = static_cast<std::uint32_t>(cpu.step());
+
+        // EI delay promotion lives HERE, between the just-executed
+        // instruction and the IRQ dispatch check.  The two-flag protocol:
+        // EI sets ime_pending + ei_just_executed in the same step; the
+        // first time this block runs after EI both flags are true so the
+        // condition is false (no promotion, IME stays off through the
+        // post-EI instruction).  ei_just_executed is then cleared, so on
+        // the NEXT pass through this block — i.e. after the second
+        // instruction past EI has executed — the check passes and IME
+        // goes high BEFORE irq.dispatch().  Doing this inside cpu.step
+        // (at the top of the next instruction) used to let a DI landing
+        // one instruction past EI clobber the freshly-set IME before the
+        // dispatch ran, masking the IRQ window that real hardware
+        // exposes.  Kirby's Dream Land 2 hangs on its idle loop without
+        // this ordering.
+        if (cpu.ime_pending && !cpu.ei_just_executed) {
+            cpu.interrupt_enabled = true;
+            cpu.ime_pending = false;
+        }
+        cpu.ei_just_executed = false;
+
         if (irq.dispatch()) {
             total += 20;
         }
-        if (pending_ppu_t) {
-            ppu.step(pending_ppu_t);
+        // Drain pending_ppu_t in a loop so any cpu.tick() that lands inside
+        // ppu.step() (notably the HBlank DMA block copy fired from
+        // ppu::enter_hblank → hdma::on_hblank) is picked up by the next
+        // iteration instead of being silently zeroed out below.
+        while (pending_ppu_t) {
+            const auto t = pending_ppu_t;
             pending_ppu_t = 0;
+            ppu.step(t);
         }
         return total;
     } catch (const gbemu_exception& e) {
