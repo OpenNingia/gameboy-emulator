@@ -11,6 +11,7 @@
 #    include <card.h>
 #    include <cpu.h>
 #    include <dma.h>
+#    include <hdma.h>
 #    include <irq.h>
 #    include <joypad.h>
 #    include <mmu.h>
@@ -30,6 +31,7 @@ namespace gbemu {
               irq(cpu, mmu),
               serial(mmu, irq),
               dma(mmu),
+              hdma(mmu, cpu),
               timer(mmu, irq),
               apu(mmu),
               joypad(mmu, irq),
@@ -55,11 +57,28 @@ namespace gbemu {
             cpu.tick_ctx = this;
             cpu.tick_fn = [](void* ctx, std::uint8_t t) {
                 auto* c = static_cast<core*>(ctx);
-                c->pending_ppu_t += t;
-                c->apu.step(t);
+                // CGB double-speed: the CPU clock doubles, so each cpu-clock
+                // T forwarded here is half a base-clock T.  PPU and APU stay
+                // at the original 4.19 MHz (their work per frame is constant
+                // regardless of the CPU mode), so we halve `t` for them.
+                // Timer follows the CPU clock — DIV / TIMA on real hardware
+                // also count 2x faster in double-speed — so it keeps the
+                // full t.  total_cycles is reported in CPU-clock T-cycles
+                // and is what the dispatch-table cycle counts use, so it
+                // also receives the full t.  Bus accesses always tick in
+                // multiples of 4, so the /2 stays integer.
+                const std::uint8_t base_t = c->cpu.double_speed ? static_cast<std::uint8_t>(t >> 1) : t;
+                c->pending_ppu_t += base_t;
+                c->apu.step(base_t);
                 c->timer.step(t);
                 c->total_cycles += t;
             };
+
+            // PPU H-Blank edge → HDMA block copy.  No-op on DMG (hdma's
+            // public entrypoints short-circuit when mmu.cgb_mode() is false
+            // and HDMA5 writes never arm it in the first place).
+            ppu.hblank_ctx = this;
+            ppu.hblank_fn = [](void* ctx) { static_cast<core*>(ctx)->hdma.on_hblank(); };
         }
 
         cpu cpu;
@@ -69,6 +88,7 @@ namespace gbemu {
         irq irq;
         serial serial;
         dma dma;
+        hdma hdma;
         timer timer;
         apu apu;
         joypad joypad;
@@ -76,6 +96,13 @@ namespace gbemu {
         std::array<std::uint16_t, 256> pc_ring;
         std::size_t pc_idx;
         std::uint64_t total_cycles{0};
+        // Selected hardware model. Captured in core::load() from the
+        // cartridge's CGB flag ($0143): true when the cart wants CGB
+        // enhancements (flag & 0x80 != 0). Stays false on a DMG-only cart.
+        // Property of the loaded cartridge, not of the run — core::reset()
+        // does NOT clear it (a Reset re-runs the same game on the same
+        // hardware model).
+        bool cgb_mode{false};
         // PPU tick accumulator: bumped from the tick callback during
         // cpu.step() / irq.dispatch(), drained by a single ppu.step() at the
         // end of core::step().  See the tick-callback comment in the ctor

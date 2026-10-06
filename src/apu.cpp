@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include <apu.h>
 #include <gb_layout.h>
 
@@ -74,6 +76,26 @@ apu::apu(mmu& mmu) : mmu_(mmu) {
     for (std::uint16_t a = unused_tail_begin; a <= unused_tail_end; ++a) {
         mmu_.io_store(a, gb::OPEN_BUS);
     }
+    // Wave RAM read/write redirect — CGB only.  While CH3 is active every
+    // bus access to $FF30-$FF3F is redirected to the byte CH3 is currently
+    // fetching (wave_ram[wave_pos >> 1]) regardless of the addressed byte.
+    // The DMG blackout-window quirk (returns 0xFF / silently ignores writes
+    // outside the 2-T fetch window) is intentionally NOT modeled here —
+    // see TODO §8.  Blargg cgb_sound 09:01 / 12:0x exercise the CGB paths.
+    for (std::uint16_t a = gb::io::WAVE_RAM_BASE; a < gb::io::WAVE_RAM_END; ++a) {
+        mmu_.add_mmio_read_handler(a, [this](std::uint16_t /*addr*/, std::uint8_t current) -> std::uint8_t {
+            if (mmu_.cgb_mode() && ch3_.channel_enabled) {
+                return ch3_.current_sample_byte;
+            }
+            return current;
+        });
+        mmu_.add_mmio_write_redirect(a, [this](std::uint16_t addr) -> std::uint16_t {
+            if (mmu_.cgb_mode() && ch3_.channel_enabled) {
+                return static_cast<std::uint16_t>(gb::io::WAVE_RAM_BASE + ch3_.current_sample_byte_idx);
+            }
+            return addr;
+        });
+    }
     // Master mixer — NR50 (master volume / VIN), NR51 (channel pan).
     mmu_.add_mmio_write_handler(gb::io::NR50, [this](std::uint8_t v) { on_nr50(v); });
     mmu_.add_mmio_write_handler(gb::io::NR51, [this](std::uint8_t v) { on_nr51(v); });
@@ -84,6 +106,12 @@ apu::apu(mmu& mmu) : mmu_(mmu) {
     // the system counter on a ROM DIV write can produce an extra frame
     // sequencer step if the FS-clocking bit was high before the reset.
     mmu_.add_mmio_write_handler(gb::io::DIV, [this](std::uint8_t v) { on_div_write(v); });
+
+    // Seed the highpass IIR coefficient from the default mode. cgb_mode is
+    // false at this point (set later by core::load(rom_file)); the DMG
+    // tau is a safe baseline and Application re-applies settings post-load
+    // so the CGB alpha takes over before the first sample is pushed.
+    recompute_hp_alpha();
 }
 
 // --- square_channel: register loads -----------------------------------------
@@ -288,9 +316,15 @@ void apu::wave_channel::tick_frequency(std::uint32_t cycles, const std::uint8_t*
         // Wave period is (2048 - freq) * 2 — half the square period because
         // CH3 advances one 4-bit sample per step, not one duty bit.
         freq_timer += (2048 - static_cast<std::int32_t>(freq_raw)) * 2;
+        // Fetch using the CURRENT wave_pos, THEN increment.  This makes byte 0
+        // get fetched twice per cycle (high nibble at wave_pos=0, low nibble
+        // at wave_pos=1) just like every other byte; the alternative
+        // increment-first ordering fetches byte 0 only once per cycle and
+        // produces a 4x asymmetry visible in Blargg cgb_sound 09.
+        current_sample_byte_idx = static_cast<std::uint8_t>(wave_pos >> 1);
+        current_sample_byte = wave_ram[current_sample_byte_idx];
+        sample_buffer = (wave_pos & 1) ? (current_sample_byte & 0x0F) : (current_sample_byte >> 4);
         wave_pos = (wave_pos + 1) & 0x1F;
-        const std::uint8_t byte = wave_ram[wave_pos >> 1];
-        sample_buffer = (wave_pos & 1) ? (byte & 0x0F) : (byte >> 4);
     }
 }
 
@@ -301,17 +335,33 @@ void apu::wave_channel::tick_length() {
     }
 }
 
-void apu::wave_channel::trigger(bool next_step_clocks_length) {
+void apu::wave_channel::trigger(bool next_step_clocks_length, bool cgb_mode) {
     channel_enabled = dac_enabled;
     if (length == 0) {
         length = 256;
         if (length_enabled && !next_step_clocks_length)
             --length;
     }
-    freq_timer = (2048 - static_cast<std::int32_t>(freq_raw)) * 2;
+    // First sample after trigger: the wave channel's frequency timer is
+    // loaded with a small fixed countdown (~6 T-cycles), not the full
+    // (2048 - freq) * 2 nibble period (SameBoy convention; matches the
+    // shape of Blargg cgb_sound 09's leading 4-read 0x00 group).  After
+    // the first fetch the timer reloads with the normal nibble period.
+    // We apply the short countdown on CGB only — DMG's wave-RAM access
+    // gating (TODO §8) interacts with trigger timing differently and
+    // changing it here would shift the passing dmg_sound tests.
+    freq_timer = cgb_mode ? 6 : (2048 - static_cast<std::int32_t>(freq_raw)) * 2;
     wave_pos = 0;
-    // sample_buffer intentionally NOT reset — matches DMG behavior where
-    // the first sample after a trigger is the previously buffered nibble.
+    // DMG: sample_buffer / current_sample_byte survive the trigger — the
+    // first sample after a trigger is the previously buffered nibble.
+    // CGB: both are cleared on trigger (Blargg cgb_sound 12:02 covers the
+    // sample_buffer side; clearing current_sample_byte keeps the wave-RAM
+    // read redirect symmetric).
+    if (cgb_mode) {
+        sample_buffer = 0;
+        current_sample_byte = 0;
+        current_sample_byte_idx = 0;
+    }
 }
 
 float apu::wave_channel::sample() const {
@@ -451,9 +501,11 @@ void apu::on_nr10(std::uint8_t v) {
 void apu::on_nr11(std::uint8_t v) {
     // DMG quirk: even when powered off, the length portion of NRx1 writes
     // is accepted (duty and other bits stay zero). The mmio byte is still
-    // forced to its read-mask since duty isn't updated.
+    // forced to its read-mask since duty isn't updated. On CGB the write
+    // is fully ignored while powered off (Blargg cgb_sound 11:04).
     if (!powered_) {
-        ch1_sq_.length = 64 - (v & 0x3F);
+        if (!mmu_.cgb_mode())
+            ch1_sq_.length = 64 - (v & 0x3F);
         apply_read_mask(gb::io::NR11, 0);
         return;
     }
@@ -486,7 +538,8 @@ void apu::on_nr14(std::uint8_t v) {
 
 void apu::on_nr21(std::uint8_t v) {
     if (!powered_) {
-        ch2_.length = 64 - (v & 0x3F);
+        if (!mmu_.cgb_mode())
+            ch2_.length = 64 - (v & 0x3F);
         apply_read_mask(gb::io::NR21, 0);
         return;
     }
@@ -522,8 +575,10 @@ void apu::on_nr30(std::uint8_t v) {
 
 void apu::on_nr31(std::uint8_t v) {
     // DMG: NR31 is fully length on DMG, and accepted even while off.
+    // On CGB the write is ignored while powered off (cgb_sound 11:04).
     if (!powered_) {
-        ch3_.load_nr31(v);
+        if (!mmu_.cgb_mode())
+            ch3_.load_nr31(v);
         apply_read_mask(gb::io::NR31, 0);
         return;
     }
@@ -547,13 +602,14 @@ void apu::on_nr34(std::uint8_t v) {
     GATE(gb::io::NR34);
     const bool nclk = next_step_clocks_length();
     if (ch3_.load_nr34(v, nclk))
-        ch3_.trigger(nclk);
+        ch3_.trigger(nclk, mmu_.cgb_mode());
     apply_read_mask(gb::io::NR34, v);
 }
 
 void apu::on_nr41(std::uint8_t v) {
     if (!powered_) {
-        ch4_.load_nr41(v);
+        if (!mmu_.cgb_mode())
+            ch4_.load_nr41(v);
         apply_read_mask(gb::io::NR41, 0);
         return;
     }
@@ -628,6 +684,9 @@ void apu::power_off() {
     // clocking lengths across the powered-on window between power-off and
     // the next NRx4 write, decimating preserved length values before
     // tests could trigger and measure them.
+    // On CGB the length counters are also cleared at power-off (Blargg
+    // cgb_sound 08:01).
+    const bool preserve_lengths = !mmu_.cgb_mode();
     const std::uint8_t ch1_len = ch1_sq_.length;
     const std::uint8_t ch2_len = ch2_.length;
     const std::uint16_t ch3_len = ch3_.length;
@@ -639,10 +698,12 @@ void apu::power_off() {
     ch3_ = wave_channel{};
     ch4_ = noise_channel{};
 
-    ch1_sq_.length = ch1_len;
-    ch2_.length = ch2_len;
-    ch3_.length = ch3_len;
-    ch4_.length = ch4_len;
+    if (preserve_lengths) {
+        ch1_sq_.length = ch1_len;
+        ch2_.length = ch2_len;
+        ch3_.length = ch3_len;
+        ch4_.length = ch4_len;
+    }
 
     // Wipe NR10..NR51 (logical value = 0) but leave the read-mask bits set
     // so reads after power-off still return the canonical "mostly 1s" byte
@@ -671,6 +732,46 @@ void apu::reset() {
     frame_seq_acc_ = 0;
     frame_seq_step_ = 0;
     powered_ = true;
+    // Zero the highpass memory — residual DC from the prior session
+    // would otherwise leak through the first samples after the reset
+    // (audible as a low thump on hot-swap). Re-derive alpha too, even
+    // though it doesn't depend on cgb_mode anymore, so a future tuning
+    // of the curve takes effect on the next emit.
+    hp_prev_in_l_ = hp_prev_in_r_ = 0.0f;
+    hp_prev_out_l_ = hp_prev_out_r_ = 0.0f;
+    recompute_hp_alpha();
+}
+
+void apu::set_highpass_mode(highpass_mode m) {
+    highpass_mode_ = m;
+    recompute_hp_alpha();
+}
+
+void apu::recompute_hp_alpha() {
+    // IIR 1st-order DC blocker: y[n] = alpha * (y[n-1] + x[n] - x[n-1]).
+    // Equivalent (and used by SameBoy) to "subtract a slow moving-average
+    // of the input", with alpha == the running-average retention rate.
+    //
+    // Important: the real DMG analog filter sits around f_c ≈ 60 Hz, which
+    // happens to bracket the lowest CH1/CH2 fundamentals (~64 Hz). Using
+    // a textbook 60 Hz IIR here audibly clips the attack of low notes —
+    // it sounds like crackle/grit even though it's the filter chewing
+    // bass content. SameBoy intentionally backs off to ~28 Hz for its
+    // accurate mode for exactly this reason; we follow suit.
+    //
+    // alpha is expressed via the SameBoy parameterisation: a per-CPU-clock
+    // retention rate raised to (CPU_HZ / SAMPLE_RATE), so the effective
+    // cutoff is stable across sample rates without retuning.
+    //   accurate : 0.999958 base ≈ 0.99634 at 48 kHz → f_c ≈ 28 Hz.
+    //   preserve : 0.999999 base ≈ 0.99991 at 48 kHz → f_c ≈ 0.7 Hz
+    //              (DC only, the actual waveform low end stays intact).
+    if (highpass_mode_ == highpass_mode::off) {
+        hp_alpha_ = 0.0f;
+        return;
+    }
+    const float base = (highpass_mode_ == highpass_mode::accurate) ? 0.999958f : 0.999999f;
+    const float exponent = static_cast<float>(gb::CPU_HZ) / static_cast<float>(SAMPLE_RATE);
+    hp_alpha_ = std::pow(base, exponent);
 }
 
 void apu::refresh_nr52_status() {
@@ -795,6 +896,31 @@ void apu::emit_sample() {
     // Phase 2's single-channel output, intentional tradeoff for consistency.
     l *= 0.25f;
     r *= 0.25f;
+
+    // Post-mix highpass. Run the IIR even while muted so the filter
+    // memory does not develop a step on un-mute — but feed it the
+    // pre-mute sample so the running average matches what the user
+    // would otherwise be hearing.
+    if (highpass_mode_ != highpass_mode::off) {
+        const float in_l = l;
+        const float in_r = r;
+        const float out_l = hp_alpha_ * (hp_prev_out_l_ + in_l - hp_prev_in_l_);
+        const float out_r = hp_alpha_ * (hp_prev_out_r_ + in_r - hp_prev_in_r_);
+        hp_prev_in_l_ = in_l;
+        hp_prev_in_r_ = in_r;
+        hp_prev_out_l_ = out_l;
+        hp_prev_out_r_ = out_r;
+        l = out_l;
+        r = out_r;
+    }
+
+    if (muted_) {
+        ring_.push(0.0f, 0.0f);
+        return;
+    }
+
+    l *= master_gain_;
+    r *= master_gain_;
 
     ring_.push(l, r);
 }

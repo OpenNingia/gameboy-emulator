@@ -42,18 +42,47 @@ uint8_t cpu::step() {
         return static_cast<std::uint8_t>(step_cycles);
     }
 
-    // EI delay: applica IME=true se EI eseguito allo step precedente
-    if (ime_pending && !ei_just_executed) {
-        interrupt_enabled = true;
-        ime_pending = false;
-    }
-    ei_just_executed = false;
+    // EI delay: the ime_pending → interrupt_enabled promotion used to live
+    // here (top of cpu::step).  It was moved to core::step, between this
+    // call and irq::dispatch(), so a "DI" landing one instruction after
+    // EI cannot mask the IRQ window that real hardware exposes between
+    // the EI-following instruction and the next one.  See core::step for
+    // the load-bearing ordering.  ei_just_executed is still mutated by
+    // the EI opcode body and cleared by core::step after the promotion
+    // check.
     extra_cycles = 0;
 
     auto op = fetch();
     auto& e = ((op & 0xFF00) == 0xCB00) ? dispatch_cb[op & 0xFF] : dispatch_main[op & 0xFF];
-    if (!e.fn)
+    if (!e.fn) {
+        // The Sharp LR35902 has 11 truly illegal opcodes (D3 DB DD E3 E4
+        // EB EC ED F4 FC FD).  On real hardware they lock the CPU
+        // permanently at the current PC — the chip stops fetching and
+        // sits there until reset.  Rather than crashing the emulator we
+        // emulate the lockup: park PC on the illegal byte, mark halted,
+        // log once, drain a single M-cycle.  The halted branch above
+        // keeps the PPU/APU/timer running so the user can pause from
+        // the debugger and inspect.  All other null-fn cases (CB-prefix
+        // holes, opcodes we haven't written a body for yet) still throw
+        // because they indicate emulator gaps, not real hardware
+        // behaviour the ROM is allowed to rely on.
+        const std::uint8_t low = static_cast<std::uint8_t>(op & 0xFF);
+        const bool non_cb = (op & 0xFF00) == 0;
+        const bool is_illegal =
+            non_cb && (low == 0xD3 || low == 0xDB || low == 0xDD || low == 0xE3 || low == 0xE4 || low == 0xEB ||
+                       low == 0xEC || low == 0xED || low == 0xF4 || low == 0xFC || low == 0xFD);
+        if (is_illegal) {
+            // Undo fetch's PC++ so PC sits on the illegal byte, matching
+            // the hardware-observable "stuck at this address" behaviour.
+            --regs.pc;
+            halted = true;
+            LOG_ERROR(gbemu::log::root(), "Illegal opcode 0x{:02X} at PC=0x{:04X} — CPU locked", low,
+                      static_cast<unsigned>(regs.pc));
+            tick(4);
+            return static_cast<std::uint8_t>(step_cycles);
+        }
         throw gbemu_exception{"Instruction not handled!"};
+    }
     e.fn(*this);
 
     // Hybrid M-cycle accounting: bus accesses ticked during the instruction

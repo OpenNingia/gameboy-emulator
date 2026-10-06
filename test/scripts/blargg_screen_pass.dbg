@@ -1,0 +1,20 @@
+# Generic Blargg "screen output" test harness.
+#
+# Several Blargg test ROMs (notably halt_bug, interrupt_time) report
+# pass / fail only by drawing ASCII to the LCD via shell.inc's screen
+# backend — no serial output.  shell.inc stores ASCII codes directly
+# into the BG tile map (the font glyph for each ASCII char is loaded
+# into the matching VRAM tile slot at boot), so reading $9800/$9C00
+# back as bytes yields the on-screen text verbatim.  `run-until
+# bg-text-match` does the substring search at every VBlank edge.
+#
+# Works for the serial-emitting ROMs too (cpu_instrs, instr_timing,
+# mem_timing, mem_timing-2) since they paint the same text to screen
+# in parallel — keeps the whole Blargg suite on one harness.
+#
+# 500M T-cycles ≈ 119 seconds of emulated GB time.  CTest's wall-clock
+# timeout (set per-test in test/CMakeLists.txt) caps the real-time
+# budget on top of this.
+run-until bg-text-match "Passed" max-cycles 500000000
+dump bg-text
+exit

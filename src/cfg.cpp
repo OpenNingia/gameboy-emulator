@@ -27,5 +27,15 @@ config::config(std::string const& file_path) {
         app_paths.lookupValue("roms_dir", paths.roms_dir);
         app_paths.lookupValue("savs_dir", paths.savs_dir);
         app_paths.lookupValue("sslots_dir", paths.sslots_dir);
+        app_paths.lookupValue("palettes_dir", paths.palettes_dir);
+        app_paths.lookupValue("user_dir", paths.user_dir);
+    }
+
+    // Optional `display` block. Same shape as `paths` — every field has a
+    // built-in default so a config missing the block is still valid.
+    if (app.exists("display")) {
+        const auto& app_display = app["display"];
+        app_display.lookupValue("frame_blending", display.frame_blending);
+        app_display.lookupValue("palette", display.palette);
     }
 }

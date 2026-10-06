@@ -7,6 +7,9 @@
       "environment": {
         "VCPKG_ROOT": "C:\\code\\vcpkg",
         "GBEMU_HOME": "C:\\code\\emu\\gb_home"
+      },
+      "cacheVariables": {
+        "GBEMU_TEST_ROMS_DIR": "C:\\code\\emu\\gb-test-roms"
       }
     },
     {

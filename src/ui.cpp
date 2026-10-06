@@ -1,34 +1,40 @@
 // Panels: Display, CPU, Disassembly, Memory (per-region tabs via the vendored
 // imgui_memory_editor.h), Breakpoints + Watchpoints, PPU (LCDC/STAT decode +
-// palette swatches + VRAM tile viewer + BG tile-map viewer), MBC (banking
-// state via mbc::debug_state), Serial (scrollback of debugger serial buffer),
-// PC-ring (clickable history of recent PCs).  Kept in one file — the panel
-// count is high but each panel is small and the shared `context` lookup is
-// trivial.  If this grows past ~1.5kLOC consider splitting per-panel.
+// palette swatches + VRAM tile viewer + BG tile-map viewer), OAM (40-sprite
+// grid + decoded table), MBC (banking state via mbc::debug_state), Serial
+// (scrollback of debugger serial buffer), PC-ring (clickable history of
+// recent PCs).  Kept in one file — the panel count is high but each panel
+// is small and the shared `context` lookup is trivial.  If this grows past
+// ~1.5kLOC consider splitting per-panel.
 
 #include <algorithm>
 #include <array>
 #include <cfloat>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <string>
 #include <vector>
 
 #include <SDL2/SDL.h>
+#include <apu.h>
+#include <cfg.h>
 #include <core.h>
 #include <debugger.h>
 #include <disasm.h>
+#include <display_post.h>
 #include <gb_layout.h>
 #include <gfx.h>
 #include <imgui.h>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include <imgui_internal.h>
+#include <input.h>
+#include <log.h>
 #include <mbc.h>
 #include <pixel_pipeline.h>
 #include <third_party/imgui_memory_editor.h>
 #include <ui.h>
+#include <user_state.h>
 
 namespace gbemu::ui {
 
@@ -40,8 +46,9 @@ namespace gbemu::ui {
             std::uint16_t base;
         };
 
-        // Persistent state files kept next to imgui.ini in CWD.
-        constexpr const char* RECENT_ROMS_FILE = "gbemu_recent.txt";
+        // Cap on the Recent ROMs MRU list.  Storage lives in user_state
+        // (persisted to <base>/<user_dir>/user.conf); this only bounds
+        // how many entries we keep in memory and serialise back out.
         constexpr std::size_t MAX_RECENT_ROMS = 8;
 
     } // namespace
@@ -52,6 +59,11 @@ namespace gbemu::ui {
         gbemu::gfx::backend* backend{nullptr};
         gbemu::debugger* dbg{nullptr};
         gbemu::core* core{nullptr};
+        // Read-only pointer to the host's input manager — used by the
+        // menu bar to label MenuItem shortcuts from the live binding
+        // config rather than hardcoded strings, so a future rebinding
+        // UI lands without a parallel edit.
+        gbemu::input::manager const* input{nullptr};
 
         // Streaming presenter for the GB framebuffer shown in the Display
         // panel.  Created eagerly in ui::init; uploaded each time the PPU
@@ -65,6 +77,7 @@ namespace gbemu::ui {
         bool show_memory{true};
         bool show_breakpoints{true};
         bool show_ppu{true};
+        bool show_oam{true};
         bool show_mbc{true};
         bool show_serial{true};
         bool show_pc_ring{true};
@@ -80,8 +93,19 @@ namespace gbemu::ui {
 
         // Breakpoints / Watchpoints panel inputs.
         char bp_input_buf[8]{};
+        char bp_cond_buf[128]{};
+        std::string bp_parse_error{}; // last parse error from the Add row
         char wp_input_buf[8]{};
         int wp_len_input{1};
+
+        // Per-row edit state for the conditional-breakpoint list.  When the
+        // user clicks "Edit" on a row, `bp_edit_addr` holds the bp address
+        // and `bp_edit_buf` is seeded with the current condition; clicking
+        // Apply re-parses + reattaches, Cancel discards.  Only one row can
+        // be in edit mode at a time.
+        int bp_edit_addr{-1};
+        char bp_edit_buf[128]{};
+        std::string bp_edit_error{};
 
         // PPU panel: streaming presenters for the VRAM tile grid (128x192
         // px, 16x24 tiles of 8x8) and the BG tile map viewer (256x256 px).
@@ -90,37 +114,42 @@ namespace gbemu::ui {
         // vs $9C00); independent of LCDC.3 so the user can inspect either.
         gbemu::gfx::presenter* ppu_tiles_present{nullptr};
         gbemu::gfx::presenter* ppu_bgmap_present{nullptr};
-        int ppu_bgmap_idx{0}; // 0 → $9800, 1 → $9C00
+        int ppu_bgmap_idx{0};  // 0 → $9800, 1 → $9C00
+        int ppu_tiles_bank{0}; // CGB: 0 → VRAM bank 0, 1 → VRAM bank 1
+
+        // OAM panel: a single streaming presenter for the 40-sprite grid
+        // (8 cols x 5 rows of 8x16 cells = 64 x 80 px).  Cells are always
+        // sized for the 8x16 case; in 8x8 mode the bottom half of each
+        // cell is filled with a checkerboard so the user can tell at a
+        // glance which mode is active.  Lazy-created on first paint.
+        gbemu::gfx::presenter* oam_present{nullptr};
 
         // Menu-bar / popup state.
         host_actions actions{};
-        std::vector<std::string> recent_roms{};
+        // Session state owned by the host Application.  Source of truth
+        // for `recent_roms` (and future palette / panel-state prefs);
+        // mutations raise host_actions::save_user_state_requested so the
+        // host writes the file back to disk after the frame.
+        gbemu::user_state* user{nullptr};
+        // Long-lived backing for ImGui::GetIO().IniFilename — ImGui
+        // stores the pointer verbatim and does not copy.  Set in init()
+        // right after CreateContext so the first NewFrame loads the
+        // right path.
+        std::string imgui_ini_path{};
         bool show_about_popup{false};
+
+        // Display post-processing — frame blending (LCD ghosting) and the
+        // palette registry feeding the PPU's resolver.  Owned by the UI
+        // context because both are interactive-only: the headless script
+        // runner never calls ui::render_frame and therefore never touches
+        // this state.  The Application configures both from cfg.display
+        // during ui::init.
+        gbemu::display::frame_blender post{};
+        gbemu::display::palette_registry palettes{};
+        // Track the currently-active palette name so the menu can render
+        // radio checkmarks without re-walking the registry to identify it.
+        std::string active_palette_name{"grey"};
     };
-
-    namespace {
-
-        // Recents persistence: one path per line, MRU first. Missing file is
-        // not an error (first launch). Save is best-effort.
-        void load_recent_roms(context& c) {
-            c.recent_roms.clear();
-            std::ifstream f(RECENT_ROMS_FILE);
-            std::string line;
-            while (std::getline(f, line) && c.recent_roms.size() < MAX_RECENT_ROMS) {
-                if (!line.empty())
-                    c.recent_roms.push_back(line);
-            }
-        }
-
-        void save_recent_roms(const context& c) {
-            std::ofstream f(RECENT_ROMS_FILE);
-            if (!f)
-                return;
-            for (const auto& p : c.recent_roms)
-                f << p << '\n';
-        }
-
-    } // namespace
 
     namespace {
 
@@ -160,6 +189,7 @@ namespace gbemu::ui {
             ImGui::DockBuilderDockWindow("Display", dock_left_top);
             ImGui::DockBuilderDockWindow("Memory", dock_left_bot);
             ImGui::DockBuilderDockWindow("PPU", dock_left_bot);
+            ImGui::DockBuilderDockWindow("OAM", dock_left_bot);
             ImGui::DockBuilderDockWindow("CPU", dock_middle_top);
             ImGui::DockBuilderDockWindow("Disassembly", dock_middle_bot);
             ImGui::DockBuilderDockWindow("Breakpoints", dock_right_top);
@@ -180,27 +210,45 @@ namespace gbemu::ui {
 
         void draw_menu_bar(context& c) {
             auto& dbg = *c.dbg;
+            // Resolve shortcut labels once per frame from the live input
+            // config so a rebinding (today: hardcoded defaults; tomorrow:
+            // user.conf or a Settings panel) automatically refreshes the
+            // menu hints without a parallel edit here.  Empty string is
+            // a legal value: MenuItem(label, "") just hides the shortcut
+            // column.  Cached on the stack — the std::string returned
+            // from shortcut_label has full-expression lifetime so c_str()
+            // is safe to pass into ImGui::MenuItem.
+            using a = gbemu::input::action;
+            const std::string sc_load_rom = c.input ? c.input->shortcut_label(a::load_rom) : "";
+            const std::string sc_pause = c.input ? c.input->shortcut_label(a::toggle_pause) : "";
+            const std::string sc_reset = c.input ? c.input->shortcut_label(a::reset) : "";
+            const std::string sc_fullscreen = c.input ? c.input->shortcut_label(a::toggle_fullscreen) : "";
+            const std::string sc_speed_reset = c.input ? c.input->shortcut_label(a::speed_reset) : "";
+            const std::string sc_speed_up = c.input ? c.input->shortcut_label(a::speed_up) : "";
+            const std::string sc_fast_fwd = c.input ? c.input->shortcut_label(a::fast_forward) : "";
+            const std::string sc_mute = c.input ? c.input->shortcut_label(a::toggle_mute) : "";
 
             if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("Load ROM...", "Ctrl+O"))
+                if (ImGui::MenuItem("Load ROM...", sc_load_rom.c_str()))
                     c.actions.load_rom_dialog_requested = true;
 
                 // Recent ROMs submenu — disabled (and shows "(none)") when
                 // the MRU list is empty so the user gets the feedback that
                 // it exists but has nothing to offer yet.
-                if (ImGui::BeginMenu("Recent ROMs", !c.recent_roms.empty())) {
-                    for (std::size_t i = 0; i < c.recent_roms.size(); ++i) {
+                auto& recents = c.user->recent_roms;
+                if (ImGui::BeginMenu("Recent ROMs", !recents.empty())) {
+                    for (std::size_t i = 0; i < recents.size(); ++i) {
                         // PushID guards against duplicate basenames showing
                         // up in the list (rare but possible across folders).
                         ImGui::PushID(static_cast<int>(i));
-                        if (ImGui::MenuItem(c.recent_roms[i].c_str()))
-                            c.actions.pending_rom_load = c.recent_roms[i];
+                        if (ImGui::MenuItem(recents[i].c_str()))
+                            c.actions.pending_rom_load = recents[i];
                         ImGui::PopID();
                     }
                     ImGui::Separator();
                     if (ImGui::MenuItem("Clear list")) {
-                        c.recent_roms.clear();
-                        save_recent_roms(c);
+                        recents.clear();
+                        c.actions.save_user_state_requested = true;
                     }
                     ImGui::EndMenu();
                 }
@@ -218,23 +266,73 @@ namespace gbemu::ui {
                 const bool rom_loaded = has_rom(c);
                 ImGui::BeginDisabled(!rom_loaded);
                 if (paused) {
-                    if (ImGui::MenuItem("Resume", "Space"))
+                    if (ImGui::MenuItem("Resume", sc_pause.c_str()))
                         dbg.resume();
                 } else {
-                    if (ImGui::MenuItem("Pause", "Space"))
+                    if (ImGui::MenuItem("Pause", sc_pause.c_str()))
                         dbg.pause();
                 }
-                if (ImGui::MenuItem("Reset", "Ctrl+R"))
+                if (ImGui::MenuItem("Reset", sc_reset.c_str())) {
                     dbg.reset();
+                    // Clear the blender history so the first post-reset frame
+                    // is shown un-ghosted (matches the user's mental model of
+                    // "power-cycle").
+                    c.post.reset();
+                }
                 ImGui::EndDisabled();
 
-                // Speed and Save/Load State live behind TODO §3 and §2
-                // respectively.  Surfaced as disabled submenus so users see
-                // the placeholder rather than wondering where these features
-                // will land.
-                if (ImGui::BeginMenu("Speed", false)) {
+                // Speed presets. Kept in sync with Application::SPEED_PRESETS
+                // (app.h) — the duplication is intentional: ui.cpp does not
+                // include app.h, and the list is short enough that a future
+                // edit is trivially mirrored.  The current value is read from
+                // user_state (the single source of truth, mutated by hotkeys
+                // and by these menu items alike); Application's main loop
+                // watches user_state.speed_multiplier and re-applies the
+                // title / apu mute side-effects on change.
+                if (ImGui::BeginMenu("Speed")) {
+                    struct preset {
+                        const char* label;
+                        const char* shortcut;
+                        float value;
+                    };
+                    // Shortcuts pulled from the input config: only the
+                    // 1.0x preset and the 2.0x preset have natural one-key
+                    // bindings (speed_reset / speed_up).  The rest are
+                    // reached via the menu or repeated +/− presses, so
+                    // they show no shortcut column.
+                    static constexpr preset presets[] = {
+                        {"0.25x", "", 0.25f}, {"0.5x", "", 0.5f}, {"1.0x", "", 1.0f},
+                        {"1.5x", "", 1.5f},   {"2.0x", "", 2.0f}, {"4.0x", "", 4.0f},
+                    };
+                    const float cur = c.user->speed_multiplier;
+                    for (const auto& p : presets) {
+                        const char* sc = nullptr;
+                        if (p.value == 1.0f && !sc_speed_reset.empty())
+                            sc = sc_speed_reset.c_str();
+                        else if (p.value == 2.0f && !sc_speed_up.empty())
+                            sc = sc_speed_up.c_str();
+                        const bool selected = (cur == p.value);
+                        if (ImGui::MenuItem(p.label, sc, selected)) {
+                            c.user->speed_multiplier = p.value;
+                            c.actions.save_user_state_requested = true;
+                        }
+                    }
+                    ImGui::Separator();
+                    // Informational only — fast-forward is hold-only and
+                    // captured by the SDL event loop, not by ImGui (the
+                    // hotkey path is gated on !imgui_captured).  Disabled
+                    // so the menu doesn't pretend the row is clickable.
+                    ImGui::BeginDisabled();
+                    std::string ff_label = "Fast-forward (hold ";
+                    ff_label += sc_fast_fwd.empty() ? "Tab" : sc_fast_fwd;
+                    ff_label += ")";
+                    ImGui::MenuItem(ff_label.c_str(), sc_fast_fwd.c_str());
+                    ImGui::EndDisabled();
                     ImGui::EndMenu();
                 }
+                // Save/Load State live behind TODO §2.  Surfaced as disabled
+                // submenus so users see the placeholder rather than wondering
+                // where the feature will land.
                 if (ImGui::BeginMenu("Save State", false)) {
                     ImGui::EndMenu();
                 }
@@ -245,8 +343,110 @@ namespace gbemu::ui {
                 ImGui::Separator();
 
                 const bool is_fs = c.window && (SDL_GetWindowFlags(c.window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
-                if (ImGui::MenuItem("Toggle Fullscreen", "F11", is_fs)) {
+                if (ImGui::MenuItem("Toggle Fullscreen", sc_fullscreen.c_str(), is_fs)) {
                     SDL_SetWindowFullscreen(c.window, is_fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+                }
+
+                // Display ▸ — frame blending (LCD ghosting) + palette swap.
+                // Live state lives in the context; the cfg.display values
+                // are only the initial defaults at boot.
+                if (ImGui::BeginMenu("Display")) {
+                    using gbemu::display::blend_mode;
+                    if (ImGui::BeginMenu("Frame Blending")) {
+                        const blend_mode current = c.post.mode();
+                        if (ImGui::MenuItem("Disabled", nullptr, current == blend_mode::disabled))
+                            c.post.set_mode(blend_mode::disabled);
+                        if (ImGui::MenuItem("Simple", nullptr, current == blend_mode::simple))
+                            c.post.set_mode(blend_mode::simple);
+                        if (ImGui::MenuItem("Accurate", nullptr, current == blend_mode::accurate))
+                            c.post.set_mode(blend_mode::accurate);
+                        ImGui::EndMenu();
+                    }
+                    // In CGB mode (CGB-only and CGB-compat carts both) the PPU
+                    // routes through resolve_cgb() and reads colors from CGB
+                    // palette RAM — the 4-shade DMG palette is ignored, so
+                    // disable the submenu rather than letting the user click
+                    // through entries that do nothing.
+                    const bool cgb_active = c.core->mmu.cgb_mode();
+                    if (ImGui::BeginMenu("Palette", !cgb_active)) {
+                        // Built-ins are inserted first by install_builtins()
+                        // and any user .sbp files follow.  A separator marks
+                        // the boundary so users can tell at a glance what is
+                        // custom vs. ours.  The first 4 entries are the
+                        // built-ins (grey/dmg/mgb/gbl), see palette_registry.
+                        const auto& list = c.palettes.all();
+                        for (std::size_t i = 0; i < list.size(); ++i) {
+                            if (i == 4 && list.size() > 4)
+                                ImGui::Separator();
+                            const bool selected = (list[i].name == c.active_palette_name);
+                            if (ImGui::MenuItem(list[i].name.c_str(), nullptr, selected)) {
+                                c.core->ppu.set_palette(list[i].shades);
+                                c.active_palette_name = list[i].name;
+                            }
+                        }
+                        ImGui::EndMenu();
+                    }
+                    if (cgb_active && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip("Palette swap applies only to DMG titles.\n"
+                                          "CGB and CGB-compatible cartridges drive the PPU through CGB palette RAM.");
+                    }
+                    ImGui::EndMenu();
+                }
+
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Audio")) {
+                auto& u = *c.user;
+                auto& apu = c.core->apu;
+
+                // Mute toggle. We keep user_state and apu in sync explicitly
+                // instead of plumbing a watcher — Application::run does the
+                // same after a hotkey toggle. The save flag is raised so
+                // user.conf reflects the new state on next frame drain.
+                if (ImGui::MenuItem("Mute", sc_mute.c_str(), u.audio_muted)) {
+                    u.audio_muted = !u.audio_muted;
+                    apu.set_muted(u.audio_muted);
+                    c.actions.save_user_state_requested = true;
+                }
+
+                if (ImGui::BeginMenu("Volume")) {
+                    // Slider value is a percentage (0..100) so the user sees
+                    // a familiar scale; the gain pushed into the APU is the
+                    // square of pct/100, giving a perceptually-linear feel
+                    // (-12 dB at the midpoint instead of -6 dB).
+                    int pct = static_cast<int>(u.audio_volume * 100.0f + 0.5f);
+                    ImGui::SetNextItemWidth(180);
+                    if (ImGui::SliderInt("##volpct", &pct, 0, 100, "%d%%")) {
+                        pct = std::clamp(pct, 0, 100);
+                        u.audio_volume = static_cast<float>(pct) / 100.0f;
+                        apu.set_master_gain(u.audio_volume * u.audio_volume);
+                        c.actions.save_user_state_requested = true;
+                    }
+                    ImGui::EndMenu();
+                }
+
+                if (ImGui::BeginMenu("Highpass Filter")) {
+                    using hp = gbemu::apu::highpass_mode;
+                    struct entry {
+                        const char* label;
+                        const char* key;
+                        hp mode;
+                    };
+                    static constexpr entry entries[] = {
+                        {"Off", "off", hp::off},
+                        {"Accurate", "accurate", hp::accurate},
+                        {"Preserve waveform", "preserve", hp::preserve},
+                    };
+                    for (const auto& e : entries) {
+                        const bool selected = (u.audio_highpass == e.key);
+                        if (ImGui::MenuItem(e.label, nullptr, selected)) {
+                            u.audio_highpass = e.key;
+                            apu.set_highpass_mode(e.mode);
+                            c.actions.save_user_state_requested = true;
+                        }
+                    }
+                    ImGui::EndMenu();
                 }
 
                 ImGui::EndMenu();
@@ -259,6 +459,7 @@ namespace gbemu::ui {
                 ImGui::MenuItem("Memory", nullptr, &c.show_memory);
                 ImGui::MenuItem("Breakpoints", nullptr, &c.show_breakpoints);
                 ImGui::MenuItem("PPU", nullptr, &c.show_ppu);
+                ImGui::MenuItem("OAM", nullptr, &c.show_oam);
                 ImGui::MenuItem("MBC", nullptr, &c.show_mbc);
                 ImGui::MenuItem("Serial", nullptr, &c.show_serial);
                 ImGui::MenuItem("PC ring", nullptr, &c.show_pc_ring);
@@ -436,8 +637,8 @@ namespace gbemu::ui {
 
             ImGui::Text("Z %d   N %d   H %d   C %d", regs.z_flag() ? 1 : 0, regs.n_flag() ? 1 : 0,
                         regs.h_flag() ? 1 : 0, regs.c_flag() ? 1 : 0);
-            ImGui::Text("IME %d   HALT %d   STOP %d", cpu.interrupt_enabled ? 1 : 0, cpu.halted ? 1 : 0,
-                        cpu.stopped ? 1 : 0);
+            ImGui::Text("IME %d   HALT %d   STOP %d   2x %d", cpu.interrupt_enabled ? 1 : 0, cpu.halted ? 1 : 0,
+                        cpu.stopped ? 1 : 0, cpu.double_speed ? 1 : 0);
 
             ImGui::Separator();
 
@@ -470,6 +671,8 @@ namespace gbemu::ui {
                     // ignore parse failure — user can retry
                 }
             }
+            ImGui::SameLine();
+            const bool copy_pressed = ImGui::Button("Copy");
             ImGui::Separator();
 
             if (c.disasm_follow_pc)
@@ -480,6 +683,10 @@ namespace gbemu::ui {
             const float line_h = ImGui::GetTextLineHeightWithSpacing();
             const float avail_h = ImGui::GetContentRegionAvail().y;
             const int n = std::clamp(static_cast<int>(avail_h / line_h) + 2, 8, 64);
+
+            std::string copy_buffer;
+            if (copy_pressed)
+                copy_buffer.reserve(static_cast<std::size_t>(n) * 40);
 
             std::uint16_t cur = c.disasm_view_addr;
             for (int i = 0; i < n; ++i) {
@@ -519,10 +726,18 @@ namespace gbemu::ui {
 
                 ImGui::PopID();
 
+                if (copy_pressed) {
+                    copy_buffer.append(buf);
+                    copy_buffer.push_back('\n');
+                }
+
                 if (r.length == 0)
                     break; // safety: malformed table entry
                 cur = static_cast<std::uint16_t>(cur + r.length);
             }
+
+            if (copy_pressed && !copy_buffer.empty())
+                ImGui::SetClipboardText(copy_buffer.c_str());
 
             ImGui::EndChild();
             ImGui::End();
@@ -603,28 +818,95 @@ namespace gbemu::ui {
             ImGui::SetNextItemWidth(80);
             ImGui::InputText("Addr##bp", c.bp_input_buf, sizeof(c.bp_input_buf), ImGuiInputTextFlags_CharsHexadecimal);
             ImGui::SameLine();
+            ImGui::SetNextItemWidth(220);
+            ImGui::InputTextWithHint("Cond##bp", "e.g. A==0x7F && (HL)>=0xC000", c.bp_cond_buf, sizeof(c.bp_cond_buf));
+            ImGui::SameLine();
             if (ImGui::Button("Add##bp")) {
+                c.bp_parse_error.clear();
                 try {
                     if (c.bp_input_buf[0]) {
                         const auto addr = static_cast<std::uint16_t>(std::stoul(c.bp_input_buf, nullptr, 16));
-                        dbg.breakpoint_set(addr);
-                        c.bp_input_buf[0] = '\0';
+                        // Empty condition -> unconditional bp.
+                        std::string err;
+                        if (auto p = gbemu::parse_bp_predicate(c.bp_cond_buf, err)) {
+                            if (p->terms.empty())
+                                dbg.breakpoint_set(addr);
+                            else
+                                dbg.breakpoint_set(addr, std::move(*p));
+                            c.bp_input_buf[0] = '\0';
+                            c.bp_cond_buf[0] = '\0';
+                        } else {
+                            c.bp_parse_error = err;
+                        }
                     }
-                } catch (...) {}
+                } catch (...) {
+                    c.bp_parse_error = "invalid address";
+                }
             }
             ImGui::SameLine();
             if (ImGui::Button("Clear all##bp")) {
                 for (auto a : dbg.breakpoint_list())
                     dbg.breakpoint_clear(a);
+                c.bp_edit_addr = -1;
+                c.bp_parse_error.clear();
+            }
+            if (!c.bp_parse_error.empty()) {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "parse error: %s", c.bp_parse_error.c_str());
             }
 
             if (ImGui::BeginListBox("##bp_list", ImVec2(-FLT_MIN, 6 * ImGui::GetTextLineHeightWithSpacing()))) {
                 for (auto a : dbg.breakpoint_list()) {
                     ImGui::PushID(static_cast<int>(a));
-                    if (ImGui::SmallButton("X"))
+                    if (ImGui::SmallButton("X")) {
                         dbg.breakpoint_clear(a);
+                        if (c.bp_edit_addr == static_cast<int>(a))
+                            c.bp_edit_addr = -1;
+                    }
                     ImGui::SameLine();
-                    ImGui::Text("$%04X", a);
+                    if (c.bp_edit_addr == static_cast<int>(a)) {
+                        ImGui::Text("$%04X if", a);
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(220);
+                        const bool apply = ImGui::InputText("##bp_edit", c.bp_edit_buf, sizeof(c.bp_edit_buf),
+                                                            ImGuiInputTextFlags_EnterReturnsTrue);
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Apply") || apply) {
+                            std::string err;
+                            if (auto p = gbemu::parse_bp_predicate(c.bp_edit_buf, err)) {
+                                if (p->terms.empty())
+                                    dbg.breakpoint_set(a);
+                                else
+                                    dbg.breakpoint_set(a, std::move(*p));
+                                c.bp_edit_addr = -1;
+                                c.bp_edit_error.clear();
+                            } else {
+                                c.bp_edit_error = err;
+                            }
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Cancel")) {
+                            c.bp_edit_addr = -1;
+                            c.bp_edit_error.clear();
+                        }
+                        if (!c.bp_edit_error.empty()) {
+                            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "  %s", c.bp_edit_error.c_str());
+                        }
+                    } else {
+                        if (const auto* pred = dbg.breakpoint_predicate(a))
+                            ImGui::Text("$%04X if %s", a, pred->source.c_str());
+                        else
+                            ImGui::Text("$%04X", a);
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Edit")) {
+                            c.bp_edit_addr = static_cast<int>(a);
+                            c.bp_edit_error.clear();
+                            if (const auto* pred = dbg.breakpoint_predicate(a)) {
+                                std::snprintf(c.bp_edit_buf, sizeof(c.bp_edit_buf), "%s", pred->source.c_str());
+                            } else {
+                                c.bp_edit_buf[0] = '\0';
+                            }
+                        }
+                    }
                     ImGui::PopID();
                 }
                 ImGui::EndListBox();
@@ -677,7 +959,18 @@ namespace gbemu::ui {
                     if (w.len > display_len)
                         std::snprintf(val_buf + pos, sizeof(val_buf) - static_cast<std::size_t>(pos), " ...");
 
-                    ImGui::Text("$%04X len=%u = %s", w.addr, static_cast<unsigned>(w.len), val_buf);
+                    // Surface the writer PC + the byte the writer actually
+                    // wrote inline once the watchpoint has fired.  Showing
+                    // the written value is load-bearing for control
+                    // registers (MBC bank-switch, HDMA5 trigger, etc.)
+                    // where the visible byte under "= " may differ from
+                    // what the program wrote.
+                    if (w.has_fired) {
+                        ImGui::Text("$%04X len=%u = %s  wrote $%02X by PC=$%04X", w.addr, static_cast<unsigned>(w.len),
+                                    val_buf, w.last_value, w.last_writer_pc);
+                    } else {
+                        ImGui::Text("$%04X len=%u = %s  by PC=—", w.addr, static_cast<unsigned>(w.len), val_buf);
+                    }
                     ImGui::PopID();
                 }
                 ImGui::EndListBox();
@@ -718,8 +1011,13 @@ namespace gbemu::ui {
                     return;
             }
             std::array<std::uint32_t, 128 * 192> pixels{};
-            const gbemu::palette_resolver resolver{c.core->mmu};
-            const std::uint8_t* vram = c.core->mmu.vram_bank().data();
+            const auto& resolver = c.core->ppu.palette();
+            // CGB carts can stash pixel data in VRAM bank 1 (selected via the
+            // BG attribute byte's bit 3); the viewer's `ppu_tiles_bank` toggle
+            // lets the user inspect either bank independently of what the
+            // game has VBK latched to right now.
+            const std::uint8_t bank = static_cast<std::uint8_t>(c.ppu_tiles_bank ? 1 : 0);
+            const std::uint8_t* vram = c.core->mmu.vram_bank(bank).data();
             // The viewer covers $8000-$97FF: 384 tiles laid out 16 wide × 24 tall.
             constexpr std::uint32_t tiles_per_row = 16;
             constexpr std::uint32_t total_tiles = 384;
@@ -743,7 +1041,7 @@ namespace gbemu::ui {
             }
             std::array<std::uint32_t, 256 * 256> pixels{};
             const std::uint8_t lcdc = c.core->mmu.hwr_lcdc();
-            const gbemu::palette_resolver resolver{c.core->mmu};
+            const auto& resolver = c.core->ppu.palette();
             const bool data_8000 = (lcdc & gb::lcdc::tile_data_8000) != 0;
             const std::uint16_t map_base = c.ppu_bgmap_idx ? gb::BG_MAP_1 : gb::BG_MAP_0;
             const std::uint8_t* vram = c.core->mmu.vram_bank().data();
@@ -813,7 +1111,7 @@ namespace gbemu::ui {
                         (stat >> 4) & 1, (stat >> 3) & 1, (stat >> 2) & 1, stat & 3);
 
             ImGui::SeparatorText("Palettes");
-            const gbemu::palette_resolver resolver{mmu};
+            const auto& resolver = c.core->ppu.palette();
             palette_swatch("BGP ", resolver, gbemu::palette_id::bg);
             palette_swatch("OBP0", resolver, gbemu::palette_id::obj0);
             palette_swatch("OBP1", resolver, gbemu::palette_id::obj1);
@@ -824,6 +1122,15 @@ namespace gbemu::ui {
             // docked-but-hidden PPU panel stays cheap.  Textures live across
             // hides (only freed in ui::shutdown) so reopening is instant.
             ImGui::SeparatorText("VRAM tiles ($8000-$97FF)");
+            // Bank toggle is only meaningful on CGB; on DMG bank 1 is always
+            // empty so the radio is hidden to keep the panel clean.
+            if (c.core->mmu.cgb_mode()) {
+                ImGui::RadioButton("Bank 0##tiles", &c.ppu_tiles_bank, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton("Bank 1##tiles", &c.ppu_tiles_bank, 1);
+            } else {
+                c.ppu_tiles_bank = 0;
+            }
             refresh_tile_viewer_texture(c);
             if (c.ppu_tiles_present)
                 ImGui::Image(gbemu::gfx::presenter_imgui_id(c.ppu_tiles_present), ImVec2(128 * 2, 192 * 2));
@@ -835,6 +1142,216 @@ namespace gbemu::ui {
             refresh_bgmap_viewer_texture(c);
             if (c.ppu_bgmap_present)
                 ImGui::Image(gbemu::gfx::presenter_imgui_id(c.ppu_bgmap_present), ImVec2(256, 256));
+
+            ImGui::End();
+        }
+
+        // ---------- OAM panel ----------
+
+        // OAM viewer grid geometry.  Each cell hosts a 8x16 area: the top
+        // 8x8 holds the (top-half) sprite tile, the bottom 8x8 holds the
+        // bottom-half tile in 8x16 mode or a "(no tile here)" checkerboard
+        // in 8x8 mode.  Total grid: 8 columns * 5 rows = 40 entries
+        // (matches gb::OAM_ENTRIES).
+        constexpr std::uint32_t OAM_GRID_COLS = 8;
+        constexpr std::uint32_t OAM_GRID_ROWS = 5;
+        constexpr std::uint32_t OAM_CELL_W = 8;
+        constexpr std::uint32_t OAM_CELL_H = 16;
+        constexpr std::uint32_t OAM_TEX_W = OAM_GRID_COLS * OAM_CELL_W; // 64
+        constexpr std::uint32_t OAM_TEX_H = OAM_GRID_ROWS * OAM_CELL_H; // 80
+
+        // Render a single 8x8 sprite tile into `out` honouring x_flip /
+        // y_flip.  Sprite color index 0 is transparent on real hardware,
+        // so we paint it as a dim checkerboard to distinguish the
+        // sprite's silhouette from genuine background.  Colors 1..3 go
+        // through `ppu.resolve_pixel` so DMG OBP0/OBP1 and CGB OBJ palette
+        // RAM are both honoured automatically.
+        void decode_sprite_tile_8x8(const std::uint8_t* vram, std::uint8_t tile_idx, std::uint32_t* out,
+                                    std::uint32_t dst_stride, std::uint32_t dst_x, std::uint32_t dst_y,
+                                    const gbemu::ppu& ppu, gbemu::palette_id pal_id, bool x_flip, bool y_flip) {
+            const std::uint32_t off = static_cast<std::uint32_t>(tile_idx) * gb::TILE_BYTES;
+            for (std::uint32_t row = 0; row < gb::TILE_PIXELS; ++row) {
+                const std::uint32_t sr = y_flip ? (gb::TILE_PIXELS - 1 - row) : row;
+                const std::uint8_t lo = vram[off + sr * 2];
+                const std::uint8_t hi = vram[off + sr * 2 + 1];
+                for (std::uint32_t col = 0; col < gb::TILE_PIXELS; ++col) {
+                    const std::uint32_t sc = x_flip ? (gb::TILE_PIXELS - 1 - col) : col;
+                    const std::uint8_t shift = static_cast<std::uint8_t>(7 - sc);
+                    const std::uint8_t ci = gbemu::tile_color_index(lo, hi, shift);
+                    std::uint32_t px;
+                    if (ci == 0) {
+                        const bool ck = (((row >> 1) ^ (col >> 1)) & 1) != 0;
+                        px = ck ? 0xFF353535u : 0xFF252525u;
+                    } else {
+                        px = ppu.resolve_pixel(pal_id, ci);
+                    }
+                    out[(dst_y + row) * dst_stride + (dst_x + col)] = px;
+                }
+            }
+        }
+
+        // Repaint the OAM grid (gb::OAM_ENTRIES cells).  Walks the live OAM
+        // bytes, resolves per-sprite tile data, palette, flips, then stamps
+        // each sprite into its cell.  In 8x8 mode the bottom half of every
+        // cell is filled with a checkerboard so the user can see the active
+        // sprite size at a glance.  Always reads VRAM bank 1 on CGB when
+        // OAM attribute bit 3 is set; on DMG that bit is ignored.
+        void refresh_oam_viewer_texture(context& c) {
+            if (!c.oam_present) {
+                c.oam_present = gbemu::gfx::presenter_create(c.backend, OAM_TEX_W, OAM_TEX_H);
+                if (!c.oam_present)
+                    return;
+            }
+            std::array<std::uint32_t, OAM_TEX_W * OAM_TEX_H> pixels{};
+            const auto& mmu = c.core->mmu;
+            const auto& ppu = c.core->ppu;
+            const std::uint8_t lcdc = mmu.hwr_lcdc();
+            const bool tall = (lcdc & gb::lcdc::obj_size_8x16) != 0;
+            const bool cgb = mmu.cgb_mode();
+            const std::uint8_t* vram0 = mmu.vram_bank(0).data();
+            const std::uint8_t* vram1 = cgb ? mmu.vram_bank(1).data() : vram0;
+
+            for (int s = 0; s < gb::OAM_ENTRIES; ++s) {
+                const std::uint8_t off = static_cast<std::uint8_t>(s * gb::OAM_BYTES_PER_ENTRY);
+                const std::uint8_t tile = mmu.oam_read(static_cast<std::uint8_t>(off + 2));
+                const std::uint8_t attr = mmu.oam_read(static_cast<std::uint8_t>(off + 3));
+                const bool x_flip = (attr & gb::oam_attr::x_flip) != 0;
+                const bool y_flip = (attr & gb::oam_attr::y_flip) != 0;
+                const std::uint8_t* vram = (cgb && (attr & gb::oam_attr::cgb_vram_bank)) ? vram1 : vram0;
+
+                gbemu::palette_id pal_id;
+                if (cgb) {
+                    const std::uint8_t cgb_pal = attr & gb::oam_attr::cgb_palette_mask;
+                    pal_id = static_cast<gbemu::palette_id>(static_cast<std::uint8_t>(gbemu::palette_id::cgb_obj0) +
+                                                            cgb_pal);
+                } else {
+                    pal_id =
+                        (attr & gb::oam_attr::dmg_palette_obp1) ? gbemu::palette_id::obj1 : gbemu::palette_id::obj0;
+                }
+
+                const std::uint32_t cell_x = (static_cast<std::uint32_t>(s) % OAM_GRID_COLS) * OAM_CELL_W;
+                const std::uint32_t cell_y = (static_cast<std::uint32_t>(s) / OAM_GRID_COLS) * OAM_CELL_H;
+
+                if (tall) {
+                    // In 8x16 the LSB of the tile index is ignored: even
+                    // index is the top half, odd is the bottom.  Y-flip
+                    // swaps which physical position gets which tile (and
+                    // the per-tile y_flip still applies inside each half).
+                    const std::uint8_t top_tile = static_cast<std::uint8_t>(tile & 0xFE);
+                    const std::uint8_t bot_tile = static_cast<std::uint8_t>(tile | 0x01);
+                    const std::uint8_t tile_a = y_flip ? bot_tile : top_tile;
+                    const std::uint8_t tile_b = y_flip ? top_tile : bot_tile;
+                    decode_sprite_tile_8x8(vram, tile_a, pixels.data(), OAM_TEX_W, cell_x, cell_y, ppu, pal_id, x_flip,
+                                           y_flip);
+                    decode_sprite_tile_8x8(vram, tile_b, pixels.data(), OAM_TEX_W, cell_x, cell_y + 8, ppu, pal_id,
+                                           x_flip, y_flip);
+                } else {
+                    decode_sprite_tile_8x8(vram, tile, pixels.data(), OAM_TEX_W, cell_x, cell_y, ppu, pal_id, x_flip,
+                                           y_flip);
+                    // Mark the unused bottom half so 8x8 mode is visually
+                    // distinguishable from 8x16 at a glance.
+                    for (std::uint32_t row = 8; row < OAM_CELL_H; ++row) {
+                        for (std::uint32_t col = 0; col < OAM_CELL_W; ++col) {
+                            const bool ck = (((row >> 1) ^ (col >> 1)) & 1) != 0;
+                            pixels[(cell_y + row) * OAM_TEX_W + (cell_x + col)] = ck ? 0xFF181818u : 0xFF0C0C0Cu;
+                        }
+                    }
+                }
+            }
+            gbemu::gfx::presenter_upload(c.oam_present, pixels.data());
+        }
+
+        void draw_oam_panel(context& c) {
+            if (!c.show_oam)
+                return;
+            if (!ImGui::Begin("OAM", &c.show_oam)) {
+                ImGui::End();
+                return;
+            }
+
+            const auto& mmu = c.core->mmu;
+            const std::uint8_t lcdc = mmu.hwr_lcdc();
+            const bool tall = (lcdc & gb::lcdc::obj_size_8x16) != 0;
+            const bool obj_en = (lcdc & gb::lcdc::obj_enable) != 0;
+            const bool cgb = mmu.cgb_mode();
+
+            ImGui::Text("OBJ size %s    OBJ enable %s    Mode %s", tall ? "8x16" : "8x8", obj_en ? "yes" : "no",
+                        cgb ? "CGB" : "DMG");
+
+            ImGui::SeparatorText("Sprite grid (4x zoom)");
+            refresh_oam_viewer_texture(c);
+            if (c.oam_present)
+                ImGui::Image(gbemu::gfx::presenter_imgui_id(c.oam_present),
+                             ImVec2(static_cast<float>(OAM_TEX_W * 4), static_cast<float>(OAM_TEX_H * 4)));
+
+            ImGui::SeparatorText("Sprite table");
+            if (ImGui::BeginTable("##oam_table", 6,
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                                      ImGuiTableFlags_SizingFixedFit,
+                                  ImVec2(0, 12 * ImGui::GetTextLineHeightWithSpacing()))) {
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableSetupColumn("#");
+                ImGui::TableSetupColumn("Y");
+                ImGui::TableSetupColumn("X");
+                ImGui::TableSetupColumn("Tile");
+                ImGui::TableSetupColumn("Attr");
+                ImGui::TableSetupColumn("Flags");
+                ImGui::TableHeadersRow();
+
+                for (int i = 0; i < gb::OAM_ENTRIES; ++i) {
+                    const std::uint8_t off = static_cast<std::uint8_t>(i * gb::OAM_BYTES_PER_ENTRY);
+                    const std::uint8_t y_raw = mmu.oam_read(static_cast<std::uint8_t>(off + 0));
+                    const std::uint8_t x_raw = mmu.oam_read(static_cast<std::uint8_t>(off + 1));
+                    const std::uint8_t tile = mmu.oam_read(static_cast<std::uint8_t>(off + 2));
+                    const std::uint8_t attr = mmu.oam_read(static_cast<std::uint8_t>(off + 3));
+
+                    const int screen_y = static_cast<int>(y_raw) - 16;
+                    const int screen_x = static_cast<int>(x_raw) - 8;
+
+                    // Off-screen sprites are dimmed so the eye skips them.
+                    // Hardware hides a sprite when X or Y is fully outside
+                    // the active window — we use the rectangle the sprite
+                    // would occupy (8 wide, 8 or 16 tall) and check overlap
+                    // with the LCD frame.
+                    const int height = tall ? 16 : 8;
+                    const bool on_screen = (screen_y + height > 0 && screen_y < gb::LCD_HEIGHT && screen_x + 8 > 0 &&
+                                            screen_x < gb::LCD_WIDTH);
+
+                    ImGui::TableNextRow();
+                    if (!on_screen)
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("%2d", i);
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%4d  $%02X", screen_y, y_raw);
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%4d  $%02X", screen_x, x_raw);
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("$%02X", tile);
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("$%02X", attr);
+                    ImGui::TableSetColumnIndex(5);
+                    const bool prio = (attr & gb::oam_attr::bg_priority) != 0;
+                    const bool yflip = (attr & gb::oam_attr::y_flip) != 0;
+                    const bool xflip = (attr & gb::oam_attr::x_flip) != 0;
+                    if (cgb) {
+                        // On CGB the palette is a 0..7 index from bits 0-2;
+                        // the VRAM bank for tile data is bit 3.
+                        ImGui::Text("%c%c%c  pal=%u  bank=%u", prio ? 'P' : '-', yflip ? 'Y' : '-', xflip ? 'X' : '-',
+                                    static_cast<unsigned>(attr & gb::oam_attr::cgb_palette_mask),
+                                    (attr & gb::oam_attr::cgb_vram_bank) ? 1u : 0u);
+                    } else {
+                        const bool dmg_p = (attr & gb::oam_attr::dmg_palette_obp1) != 0;
+                        ImGui::Text("%c%c%c  %s", prio ? 'P' : '-', yflip ? 'Y' : '-', xflip ? 'X' : '-',
+                                    dmg_p ? "OBP1" : "OBP0");
+                    }
+
+                    if (!on_screen)
+                        ImGui::PopStyleColor();
+                }
+                ImGui::EndTable();
+            }
 
             ImGui::End();
         }
@@ -862,6 +1379,19 @@ namespace gbemu::ui {
             ImGui::Text("Mode        %u", static_cast<unsigned>(st.mode));
 
             ImGui::Separator();
+            const std::uint8_t cgb_flag = cart->cgb_flag();
+            const char* cgb_label = "DMG";
+            switch (classify_cgb_flag(cgb_flag)) {
+                case cgb_support::compat:
+                    cgb_label = "CGB-compat";
+                    break;
+                case cgb_support::cgb_only:
+                    cgb_label = "CGB-only";
+                    break;
+                case cgb_support::none:
+                    break;
+            }
+            ImGui::Text("CGB flag    $%02X (%s)", cgb_flag, cgb_label);
             // Header bytes are stable, but surfacing them next to the live
             // banking state saves a trip to the Memory panel.
             ImGui::Text("Header  ROM size $%02X   RAM size $%02X", c.core->mmu.read_u8(0x0148),
@@ -939,7 +1469,8 @@ namespace gbemu::ui {
 
     } // namespace
 
-    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, gbemu::core& c) {
+    context* init(SDL_Window* window, SDL_Renderer* renderer, gfx::backend* backend, debugger& dbg, gbemu::core& c,
+                  gbemu::user_state& user, gbemu::input::manager const& input, std::string const& imgui_ini_path) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
@@ -961,8 +1492,17 @@ namespace gbemu::ui {
         ctx->backend = backend;
         ctx->dbg = &dbg;
         ctx->core = &c;
+        ctx->user = &user;
+        ctx->input = &input;
+        // ImGui::GetIO().IniFilename stores the pointer verbatim and does
+        // not copy, so the backing string must outlive ImGui itself —
+        // park it on the context which lives for the whole frontend
+        // lifetime.  Setting it between CreateContext and the first
+        // NewFrame is supported (ImGui::Initialize, which loads the ini,
+        // runs lazily inside NewFrame).
+        ctx->imgui_ini_path = imgui_ini_path;
+        io.IniFilename = ctx->imgui_ini_path.empty() ? nullptr : ctx->imgui_ini_path.c_str();
         ctx->display_present = gbemu::gfx::presenter_create(backend, gb::LCD_WIDTH, gb::LCD_HEIGHT);
-        load_recent_roms(*ctx);
         return ctx;
     }
 
@@ -971,15 +1511,52 @@ namespace gbemu::ui {
     }
 
     void add_recent_rom(context* ctx, const std::string& path) {
-        if (!ctx || path.empty())
+        if (!ctx || !ctx->user || path.empty())
             return;
-        auto& rec = ctx->recent_roms;
+        auto& rec = ctx->user->recent_roms;
         // Dedup first so the moved-to-front entry doesn't leave a duplicate.
         rec.erase(std::remove(rec.begin(), rec.end(), path), rec.end());
         rec.insert(rec.begin(), path);
         if (rec.size() > MAX_RECENT_ROMS)
             rec.resize(MAX_RECENT_ROMS);
-        save_recent_roms(*ctx);
+        // The actual disk write happens on the next frame's host-side
+        // drain (Application reads save_user_state_requested and calls
+        // user_state::save).  Keeps libconfig I/O out of the menu-bar
+        // callback path.
+        ctx->actions.save_user_state_requested = true;
+    }
+
+    void apply_display_config(context* ctx, const config& cfg, const std::string& palettes_dir) {
+        if (!ctx)
+            return;
+        // 1) Built-ins first so "grey"/"dmg"/"mgb"/"gbl" are always available
+        //    even when the user palettes dir is missing.  User .sbp files
+        //    may shadow a built-in by sharing its stem (last-wins).
+        ctx->palettes.install_builtins();
+        ctx->palettes.scan_directory(palettes_dir);
+
+        // 2) Frame blending mode straight from the config string.
+        ctx->post.set_mode(gbemu::display::parse_blend_mode(cfg.display.frame_blending));
+
+        // 3) Resolve the active palette name.  Unknown names fall back to
+        //    "grey" rather than throwing — the user has just typed a string
+        //    in the config and a typo shouldn't crash the emulator.
+        const auto* p = ctx->palettes.find(cfg.display.palette);
+        if (!p) {
+            LOG_WARNING(gbemu::log::root(), "display: unknown palette \"{}\", falling back to \"grey\"",
+                        cfg.display.palette);
+            p = ctx->palettes.find("grey");
+        }
+        if (p && ctx->core) {
+            ctx->core->ppu.set_palette(p->shades);
+            ctx->active_palette_name = p->name;
+        }
+    }
+
+    void reset_display_post(context* ctx) {
+        if (!ctx)
+            return;
+        ctx->post.reset();
     }
 
     void shutdown(context* ctx) {
@@ -989,6 +1566,8 @@ namespace gbemu::ui {
         ctx->ppu_tiles_present = nullptr;
         gbemu::gfx::presenter_destroy(ctx->ppu_bgmap_present);
         ctx->ppu_bgmap_present = nullptr;
+        gbemu::gfx::presenter_destroy(ctx->oam_present);
+        ctx->oam_present = nullptr;
         gbemu::gfx::presenter_destroy(ctx->display_present);
         ctx->display_present = nullptr;
         ImGui_ImplSDLRenderer2_Shutdown();
@@ -1023,7 +1602,11 @@ namespace gbemu::ui {
         // Application::run; consolidating it here lets the UI fully own the
         // display presenter's lifecycle.
         if (ctx->display_present && ctx->core && ctx->core->ppu.consume_frame_ready()) {
-            gbemu::gfx::presenter_upload(ctx->display_present, ctx->core->ppu.framebuffer());
+            // Frame blending: with mode == disabled the blender returns
+            // `framebuffer()` verbatim (zero copy) so this stays cheap on
+            // the default path.  Other modes mix in the history ring.
+            const std::uint32_t* fb = ctx->post.blend(ctx->core->ppu.framebuffer());
+            gbemu::gfx::presenter_upload(ctx->display_present, fb);
         }
 
         ImGui_ImplSDLRenderer2_NewFrame();
@@ -1037,6 +1620,7 @@ namespace gbemu::ui {
         draw_memory_panel(*ctx);
         draw_breakpoints_panel(*ctx);
         draw_ppu_panel(*ctx);
+        draw_oam_panel(*ctx);
         draw_mbc_panel(*ctx);
         draw_serial_panel(*ctx);
         draw_pc_ring_panel(*ctx);

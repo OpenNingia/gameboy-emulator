@@ -18,19 +18,54 @@ debugger::debugger(core& c) : core_(c) {
             serial_buf_.push_back(static_cast<char>(core_.mmu.hwr_sb()));
         }
     });
+    // Bus-wide write observer — drives watchpoints.  Installing this from
+    // the ctor (after core has been constructed) means the post-BIOS
+    // initialize_registers() pokes have already run and won't generate
+    // spurious watchpoint fires; subsequent core.reset()s, however, will
+    // observably fire any watchpoint that covers the reset's writes
+    // (acceptable trade — the alternative is suppressing observers around
+    // reset, which adds complexity for a corner case).
+    c.mmu.add_bus_write_observer([this](std::uint16_t a, std::uint8_t v) { on_bus_write(a, v); });
 }
 
 step_result debugger::step() {
     step_result r{};
+    // Snapshot the PC *before* the step so the observer can credit any
+    // watchpoint write to the originating instruction.  Capturing here
+    // (rather than after core_.step()) is load-bearing: by the time the
+    // step returns, regs.pc has advanced past the writer (and a CALL/JP/
+    // RST/IRQ dispatch may have moved it somewhere completely unrelated).
+    pending_writer_pc_ = core_.regs.pc;
+    pending_wp_hit_ = false;
+    pending_wp_addr_ = 0;
     r.cycles = core_.step();
-    if (!watchpoints_.empty()) {
-        std::uint16_t hit_addr = 0;
-        if (sample_watchpoints(hit_addr)) {
-            r.watchpoint_hit = true;
-            r.watchpoint_addr = hit_addr;
-        }
+    if (pending_wp_hit_) {
+        r.watchpoint_hit = true;
+        r.watchpoint_addr = pending_wp_addr_;
+        r.watchpoint_writer_pc = pending_writer_pc_;
     }
     return r;
+}
+
+void debugger::on_bus_write(std::uint16_t addr, std::uint8_t val) {
+    if (watchpoints_.empty())
+        return;
+    for (auto& w : watchpoints_) {
+        // Range check (handle wrap defensively: `addr + len` can pass 0xFFFF
+        // for a watchpoint at the very top of the address space, but len is
+        // small in practice so the unsigned compare is enough).
+        if (addr < w.addr)
+            continue;
+        if (static_cast<std::uint32_t>(addr) >= static_cast<std::uint32_t>(w.addr) + w.len)
+            continue;
+        w.last_value = val;
+        w.last_writer_pc = pending_writer_pc_;
+        w.has_fired = true;
+        if (!pending_wp_hit_) {
+            pending_wp_hit_ = true;
+            pending_wp_addr_ = w.addr;
+        }
+    }
 }
 
 run_result debugger::step_over() {
@@ -51,7 +86,7 @@ run_result debugger::step_over() {
         if (sr.watchpoint_hit) {
             r.outcome = run_outcome::watchpoint;
             r.hit_addr = sr.watchpoint_addr;
-        } else if (breakpoint_has(core_.regs.pc)) {
+        } else if (breakpoint_should_fire(core_.regs.pc)) {
             r.outcome = run_outcome::breakpoint;
             r.hit_addr = core_.regs.pc;
         } else {
@@ -81,6 +116,14 @@ run_result debugger::run_until(const stop_condition& cond, std::uint64_t max_cyc
     std::size_t serial_scan_pos = 0;
 
     while (r.cycles_consumed < max_cycles) {
+        // Pre-step snapshot needed by `ld_b_b`: the opcode about to be fetched
+        // by this iteration's step().  After step() the PC has moved past the
+        // instruction (and a CALL/JP/IRQ may have rewritten it altogether), so
+        // the opcode byte has to be sampled here.  We only pay the mmu read
+        // for the kind that needs it — every other stop kind skips it.
+        const auto pre_pc = core_.regs.pc;
+        const std::uint8_t pre_op = (cond.kind == stop_kind::ld_b_b) ? core_.mmu.read_u8(pre_pc) : 0;
+
         const auto sr = step();
         r.cycles_consumed += sr.cycles;
         ++r.instructions;
@@ -90,7 +133,7 @@ run_result debugger::run_until(const stop_condition& cond, std::uint64_t max_cyc
             r.hit_addr = sr.watchpoint_addr;
             return r;
         }
-        if (breakpoint_has(core_.regs.pc)) {
+        if (breakpoint_should_fire(core_.regs.pc)) {
             r.outcome = run_outcome::breakpoint;
             r.hit_addr = core_.regs.pc;
             return r;
@@ -142,6 +185,28 @@ run_result debugger::run_until(const stop_condition& cond, std::uint64_t max_cyc
                     return r;
                 }
                 break;
+            case stop_kind::bg_text_match: {
+                // Throttle the (1024 mmu reads + substring search) scan to one
+                // pass per emulated frame — Blargg only repaints the result
+                // text at VBlank, so per-step scanning would burn cycles for
+                // no gain.  In headless mode no other consumer cares about
+                // the frame_ready edge, so consuming it here is fine.
+                if (cond.text_match.empty() || !core_.ppu.consume_frame_ready())
+                    break;
+                const auto s = bg_text_snapshot();
+                if (s.find(cond.text_match) != std::string::npos) {
+                    r.outcome = run_outcome::condition;
+                    return r;
+                }
+                break;
+            }
+            case stop_kind::ld_b_b:
+                if (pre_op == 0x40) {
+                    r.outcome = run_outcome::condition;
+                    r.hit_addr = pre_pc;
+                    return r;
+                }
+                break;
         }
     }
 
@@ -159,18 +224,67 @@ std::uint16_t debugger::current_pc() const {
 
 void debugger::breakpoint_set(std::uint16_t addr) {
     bp_bitmap_[addr >> 3] |= static_cast<std::uint8_t>(1u << (addr & 7));
+    // A plain `breakpoint_set(addr)` re-arms unconditional behaviour: any
+    // previously-attached predicate at the same address is dropped.
+    bp_predicates_.erase(
+        std::remove_if(bp_predicates_.begin(), bp_predicates_.end(), [&](const auto& kv) { return kv.first == addr; }),
+        bp_predicates_.end());
+}
+
+void debugger::breakpoint_set(std::uint16_t addr, bp_predicate pred) {
+    bp_bitmap_[addr >> 3] |= static_cast<std::uint8_t>(1u << (addr & 7));
+    if (pred.terms.empty()) {
+        // Empty predicate -> unconditional; do not insert a redundant entry.
+        bp_predicates_.erase(std::remove_if(bp_predicates_.begin(), bp_predicates_.end(),
+                                            [&](const auto& kv) { return kv.first == addr; }),
+                             bp_predicates_.end());
+        return;
+    }
+    for (auto& kv : bp_predicates_) {
+        if (kv.first == addr) {
+            kv.second = std::move(pred);
+            return;
+        }
+    }
+    bp_predicates_.emplace_back(addr, std::move(pred));
 }
 
 void debugger::breakpoint_clear(std::uint16_t addr) {
     bp_bitmap_[addr >> 3] &= static_cast<std::uint8_t>(~(1u << (addr & 7)));
+    bp_predicates_.erase(
+        std::remove_if(bp_predicates_.begin(), bp_predicates_.end(), [&](const auto& kv) { return kv.first == addr; }),
+        bp_predicates_.end());
 }
 
 void debugger::breakpoint_toggle(std::uint16_t addr) {
-    bp_bitmap_[addr >> 3] ^= static_cast<std::uint8_t>(1u << (addr & 7));
+    const bool now_set = ((bp_bitmap_[addr >> 3] >> (addr & 7)) & 1) != 0;
+    if (now_set) {
+        breakpoint_clear(addr);
+    } else {
+        breakpoint_set(addr);
+    }
 }
 
 bool debugger::breakpoint_has(std::uint16_t addr) const {
     return (bp_bitmap_[addr >> 3] & (1u << (addr & 7))) != 0;
+}
+
+bool debugger::breakpoint_should_fire(std::uint16_t addr) const {
+    if (!breakpoint_has(addr))
+        return false;
+    for (const auto& kv : bp_predicates_) {
+        if (kv.first == addr)
+            return eval_bp_predicate(kv.second, core_);
+    }
+    return true; // unconditional breakpoint
+}
+
+const bp_predicate* debugger::breakpoint_predicate(std::uint16_t addr) const {
+    for (const auto& kv : bp_predicates_) {
+        if (kv.first == addr)
+            return &kv.second;
+    }
+    return nullptr;
 }
 
 std::vector<std::uint16_t> debugger::breakpoint_list() const {
@@ -190,11 +304,7 @@ void debugger::watchpoint_set(std::uint16_t addr, std::uint16_t len) {
     if (len == 0)
         return;
     watchpoint_clear(addr);
-    watchpoint w{addr, len, {}};
-    w.last.reserve(len);
-    for (std::uint16_t i = 0; i < len; ++i)
-        w.last.push_back(core_.mmu.read_u8(static_cast<std::uint16_t>(addr + i)));
-    watchpoints_.push_back(std::move(w));
+    watchpoints_.push_back(watchpoint{addr, len, 0, 0, false});
 }
 
 void debugger::watchpoint_clear(std::uint16_t addr) {
@@ -207,23 +317,8 @@ void debugger::watchpoint_clear_all() {
     watchpoints_.clear();
 }
 
-bool debugger::sample_watchpoints(std::uint16_t& out_addr) {
-    bool any = false;
-    for (auto& w : watchpoints_) {
-        bool changed = false;
-        for (std::uint16_t i = 0; i < w.len; ++i) {
-            const auto cur = core_.mmu.read_u8(static_cast<std::uint16_t>(w.addr + i));
-            if (cur != w.last[i]) {
-                w.last[i] = cur;
-                changed = true;
-            }
-        }
-        if (changed && !any) {
-            out_addr = w.addr;
-            any = true;
-        }
-    }
-    return any;
+const std::uint32_t* debugger::framebuffer() const {
+    return core_.ppu.framebuffer();
 }
 
 void debugger::dump_regs(std::ostream& os) const {
@@ -334,7 +429,20 @@ void debugger::dump_mbc(std::ostream& os) const {
     char buf[160];
     if (const auto* cart = core_.mmu.cart()) {
         const auto st = cart->debug_state();
-        std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X\n", st.type, rom_size, ram_size);
+        const auto cgb_flag = cart->cgb_flag();
+        const char* cgb_label = "DMG";
+        switch (classify_cgb_flag(cgb_flag)) {
+            case cgb_support::compat:
+                cgb_label = "CGB-compat";
+                break;
+            case cgb_support::cgb_only:
+                cgb_label = "CGB-only";
+                break;
+            case cgb_support::none:
+                break;
+        }
+        std::snprintf(buf, sizeof(buf), "cart_type=$%02X rom_size=$%02X ram_size=$%02X cgb_flag=$%02X(%s)\n", st.type,
+                      rom_size, ram_size, cgb_flag, cgb_label);
         os << buf;
         std::snprintf(buf, sizeof(buf), "rom_bank=%u ram_bank=%u ram_enabled=%d mode=%u\n",
                       static_cast<unsigned>(st.rom_bank), static_cast<unsigned>(st.ram_bank), st.ram_enabled ? 1 : 0,
@@ -347,6 +455,31 @@ void debugger::dump_mbc(std::ostream& os) const {
         os << buf;
         os << "bank_state=(no cartridge attached)\n";
     }
+}
+
+std::string debugger::bg_text_snapshot() const {
+    // Blargg's shell.inc text backend stores ASCII codes directly into the BG
+    // tile map (the matching font glyph is loaded into VRAM at the tile index
+    // == ASCII slot at boot), so reading the map back byte-for-byte yields
+    // the on-screen text.  The full 32×32 map is scanned even though only
+    // 20×18 tiles are visible: padding rows/columns contain Blargg's blank
+    // tile ($7F or $00) which we collapse to space below.
+    const auto lcdc = core_.mmu.hwr_lcdc();
+    const std::uint16_t map_base = (lcdc & 0x08) ? 0x9C00 : 0x9800;
+    std::string s;
+    s.reserve(33 * 32);
+    for (std::uint16_t row = 0; row < 32; ++row) {
+        for (std::uint16_t col = 0; col < 32; ++col) {
+            const auto t = core_.mmu.read_u8(static_cast<std::uint16_t>(map_base + row * 32 + col));
+            s.push_back((t >= 0x20 && t < 0x7F) ? static_cast<char>(t) : ' ');
+        }
+        s.push_back('\n');
+    }
+    return s;
+}
+
+void debugger::dump_bg_text(std::ostream& os) const {
+    os << bg_text_snapshot();
 }
 
 void debugger::dump_stack(std::ostream& os, std::size_t n) const {
